@@ -16,8 +16,14 @@ Setup inicial do projeto (Next.js + TypeScript + Tailwind CSS) concluído em FAR
 App Router, TypeScript, Tailwind CSS e ESLint configurados via `create-next-app`.
 FARELO-006 adicionou Prettier (com `prettier-plugin-tailwindcss` para ordenar
 classes Tailwind) integrado ao ESLint via `eslint-config-prettier`.
-Ainda não há shadcn/ui nem as rotas de negócio (`/pdv`, `/kitchen`, `/admin`,
-`/c/{commandNumber}`) — isso é escopo de tickets futuros (a partir de FARELO-018).
+FARELO-018 adicionou a primeira tela real do Admin (`/admin/categories`,
+lista + criação de categorias), estabelecendo os padrões de acesso à API
+(proxy via `next.config.ts`, TanStack Query, react-hook-form + Zod) que os
+próximos tickets de UI reaproveitam.
+Ainda não há shadcn/ui, nem edição/exclusão de categoria (sem endpoint
+`PUT`/`DELETE` no backend ainda), nem as demais rotas de negócio (`/pdv`,
+`/kitchen`, `/c/{commandNumber}`, shell completo de `/admin`) — isso é escopo
+de tickets futuros.
 
 ## Como rodar
 
@@ -30,6 +36,27 @@ npm run dev
 ```
 
 O app fica disponível em [http://localhost:3000](http://localhost:3000).
+
+### Backend (proxy de `/api`)
+
+As páginas do Admin chamam a API sempre com caminho relativo (ex.:
+`/api/v1/categories`), nunca a URL absoluta do backend. O `next.config.ts`
+faz o proxy de `/api/*` para o backend via `rewrites()`, usando a env var
+`API_BASE_URL` (default `http://localhost:8080` se não definida). Em
+produção esse proxy não é necessário — o Caddy assume esse papel (ver
+`infra/README.md`) — mas ele também funciona com `next start` standalone.
+
+Para testar a tela `/admin/categories` de ponta a ponta, suba o Postgres e o
+backend antes do frontend:
+
+```bash
+cp infra/.env.example infra/.env
+docker compose -f infra/docker-compose.yml --env-file infra/.env up -d
+cd apps/api && ./mvnw spring-boot:run
+```
+
+Depois, com o frontend rodando (`npm run dev`), acesse
+[http://localhost:3000/admin/categories](http://localhost:3000/admin/categories).
 
 ## Build
 
