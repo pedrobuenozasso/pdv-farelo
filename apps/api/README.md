@@ -9,4 +9,25 @@ auth, catalog, customer, command, ordering, kitchen, printing,
 inventory, recipe, notification, payment, fiscal, reporting, audit
 ```
 
-Inicialização do projeto Spring Boot é escopo do FARELO-002.
+## Rodando localmente
+
+Pré-requisito: Java 21.
+
+```bash
+# usando o Maven Wrapper (recomendado, não requer Maven instalado)
+./mvnw spring-boot:run
+
+# ou, com Maven instalado localmente
+mvn spring-boot:run
+```
+
+A aplicação sobe por padrão em `http://localhost:8080`. Health check disponível em
+`http://localhost:8080/actuator/health`.
+
+## Testes
+
+```bash
+./mvnw test
+# ou
+mvn test
+```
