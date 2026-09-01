@@ -19,13 +19,24 @@ public class ProductService {
         this.categoryRepository = categoryRepository;
     }
 
-    public Product create(String name, String description, BigDecimal price, UUID categoryId, String imageUrl) {
+    public Product create(
+            String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
+            Boolean availableOnMenu, Boolean availableOnPos) {
         Category category = categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new CategoryNotFoundException(categoryId));
 
         Product product = new Product(name, price, category);
         product.setDescription(description);
         product.setImageUrl(imageUrl);
+        // availableOnMenu/availableOnPos default to true (see Product's field
+        // initializers) when the request omits them — only override when the
+        // caller explicitly sent a value.
+        if (availableOnMenu != null) {
+            product.setAvailableOnMenu(availableOnMenu);
+        }
+        if (availableOnPos != null) {
+            product.setAvailableOnPos(availableOnPos);
+        }
 
         return productRepository.save(product);
     }
@@ -37,7 +48,7 @@ public class ProductService {
     @Transactional
     public Product update(
             UUID id, String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
-            boolean active) {
+            boolean active, boolean availableOnMenu, boolean availableOnPos) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new ProductNotFoundException(id));
 
@@ -50,6 +61,8 @@ public class ProductService {
         product.setCategory(category);
         product.setImageUrl(imageUrl);
         product.setActive(active);
+        product.setAvailableOnMenu(availableOnMenu);
+        product.setAvailableOnPos(availableOnPos);
 
         return productRepository.save(product);
     }

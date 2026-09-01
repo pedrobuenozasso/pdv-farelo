@@ -98,7 +98,9 @@ Cria um produto vendável do cardápio. (FARELO-014)
   "description": "Espresso curto, torra média",
   "price": 7.50,
   "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
-  "imageUrl": "https://example.com/espresso.png"
+  "imageUrl": "https://example.com/espresso.png",
+  "availableOnMenu": true,
+  "availableOnPos": true
 }
 ```
 
@@ -109,6 +111,12 @@ Cria um produto vendável do cardápio. (FARELO-014)
 | `price` | decimal | sim | `>= 0.00` (`@DecimalMin`), nunca negativo |
 | `categoryId` | UUID | sim | Precisa apontar para uma `Category` existente |
 | `imageUrl` | string | não | |
+| `availableOnMenu` | boolean | não | Default `true` se ausente (FARELO-017) |
+| `availableOnPos` | boolean | não | Default `true` se ausente (FARELO-017) |
+
+`availableOnMenu` controla se o produto aparece no cardápio QR
+(cliente-facing); `availableOnPos` controla se aparece no PDV
+(staff-facing) — independentes um do outro.
 
 **Response — `201 Created`**
 
@@ -121,6 +129,8 @@ Header `Location: /api/v1/products/{id}`.
   "description": "Espresso curto, torra média",
   "price": 7.50,
   "active": true,
+  "availableOnMenu": true,
+  "availableOnPos": true,
   "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
   "imageUrl": "https://example.com/espresso.png",
   "createdAt": "2026-09-01T13:00:00Z",
@@ -164,6 +174,8 @@ consumidor existir.
     "description": "Espresso curto, torra média",
     "price": 7.50,
     "active": true,
+    "availableOnMenu": true,
+    "availableOnPos": true,
     "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
     "imageUrl": "https://example.com/espresso.png",
     "createdAt": "2026-09-01T13:00:00Z",
@@ -183,12 +195,16 @@ roadmap atual).
 
 **Request body**
 
-Mesmos campos de `POST /api/v1/products`, mais `active` (obrigatório aqui).
-Usa um DTO próprio (`ProductUpdateRequest`) em vez de reaproveitar o request
-de criação — `active` não faz sentido na criação (sempre começa `true`), e
-torná-lo opcional lá seria arriscado: como o Jackson zera um `boolean`
-primitivo ausente para `false` em records, um client que esquecesse de
-enviá-lo na criação desativaria o produto silenciosamente.
+Mesmos campos de `POST /api/v1/products`, mais `active` — mas aqui
+`active`, `availableOnMenu` e `availableOnPos` são todos **obrigatórios**
+(diferente do `POST`, onde `availableOnMenu`/`availableOnPos` são opcionais
+com default `true`). Usa um DTO próprio (`ProductUpdateRequest`) em vez de
+reaproveitar o request de criação — esses três campos booleanos não fazem
+sentido como opcionais na criação (sempre começam `true`), e torná-los
+opcionais lá seria arriscado: como o Jackson zera um `boolean` primitivo
+ausente para `false` em records, um client que esquecesse de enviá-los na
+criação desativaria/esconderia o produto silenciosamente. No `PUT`, que é
+substituição completa, faz sentido exigir os três explicitamente.
 
 ```json
 {
@@ -197,7 +213,9 @@ enviá-lo na criação desativaria o produto silenciosamente.
   "price": 9.90,
   "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
   "imageUrl": "https://example.com/espresso-duplo.png",
-  "active": false
+  "active": false,
+  "availableOnMenu": false,
+  "availableOnPos": true
 }
 ```
 
@@ -209,6 +227,8 @@ enviá-lo na criação desativaria o produto silenciosamente.
 | `categoryId` | UUID | sim | Precisa apontar para uma `Category` existente |
 | `imageUrl` | string | não | |
 | `active` | boolean | sim | |
+| `availableOnMenu` | boolean | sim | Independente de `availableOnPos` |
+| `availableOnPos` | boolean | sim | Independente de `availableOnMenu` |
 
 **Response — `200 OK`**
 
