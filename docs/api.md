@@ -61,8 +61,7 @@ Header `Location: /api/v1/categories/{id}`.
   }
   ```
 
-Ainda não há `PUT`/`DELETE` para categoria (tickets futuros) nem endpoints
-para `Product`.
+Ainda não há `PUT`/`DELETE` para categoria (tickets futuros).
 
 ### `GET /api/v1/categories`
 
@@ -86,5 +85,66 @@ o Admin precisar).
 ```
 
 Lista vazia (`[]`) quando não há categorias cadastradas.
+
+### `POST /api/v1/products`
+
+Cria um produto vendável do cardápio. (FARELO-014)
+
+**Request body**
+
+```json
+{
+  "name": "Café Espresso",
+  "description": "Espresso curto, torra média",
+  "price": 7.50,
+  "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "imageUrl": "https://example.com/espresso.png"
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
+| `description` | string | não | |
+| `price` | decimal | sim | `>= 0.00` (`@DecimalMin`), nunca negativo |
+| `categoryId` | UUID | sim | Precisa apontar para uma `Category` existente |
+| `imageUrl` | string | não | |
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/products/{id}`.
+
+```json
+{
+  "id": "8a1b2c3d-4e5f-6789-0abc-def123456789",
+  "name": "Café Espresso",
+  "description": "Espresso curto, torra média",
+  "price": 7.50,
+  "active": true,
+  "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "imageUrl": "https://example.com/espresso.png",
+  "createdAt": "2026-09-01T13:00:00Z",
+  "updatedAt": "2026-09-01T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `name`/`price`/`categoryId` ausente, `name` em branco
+  ou `price` negativo, no formato de erro padrão com
+  `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `categoryId` não corresponde a nenhuma categoria
+  existente:
+
+  ```json
+  {
+    "code": "CATEGORY_NOT_FOUND",
+    "message": "Category not found: b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+    "correlationId": "..."
+  }
+  ```
+
+Ainda não há `GET`/`PUT`/`DELETE` para produto (escopo de FARELO-015/016 em
+diante).
 
 _(demais endpoints a preencher conforme implementados)_
