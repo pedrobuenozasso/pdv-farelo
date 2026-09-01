@@ -1,0 +1,48 @@
+name: Frontend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - ".github/workflows/frontend.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - ".github/workflows/frontend.yml"
+
+jobs:
+  lint-and-build:
+    name: Lint, format check and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Não há .nvmrc no repositório ainda. Node 24 é a LTS ativa no momento
+      # deste ticket (FARELO-007) — ver apps/web/README.md, que pede "Node.js
+      # 20+". Se um .nvmrc for adicionado depois, atualizar este workflow
+      # para lê-lo (actions/setup-node suporta node-version-file).
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Build
+        run: npm run build
