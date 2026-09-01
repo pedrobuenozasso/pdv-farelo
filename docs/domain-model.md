@@ -32,4 +32,14 @@ Pacote: `com.farelo.api.catalog`.
   nativo a UUIDv7, ver comentário na classe), `name`, `active` (default
   `true`), `createdAt`/`updatedAt` (`OffsetDateTime` em UTC). Tabela criada
   pela migration `V2__create_category_table.sql`. Sem endpoint REST ainda
-  (escopo de FARELO-012/013) e sem `Product` (tickets seguintes).
+  (escopo de FARELO-012/013).
+- **`Product`** (FARELO-011): entidade JPA — `id` (UUID, mesma estratégia de
+  `Category`), `name`, `description` (opcional), `price` (`BigDecimal`,
+  coluna `NUMERIC(10,2)` — nunca `double`/`float`, ver AGENTS.md), `active`
+  (default `true`), `category` (`@ManyToOne` obrigatório para `Category`),
+  `imageUrl` (opcional), `createdAt`/`updatedAt` (UTC). Tabela criada pela
+  migration `V3__create_product_table.sql`, com FK para `category(id)`.
+  Escopo restrito propositalmente: sem `availableOnMenu`/`availableOnPos`
+  (FARELO-017), sem `productionStation` (FARELO-073), sem `fiscalProfileId`
+  (FARELO-151/Epic 11), sem receita/estoque, e ainda sem endpoint REST
+  (FARELO-014/015/016).
