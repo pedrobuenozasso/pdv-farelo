@@ -14,6 +14,8 @@ Interfaces servidas por este app:
 
 Setup inicial do projeto (Next.js + TypeScript + Tailwind CSS) concluído em FARELO-005:
 App Router, TypeScript, Tailwind CSS e ESLint configurados via `create-next-app`.
+FARELO-006 adicionou Prettier (com `prettier-plugin-tailwindcss` para ordenar
+classes Tailwind) integrado ao ESLint via `eslint-config-prettier`.
 Ainda não há shadcn/ui nem as rotas de negócio (`/pdv`, `/kitchen`, `/admin`,
 `/c/{commandNumber}`) — isso é escopo de tickets futuros (a partir de FARELO-018).
 
@@ -41,4 +43,12 @@ npm run build
 ```bash
 cd apps/web
 npm run lint
+```
+
+## Formatação (Prettier)
+
+```bash
+cd apps/web
+npm run format        # formata os arquivos (prettier --write)
+npm run format:check  # só verifica, sem alterar (útil em CI)
 ```
