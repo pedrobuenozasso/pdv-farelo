@@ -24,12 +24,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Integration test for {@code POST}/{@code GET /api/v1/products}, against a
- * real PostgreSQL instance (Testcontainers).
+ * Integration test for {@code POST}/{@code GET}/{@code PUT
+ * /api/v1/products}, against a real PostgreSQL instance (Testcontainers).
  *
  * <p>Same reasoning as {@code CategoryControllerIntegrationTests}: the
  * shared singleton Postgres container (see {@link AbstractIntegrationTest})
@@ -179,6 +180,109 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(products)
                 .extracting(ProductResponse::categoryId)
                 .containsOnly(category.getId());
+    }
+
+    @Test
+    void updatesProductAndPersistsChanges() throws Exception {
+        Category original = categoryRepository.save(new Category("Bebidas"));
+        Category newCategory = categoryRepository.save(new Category("Sobremesas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), original));
+
+        String body = """
+                {
+                  "name": "Café Espresso Duplo",
+                  "description": "Dose dupla",
+                  "price": 9.90,
+                  "categoryId": "%s",
+                  "imageUrl": "https://example.com/espresso-duplo.png",
+                  "active": false
+                }
+                """.formatted(newCategory.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(product.getId().toString()))
+                .andExpect(jsonPath("$.name").value("Café Espresso Duplo"))
+                .andExpect(jsonPath("$.active").value(false))
+                .andExpect(jsonPath("$.categoryId").value(newCategory.getId().toString()));
+
+        Optional<Product> persisted = productRepository.findById(product.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getName()).isEqualTo("Café Espresso Duplo");
+        assertThat(persisted.get().getDescription()).isEqualTo("Dose dupla");
+        assertThat(persisted.get().getPrice()).isEqualByComparingTo(new BigDecimal("9.90"));
+        assertThat(persisted.get().isActive()).isFalse();
+        assertThat(persisted.get().getCategory().getId()).isEqualTo(newCategory.getId());
+    }
+
+    @Test
+    void returnsProductNotFoundWhenUpdatingUnknownProduct() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        UUID missingProductId = UUID.randomUUID();
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "active": true
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", missingProductId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PRODUCT_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsCategoryNotFoundWhenUpdatingWithUnknownCategory() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+        UUID missingCategoryId = UUID.randomUUID();
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "active": true
+                }
+                """.formatted(missingCategoryId);
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CATEGORY_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsNegativePriceOnUpdateWithStandardErrorFormat() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": -1.00,
+                  "categoryId": "%s",
+                  "active": true
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
 }
