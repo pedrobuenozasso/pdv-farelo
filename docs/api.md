@@ -144,8 +144,6 @@ Header `Location: /api/v1/products/{id}`.
   }
   ```
 
-Ainda não há `PUT`/`DELETE` para produto (escopo de FARELO-016 em diante).
-
 ### `GET /api/v1/products`
 
 Lista todos os produtos, ordenados por `name` (asc). (FARELO-015)
@@ -175,5 +173,53 @@ consumidor existir.
 ```
 
 Lista vazia (`[]`) quando não há produtos cadastrados.
+
+### `PUT /api/v1/products/{id}`
+
+Atualiza (substituição completa) um produto existente. (FARELO-016)
+
+Fecha o CRUD básico de `Product` — sem `DELETE` por enquanto (fora do
+roadmap atual).
+
+**Request body**
+
+Mesmos campos de `POST /api/v1/products`, mais `active` (obrigatório aqui).
+Usa um DTO próprio (`ProductUpdateRequest`) em vez de reaproveitar o request
+de criação — `active` não faz sentido na criação (sempre começa `true`), e
+torná-lo opcional lá seria arriscado: como o Jackson zera um `boolean`
+primitivo ausente para `false` em records, um client que esquecesse de
+enviá-lo na criação desativaria o produto silenciosamente.
+
+```json
+{
+  "name": "Café Espresso Duplo",
+  "description": "Dose dupla",
+  "price": 9.90,
+  "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "imageUrl": "https://example.com/espresso-duplo.png",
+  "active": false
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
+| `description` | string | não | |
+| `price` | decimal | sim | `>= 0.00` (`@DecimalMin`), nunca negativo |
+| `categoryId` | UUID | sim | Precisa apontar para uma `Category` existente |
+| `imageUrl` | string | não | |
+| `active` | boolean | sim | |
+
+**Response — `200 OK`**
+
+`ProductResponse` com os campos atualizados (mesmo formato de
+`POST /api/v1/products`).
+
+**Erros**
+
+- `400 Bad Request` — mesmas validações do `POST`, `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `{id}` do produto não existe, `code: "PRODUCT_NOT_FOUND"`;
+  ou `categoryId` não existe, `code: "CATEGORY_NOT_FOUND"` (mesmo formato do
+  `POST`).
 
 _(demais endpoints a preencher conforme implementados)_

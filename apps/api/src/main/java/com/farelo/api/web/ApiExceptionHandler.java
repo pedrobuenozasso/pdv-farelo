@@ -1,6 +1,7 @@
 package com.farelo.api.web;
 
 import com.farelo.api.catalog.CategoryNotFoundException;
+import com.farelo.api.catalog.ProductNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -16,9 +17,13 @@ import java.util.UUID;
  *
  * <p>This is shared infrastructure for every endpoint, not just
  * {@code catalog} — new exception types should be handled here as they
- * come up in future tickets. As more domains add their own "not found"
- * business exceptions, consider a shared marker/base exception type instead
- * of one {@code @ExceptionHandler} per domain-specific class here.
+ * come up in future tickets. There are now two "not found" exceptions
+ * following the same shape ({@link CategoryNotFoundException},
+ * {@link ProductNotFoundException}); a shared marker/base exception type
+ * could remove the per-class handler boilerplate, but was deliberately not
+ * introduced yet (FARELO-016) — both handlers are still trivial one-liners,
+ * and it is easier to judge the right abstraction once a third case (in a
+ * different domain) shows up.
  *
  * <p>{@code correlationId} is a freshly generated id per error for now;
  * wiring it to a request-scoped id shared across logs (e.g. via a servlet
@@ -43,6 +48,12 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ErrorResponse handleCategoryNotFound(CategoryNotFoundException ex) {
         return new ErrorResponse("CATEGORY_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(ProductNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleProductNotFound(ProductNotFoundException ex) {
+        return new ErrorResponse("PRODUCT_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

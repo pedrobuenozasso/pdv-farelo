@@ -2,6 +2,7 @@ package com.farelo.api.catalog;
 
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -31,6 +32,26 @@ public class ProductService {
 
     public List<Product> listAll() {
         return productRepository.findAll(Sort.by(Sort.Direction.ASC, "name"));
+    }
+
+    @Transactional
+    public Product update(
+            UUID id, String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
+            boolean active) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new CategoryNotFoundException(categoryId));
+
+        product.setName(name);
+        product.setDescription(description);
+        product.setPrice(price);
+        product.setCategory(category);
+        product.setImageUrl(imageUrl);
+        product.setActive(active);
+
+        return productRepository.save(product);
     }
 
 }
