@@ -36,7 +36,9 @@ public class ProductController {
                 request.description(),
                 request.price(),
                 request.categoryId(),
-                request.imageUrl());
+                request.imageUrl(),
+                request.availableOnMenu(),
+                request.availableOnPos());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/products/{id}")
@@ -64,7 +66,9 @@ public class ProductController {
                 request.price(),
                 request.categoryId(),
                 request.imageUrl(),
-                request.active());
+                request.active(),
+                request.availableOnMenu(),
+                request.availableOnPos());
 
         return ProductResponse.from(product);
     }

@@ -22,9 +22,10 @@ import java.util.UUID;
  * docs/domain-model.md).
  *
  * <p>Scope note (FARELO-011): no recipe, inventory or advanced fiscal
- * fields yet. {@code availableOnMenu}/{@code availableOnPos} (FARELO-017),
- * {@code productionStation} (FARELO-073) and {@code fiscalProfileId}
- * (FARELO-151) are deliberately left out for later tickets.
+ * fields yet. {@code productionStation} (FARELO-073) and
+ * {@code fiscalProfileId} (FARELO-151) are deliberately left out for later
+ * tickets. {@code availableOnMenu}/{@code availableOnPos} were added in
+ * FARELO-017.
  *
  * <p>Id generation follows the same strategy as {@link Category} — see its
  * javadoc for why {@code RANDOM} (UUIDv4) is used instead of UUIDv7.
@@ -49,6 +50,22 @@ public class Product {
 
     @Column(name = "active", nullable = false)
     private boolean active = true;
+
+    /**
+     * Whether this product shows up on the QR menu (customer-facing). Can be
+     * toggled independently of {@link #availableOnPos} — e.g. a product sold
+     * out in-store might still be prepped for future menu display, or a POS-
+     * only item (like a house tab adjustment) might never appear on the menu.
+     */
+    @Column(name = "available_on_menu", nullable = false)
+    private boolean availableOnMenu = true;
+
+    /**
+     * Whether this product shows up on the POS (staff-facing), independent
+     * of {@link #availableOnMenu} — see that field's javadoc.
+     */
+    @Column(name = "available_on_pos", nullable = false)
+    private boolean availableOnPos = true;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "category_id", nullable = false)
@@ -119,6 +136,22 @@ public class Product {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public boolean isAvailableOnMenu() {
+        return availableOnMenu;
+    }
+
+    public void setAvailableOnMenu(boolean availableOnMenu) {
+        this.availableOnMenu = availableOnMenu;
+    }
+
+    public boolean isAvailableOnPos() {
+        return availableOnPos;
+    }
+
+    public void setAvailableOnPos(boolean availableOnPos) {
+        this.availableOnPos = availableOnPos;
     }
 
     public Category getCategory() {

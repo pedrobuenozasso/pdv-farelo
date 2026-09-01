@@ -28,5 +28,7 @@ public record ProductUpdateRequest(
         @NotNull @DecimalMin(value = "0.00", inclusive = true) BigDecimal price,
         @NotNull UUID categoryId,
         String imageUrl,
-        @NotNull Boolean active) {
+        @NotNull Boolean active,
+        @NotNull Boolean availableOnMenu,
+        @NotNull Boolean availableOnPos) {
 }

@@ -81,6 +81,8 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.id").exists())
                 .andExpect(jsonPath("$.name").value("Café Espresso"))
                 .andExpect(jsonPath("$.active").value(true))
+                .andExpect(jsonPath("$.availableOnMenu").value(true))
+                .andExpect(jsonPath("$.availableOnPos").value(true))
                 .andExpect(jsonPath("$.categoryId").value(category.getId().toString()))
                 .andExpect(jsonPath("$.createdAt").exists())
                 .andExpect(jsonPath("$.updatedAt").exists())
@@ -96,6 +98,41 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
         // is always BigDecimal) — same reasoning as ProductRepositoryIntegrationTests.
         assertThat(persisted.get().getPrice()).isEqualByComparingTo(new BigDecimal("7.50"));
         assertThat(persisted.get().getCategory().getId()).isEqualTo(category.getId());
+        // availableOnMenu/availableOnPos omitted from the request body above
+        // -> default true (FARELO-017).
+        assertThat(persisted.get().isAvailableOnMenu()).isTrue();
+        assertThat(persisted.get().isAvailableOnPos()).isTrue();
+    }
+
+    @Test
+    void createsProductWithExplicitAvailabilityValues() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "availableOnMenu": false,
+                  "availableOnPos": true
+                }
+                """.formatted(category.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.availableOnMenu").value(false))
+                .andExpect(jsonPath("$.availableOnPos").value(true))
+                .andReturn();
+
+        ProductResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), ProductResponse.class);
+
+        Optional<Product> persisted = productRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().isAvailableOnMenu()).isFalse();
+        assertThat(persisted.get().isAvailableOnPos()).isTrue();
     }
 
     @Test
@@ -195,7 +232,9 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                   "price": 9.90,
                   "categoryId": "%s",
                   "imageUrl": "https://example.com/espresso-duplo.png",
-                  "active": false
+                  "active": false,
+                  "availableOnMenu": false,
+                  "availableOnPos": true
                 }
                 """.formatted(newCategory.getId());
 
@@ -206,6 +245,8 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.id").value(product.getId().toString()))
                 .andExpect(jsonPath("$.name").value("Café Espresso Duplo"))
                 .andExpect(jsonPath("$.active").value(false))
+                .andExpect(jsonPath("$.availableOnMenu").value(false))
+                .andExpect(jsonPath("$.availableOnPos").value(true))
                 .andExpect(jsonPath("$.categoryId").value(newCategory.getId().toString()));
 
         Optional<Product> persisted = productRepository.findById(product.getId());
@@ -214,7 +255,43 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(persisted.get().getDescription()).isEqualTo("Dose dupla");
         assertThat(persisted.get().getPrice()).isEqualByComparingTo(new BigDecimal("9.90"));
         assertThat(persisted.get().isActive()).isFalse();
+        // availableOnMenu and availableOnPos updated independently — different
+        // values from each other, to make sure they aren't accidentally tied
+        // together in ProductService.update.
+        assertThat(persisted.get().isAvailableOnMenu()).isFalse();
+        assertThat(persisted.get().isAvailableOnPos()).isTrue();
         assertThat(persisted.get().getCategory().getId()).isEqualTo(newCategory.getId());
+    }
+
+    @Test
+    void updatesAvailabilityFieldsIndependently() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+        assertThat(product.isAvailableOnMenu()).isTrue();
+        assertThat(product.isAvailableOnPos()).isTrue();
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": false
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableOnMenu").value(true))
+                .andExpect(jsonPath("$.availableOnPos").value(false));
+
+        Optional<Product> persisted = productRepository.findById(product.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().isAvailableOnMenu()).isTrue();
+        assertThat(persisted.get().isAvailableOnPos()).isFalse();
     }
 
     @Test
@@ -227,7 +304,9 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                   "name": "Café Espresso",
                   "price": 7.50,
                   "categoryId": "%s",
-                  "active": true
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
                 }
                 """.formatted(category.getId());
 
@@ -251,7 +330,9 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                   "name": "Café Espresso",
                   "price": 7.50,
                   "categoryId": "%s",
-                  "active": true
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
                 }
                 """.formatted(missingCategoryId);
 
@@ -274,7 +355,9 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                   "name": "Café Espresso",
                   "price": -1.00,
                   "categoryId": "%s",
-                  "active": true
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
                 }
                 """.formatted(category.getId());
 
