@@ -1,14 +1,13 @@
 # Domain Model — Farelo OS
 
 Este documento é preenchido incrementalmente à medida que cada domínio é implementado.
-Ainda não há entidades implementadas neste repositório (ver FARELO-001, apenas bootstrap).
 
 ## Domínios previstos
 
 | Domínio | Responsabilidade | Status |
 |---|---|---|
 | `auth` | Autenticação e RBAC de usuários internos | Não iniciado |
-| `catalog` | `Product`, `Category` — fonte única de verdade do cardápio | Não iniciado |
+| `catalog` | `Product`, `Category` — fonte única de verdade do cardápio | Em andamento |
 | `customer` | Dados do cliente coletados no fluxo de pedido (nome, WhatsApp) | Não iniciado |
 | `command` | `Command` (comanda) e seu ciclo de vida | Não iniciado |
 | `ordering` | `Order`, `OrderItem`, snapshot de preço, histórico de status | Não iniciado |
@@ -23,3 +22,14 @@ Ainda não há entidades implementadas neste repositório (ver FARELO-001, apena
 | `audit` | `AuditLog` de operações sensíveis | Não iniciado |
 
 Cada domínio deve expor serviços claros e evitar dependências cruzadas desnecessárias.
+
+## catalog
+
+Pacote: `com.farelo.api.catalog`.
+
+- **`Category`** (FARELO-010): entidade JPA — `id` (UUID, gerado via
+  `@UuidGenerator` do Hibernate, style `RANDOM`; Hibernate 6.6 não tem suporte
+  nativo a UUIDv7, ver comentário na classe), `name`, `active` (default
+  `true`), `createdAt`/`updatedAt` (`OffsetDateTime` em UTC). Tabela criada
+  pela migration `V2__create_category_table.sql`. Sem endpoint REST ainda
+  (escopo de FARELO-012/013) e sem `Product` (tickets seguintes).

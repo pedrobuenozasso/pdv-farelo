@@ -12,7 +12,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
  *
  * <p>Requires Docker to be available locally.
  */
-abstract class AbstractIntegrationTest {
+public abstract class AbstractIntegrationTest {
 
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
