@@ -6,6 +6,7 @@ import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -15,17 +16,26 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Integration test for {@code POST /api/v1/products}, against a real
- * PostgreSQL instance (Testcontainers).
+ * Integration test for {@code POST}/{@code GET /api/v1/products}, against a
+ * real PostgreSQL instance (Testcontainers).
+ *
+ * <p>Same reasoning as {@code CategoryControllerIntegrationTests}: the
+ * shared singleton Postgres container (see {@link AbstractIntegrationTest})
+ * means the {@code product}/{@code category} tables may already have rows
+ * from other test classes, so tests that assert list contents clear both
+ * tables first (products before categories, because of the FK).
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -42,6 +52,12 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @BeforeEach
+    void cleanCatalogTables() {
+        productRepository.deleteAll();
+        categoryRepository.deleteAll();
+    }
 
     @Test
     void createsProductAndPersistsIt() throws Exception {
@@ -130,6 +146,39 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                         .content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void returnsEmptyListWhenNoProductsExist() throws Exception {
+        mockMvc.perform(get("/api/v1/products"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
+    void returnsAllCreatedProducts() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product espresso = new Product("Café Espresso", new BigDecimal("7.50"), category);
+        Product suco = new Product("Suco de Laranja", new BigDecimal("9.00"), category);
+        productRepository.save(espresso);
+        productRepository.save(suco);
+
+        MvcResult result = mockMvc.perform(get("/api/v1/products"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andReturn();
+
+        List<ProductResponse> products = objectMapper.readValue(
+                result.getResponse().getContentAsString(),
+                objectMapper.getTypeFactory().constructCollectionType(List.class, ProductResponse.class));
+
+        assertThat(products)
+                .extracting(ProductResponse::name)
+                .containsExactly("Café Espresso", "Suco de Laranja");
+        assertThat(products)
+                .extracting(ProductResponse::categoryId)
+                .containsOnly(category.getId());
     }
 
 }
