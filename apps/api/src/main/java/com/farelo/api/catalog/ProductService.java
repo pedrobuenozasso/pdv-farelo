@@ -1,8 +1,10 @@
 package com.farelo.api.catalog;
 
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -25,6 +27,10 @@ public class ProductService {
         product.setImageUrl(imageUrl);
 
         return productRepository.save(product);
+    }
+
+    public List<Product> listAll() {
+        return productRepository.findAll(Sort.by(Sort.Direction.ASC, "name"));
     }
 
 }

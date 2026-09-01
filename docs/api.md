@@ -144,7 +144,36 @@ Header `Location: /api/v1/products/{id}`.
   }
   ```
 
-Ainda não há `GET`/`PUT`/`DELETE` para produto (escopo de FARELO-015/016 em
-diante).
+Ainda não há `PUT`/`DELETE` para produto (escopo de FARELO-016 em diante).
+
+### `GET /api/v1/products`
+
+Lista todos os produtos, ordenados por `name` (asc). (FARELO-015)
+
+Sem paginação nem filtros (ex: por `categoryId`) por enquanto — decisão
+deliberada de escopo (YAGNI, mesma lógica de `GET /api/v1/categories`):
+nenhum consumidor (Admin/PDV) existe ainda pedindo isso. Um filtro por
+`categoryId` via query param é um candidato natural para quando esse
+consumidor existir.
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "8a1b2c3d-4e5f-6789-0abc-def123456789",
+    "name": "Café Espresso",
+    "description": "Espresso curto, torra média",
+    "price": 7.50,
+    "active": true,
+    "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+    "imageUrl": "https://example.com/espresso.png",
+    "createdAt": "2026-09-01T13:00:00Z",
+    "updatedAt": "2026-09-01T13:00:00Z"
+  }
+]
+```
+
+Lista vazia (`[]`) quando não há produtos cadastrados.
 
 _(demais endpoints a preencher conforme implementados)_
