@@ -54,3 +54,23 @@ postgresql://farelo:change-me@localhost:5432/farelo
 ```
 
 Ajuste usuário, senha, database e porta conforme o `infra/.env` real.
+
+## CI — GitHub Actions (FARELO-007)
+
+Dois workflows independentes em `.github/workflows/`, disparados em `push` e
+`pull_request` para `main`, cada um restrito por `paths` ao seu app (evita rodar
+o job de backend quando só o frontend mudou, e vice-versa):
+
+- **`backend.yml`** — Java 21 (Temurin, `actions/setup-java`) e roda
+  `./mvnw test` em `apps/api`. Os testes de integração usam Testcontainers
+  (`AbstractIntegrationTest`), que precisa de Docker; o runner `ubuntu-latest`
+  já vem com Docker instalado e em execução por padrão, sem configuração
+  extra.
+- **`frontend.yml`** — Node.js (`actions/setup-node`) e roda, em `apps/web`:
+  `npm ci`, `npm run lint`, `npm run format:check` e `npm run build`. Não há
+  `.nvmrc` no repositório ainda; o workflow fixa Node **24** (LTS ativa no
+  momento deste ticket — Node 22 já está em manutenção). Se um `.nvmrc` for
+  adicionado depois, o workflow deve passar a lê-lo em vez de fixar a versão.
+
+Ambos usam cache de dependências (`cache: maven` / `cache: npm`) para acelerar
+execuções subsequentes.
