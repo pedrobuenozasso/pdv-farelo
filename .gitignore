@@ -7,6 +7,9 @@ Thumbs.db
 .vscode/
 *.iml
 
+# Claude Code agent worktrees
+.claude/
+
 # Java / Maven
 target/
 *.class
