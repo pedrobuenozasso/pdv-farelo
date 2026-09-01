@@ -61,7 +61,30 @@ Header `Location: /api/v1/categories/{id}`.
   }
   ```
 
-Ainda não há `GET`/`PUT`/`DELETE` para categoria (escopo de FARELO-013 em
-diante) nem endpoints para `Product`.
+Ainda não há `PUT`/`DELETE` para categoria (tickets futuros) nem endpoints
+para `Product`.
+
+### `GET /api/v1/categories`
+
+Lista todas as categorias, ordenadas por `name` (asc). (FARELO-013)
+
+Sem paginação/filtros por enquanto (YAGNI — mantido para um ticket futuro se
+o Admin precisar).
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+    "name": "Bebidas",
+    "active": true,
+    "createdAt": "2026-09-01T13:00:00Z",
+    "updatedAt": "2026-09-01T13:00:00Z"
+  }
+]
+```
+
+Lista vazia (`[]`) quando não há categorias cadastradas.
 
 _(demais endpoints a preencher conforme implementados)_
