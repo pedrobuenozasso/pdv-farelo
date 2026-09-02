@@ -105,3 +105,29 @@ Pacote: `com.farelo.api.ordering`.
 
   Escopo restrito propositalmente: sem `OrderItem` (FARELO-051), sem
   snapshot de preço (FARELO-052), sem endpoints REST (FARELO-053+).
+- **`OrderItem`** (FARELO-051): entidade JPA — `id` (UUID, mesma estratégia
+  dos demais domínios), `order` (`@ManyToOne` obrigatório para `Order`),
+  `product` (`@ManyToOne` obrigatório para `Product`), `quantity` (int;
+  validação de positivo fica para a camada de DTO/service quando o
+  endpoint existir, FARELO-053 — não há `CHECK` no banco para isso),
+  `unitPrice` (`BigDecimal`, `NUMERIC(10,2)`), `createdAt` (UTC).
+
+  **`unitPrice` é snapshot congelado, não referência ao preço atual do
+  produto** (convenção de snapshot de preço do AGENTS.md): o valor é
+  capturado no momento da venda e nunca deriva de `product.getPrice()`,
+  nem se atualiza se o preço do produto mudar depois. Este ticket
+  (FARELO-051) só adiciona a coluna e a entidade — a lógica que de fato
+  captura o preço atual do produto automaticamente ao criar um item (e
+  qualquer validação relacionada) ainda não existe, é escopo de
+  FARELO-052/053, quando o endpoint for criado.
+
+  **Sem `updatedAt`** — decisão deliberada, diferente de toda outra
+  entidade do projeto até aqui: neste MVP um item de pedido é imutável
+  depois de criado (não há fluxo de edição ainda; nenhum endpoint altera
+  quantidade/produto/preço após a criação). Adicionar `updatedAt` agora
+  seria uma coluna sem nenhum escritor; mais barato adicionar depois, se
+  e quando um caso de uso de edição realmente aparecer.
+
+  Tabela `order_item` criada pela migration `V8__create_order_item_table.sql`,
+  com FK `NOT NULL` para `orders(id)` e para `product(id)`, mais índices
+  nas duas FKs.
