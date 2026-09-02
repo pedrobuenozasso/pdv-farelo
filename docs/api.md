@@ -759,10 +759,15 @@ baixo.
       ]
     },
     "status": "PENDING",
+    "retryCount": 0,
     "createdAt": "2026-09-01T13:00:00Z"
   }
 ]
 ```
+
+`retryCount` (FARELO-079): quantas vezes este job já foi reenviado de
+`FAILED` para `PENDING` via `POST /api/v1/print-jobs/{id}/retry` (ver
+abaixo) — `0` para um job que nunca falhou/nunca foi reenviado.
 
 `content` é o objeto estruturado já desserializado — não uma string com
 JSON escapado — mesmo formato de `PrintJobContent` (`com.farelo.api.printing`,
@@ -825,8 +830,8 @@ de `/printed` acima. Sem corpo de requisição: nenhum motivo estruturado da
 falha é aceito por enquanto — YAGNI, não existe nenhum consumidor para esse
 dado ainda (ex: um painel mostrando por que uma impressora falhou); se isso
 for necessário no futuro, é escopo de outro ticket. Sem transição de volta
-`FAILED` → `PENDING` (retry) — ver `docs/domain-model.md`, seção
-`printing`, para o mecanismo de retry ainda não desenhado (FARELO-079).
+`FAILED` → `PENDING` aqui — esse é o `POST /api/v1/print-jobs/{id}/retry`
+dedicado, logo abaixo (FARELO-079).
 
 **Estado de origem válido**: apenas `PENDING`, mesmo raciocínio de
 `/printed` acima.
@@ -841,6 +846,56 @@ for necessário no futuro, é escopo de outro ticket. Sem transição de volta
   `code: "PRINT_JOB_NOT_FOUND"`.
 - `409 Conflict` — o job existe mas não está `PENDING`, mesmo formato de
   `PRINT_JOB_INVALID_TRANSITION` acima.
+
+### `POST /api/v1/print-jobs/{id}/retry`
+
+Reenvia um `PrintJob` `FAILED` de volta para `PENDING`, fazendo-o reaparecer
+em `GET /api/v1/print-jobs` no próximo poll do Edge Agent: transição de
+status `FAILED` → `PENDING`. (FARELO-079)
+
+Implementa a última lacuna da seção 10 do prompt mestre — "Falha: `FAILED`,
+permitindo retry" — deixada em aberto desde o FARELO-071/077: até este
+ticket, um job `FAILED` ficava `FAILED` para sempre.
+
+Endpoint manual — não existe (ainda) nenhum retry automático agendado; ver
+`docs/domain-model.md`, seção `printing`, entrada FARELO-079, para a
+justificativa completa dessa escolha (e por que ela não fecha a porta para
+um agendador futuro chamar este mesmo mecanismo). Mesma razão de `POST` em
+vez de `PATCH`, mesmo padrão dos demais endpoints de ação deste domínio.
+Sem corpo de requisição — nada a reportar além do próprio `id` do job.
+
+**Estado de origem válido**: apenas `FAILED` — reenviar um job `PENDING`
+(nada para reenviar) ou já `PRINTED` é rejeitado como transição inválida,
+mesmo `code: "PRINT_JOB_INVALID_TRANSITION"` de `/printed`/`/failed` acima.
+
+**Limite de tentativas**: um job só pode ser reenviado até 3 vezes
+(`PrintJobService.MAX_RETRY_COUNT`) — a quarta tentativa (ou qualquer
+tentativa além dela) é rejeitada com um código de erro **diferente** de
+`PRINT_JOB_INVALID_TRANSITION` (ver "Erros" abaixo). Ver
+`docs/domain-model.md`, seção `printing`, para a justificativa completa do
+limite (e por que ele é uma constante fixa, não configurável).
+
+**Response — `200 OK`**
+
+`PrintJobResponse` atualizado (mesmo formato de `GET /api/v1/print-jobs`),
+com `status: "PENDING"` e `retryCount` incrementado em 1.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhum `PrintJob` existente,
+  `code: "PRINT_JOB_NOT_FOUND"`.
+- `409 Conflict` — o job existe mas não está `FAILED`:
+
+  ```json
+  { "code": "PRINT_JOB_INVALID_TRANSITION", "message": "...", "correlationId": "..." }
+  ```
+
+- `409 Conflict` — o job está `FAILED`, mas já atingiu o limite máximo de
+  tentativas (`retryCount >= 3`):
+
+  ```json
+  { "code": "PRINT_JOB_RETRY_LIMIT_EXCEEDED", "message": "...", "correlationId": "..." }
+  ```
 
 ### `POST /api/v1/ingredients`
 

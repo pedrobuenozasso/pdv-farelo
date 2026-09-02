@@ -27,12 +27,19 @@ import java.util.UUID;
  * lives in {@code com.farelo.api.printing} (not {@code .web}), so this is
  * an ordinary same-domain, cross-subpackage reference — no dependency
  * concern (unlike reaching into a different domain's package).
+ *
+ * <p><strong>{@code retryCount}</strong> (FARELO-079): how many times this
+ * job has been moved back from {@code FAILED} to {@code PENDING} via
+ * {@code POST /api/v1/print-jobs/{id}/retry} — surfaced here so a caller
+ * (e.g. a future Admin screen) can tell how close a job is to {@code
+ * PrintJobService#MAX_RETRY_COUNT} without a separate lookup.
  */
 public record PrintJobResponse(
         UUID id,
         UUID orderId,
         PrintJobContent content,
         PrintJobStatus status,
+        int retryCount,
         OffsetDateTime createdAt) {
 
     public static PrintJobResponse from(PrintJob job, ObjectMapper objectMapper) {
@@ -41,6 +48,7 @@ public record PrintJobResponse(
                 job.getOrder().getId(),
                 deserializeContent(job, objectMapper),
                 job.getStatus(),
+                job.getRetryCount(),
                 job.getCreatedAt());
     }
 

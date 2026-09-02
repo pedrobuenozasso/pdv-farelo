@@ -14,6 +14,7 @@ import com.farelo.api.ordering.OrderInvalidTransitionException;
 import com.farelo.api.ordering.OrderNotFoundException;
 import com.farelo.api.printing.PrintJobInvalidTransitionException;
 import com.farelo.api.printing.PrintJobNotFoundException;
+import com.farelo.api.printing.PrintJobRetryLimitExceededException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -133,6 +134,15 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handlePrintJobInvalidTransition(PrintJobInvalidTransitionException ex) {
         return new ErrorResponse("PRINT_JOB_INVALID_TRANSITION", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict, distinct code from PrintJobInvalidTransitionException
+    // above (FARELO-079) — see PrintJobRetryLimitExceededException's javadoc
+    // for why this is a separate exception/code rather than reusing that one.
+    @ExceptionHandler(PrintJobRetryLimitExceededException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handlePrintJobRetryLimitExceeded(PrintJobRetryLimitExceededException ex) {
+        return new ErrorResponse("PRINT_JOB_RETRY_LIMIT_EXCEEDED", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     @ExceptionHandler(IngredientNotFoundException.class)

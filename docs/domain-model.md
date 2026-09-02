@@ -445,10 +445,11 @@ Pacote: `com.farelo.api.printing`.
   rejeitar sair de um estado já terminal): não existe nenhum chamador real
   desses métodos ainda (isso é FARELO-072+), então adicionar essa guarda
   agora seria adivinhar uma regra sem um caso de uso real para testar
-  contra. Também não existe transição de volta `FAILED`→`PENDING`
-  (retry) — a seção 10 do prompt mestre menciona "permitindo retry", mas o
-  mecanismo real de retry (quem decide re-enfileirar, com que critério)
-  ainda não foi desenhado; ver `PrintJobStatus` para a nota completa.
+  contra. A transição de volta `FAILED`→`PENDING` (retry) também não
+  existia neste ticket — a seção 10 do prompt mestre menciona "permitindo
+  retry", mas o mecanismo real de retry (quem decide re-enfileirar, com que
+  critério) só foi desenhado no FARELO-079 (ver entrada dedicada mais
+  abaixo: `PrintJob.retry()` + `PrintJobService.retry(UUID)`).
 
   `PrintJobRepository` (Spring Data JPA), sem métodos de consulta próprios
   ainda além do CRUD padrão — mesmo formato minimalista de
@@ -704,10 +705,9 @@ Pacote: `com.farelo.api.printing`.
   marcar um job já `PRINTED` ou já `FAILED` de novo (com qualquer um dos
   dois endpoints) é rejeitado como qualquer outra transição inválida
   (`PrintJobInvalidTransitionException`/`PRINT_JOB_INVALID_TRANSITION`),
-  não aceito silenciosamente. Nenhuma transição de volta `FAILED` →
-  `PENDING` (retry) — mesma nota já registrada em `PrintJobStatus` desde o
-  FARELO-071: o mecanismo real de retry ainda não foi desenhado
-  (FARELO-079).
+  não aceito silenciosamente. A transição de volta `FAILED` → `PENDING`
+  (retry) continuava sem existir neste ticket — mecanismo desenhado depois,
+  no FARELO-079 (ver entrada dedicada mais abaixo).
 
   **`PrintJobNotFoundException`/`PrintJobInvalidTransitionException`**
   (pacote `printing`): espelham `OrderNotFoundException`/
@@ -747,6 +747,107 @@ Pacote: `com.farelo.api.printing`.
   (usado para preparar jobs `PRINTED`/`FAILED` sem passar pelos novos
   endpoints, ex. para o teste de exclusão da listagem do FARELO-076)
   continua reaproveitado como setup desses novos testes.
+
+- **`POST /api/v1/print-jobs/{id}/retry`** (FARELO-079): fecha a lacuna
+  deixada em aberto desde o FARELO-071/077 — um `PrintJob` `FAILED` ficava
+  `FAILED` para sempre, porque `GET /api/v1/print-jobs` só devolve jobs
+  `PENDING` (FARELO-076) e nada trazia um job de volta pra fila. A seção 10
+  do prompt mestre é explícita: "Falha: `FAILED`, permitindo retry" — este
+  ticket implementa esse "permitindo retry". Ver `docs/api.md` para o
+  endpoint completo.
+
+  **Decisão de desenho — endpoint manual, não retry automático agendado**:
+  duas abordagens foram cogitadas: (a) um endpoint manual (`POST
+  /api/v1/print-jobs/{id}/retry`) que simplesmente transiciona `FAILED` →
+  `PENDING` sob pedido, fazendo o job reaparecer no próximo poll do Edge
+  Agent; ou (b) o próprio backend (ou o Edge Agent) reagendando
+  automaticamente um job falho depois de um tempo, com contador de
+  tentativas e backoff próprios. Escolhida a opção (a), pelos motivos:
+
+  - O Edge Agent (prompt mestre seção 11) já lista "manter fila temporária
+    local" como responsabilidade **futura, ainda não implementada** — hoje
+    não existe nenhuma fila/mecanismo de backoff do lado do Edge Agent para
+    um retry agendado se apoiar, e construir isso agora do lado do backend
+    significaria inventar uma política de tempo (quanto esperar, com ou sem
+    backoff exponencial) sem nenhum dado real de padrão de falha para
+    basear essa escolha.
+  - Não existe hoje nenhum consumidor pedindo retry automático
+    desacompanhado — mesma disciplina YAGNI já aplicada a `Printer`/
+    `Ingredient` (primeira versão deliberadamente mínima, estendida depois
+    quando uma necessidade concreta aparecer).
+  - Um endpoint manual não fecha a porta para a opção (b) no futuro: nada
+    aqui impede um ticket futuro de adicionar um agendador que simplesmente
+    chame este mesmo `PrintJobService#retry(UUID)` numa timer, uma vez que
+    a fila local do Edge Agent (ou outro gatilho) exista pra decidir quando.
+    Construir o caminho manual primeiro não compromete essa opção.
+
+  **`PrintJobService.retry(UUID)`**: novo método, mas **não** reaproveita o
+  helper privado `transition(id, targetStatus, mutator)` já usado por
+  `markPrinted`/`markFailed` — ao contrário dos dois (que exigem a mesma
+  origem `PENDING`), esta transição exige origem `FAILED` **e** tem uma
+  pré-condição extra (o limite de tentativas) que nada tem a ver com o
+  status de origem — encaixar isso no helper compartilhado (que só sabe
+  comparar um status e chamar um mutator) faria ele fazer duas coisas sem
+  relação. Um método dedicado e pequeno ficou mais simples de ler do que
+  generalizar o helper para um único chamador. Estado de origem válido:
+  apenas `FAILED` — tentar `retry` num job `PENDING` (nada para reenviar) ou
+  `PRINTED` é rejeitado como transição inválida
+  (`PrintJobInvalidTransitionException`/`PRINT_JOB_INVALID_TRANSITION`,
+  mesmo código já usado por `/printed`/`/failed`), não aceito
+  silenciosamente.
+
+  **Limite de tentativas — `retryCount` + `PrintJobService.MAX_RETRY_COUNT`
+  (3)**: um retry sem limite (um operador — hoje um humano, o endpoint não
+  distingue quem chama — clicando "retry" pra sempre num job cuja
+  impressora simplesmente sumiu) deixaria um job ciclando
+  `PENDING`/`FAILED` indefinidamente, sem nenhum sinal de que está
+  "travado". `PrintJob` ganhou o campo `retryCount` (`int`, default `0`,
+  coluna `retry_count`), incrementado só por `PrintJob#retry()` a cada
+  retry bem-sucedido. `PrintJobService#retry(UUID)` rejeita uma nova
+  tentativa assim que `retryCount` atinge `MAX_RETRY_COUNT`, com uma
+  exceção **distinta** de `PrintJobInvalidTransitionException`:
+  `PrintJobRetryLimitExceededException`/`PRINT_JOB_RETRY_LIMIT_EXCEEDED`
+  (também `409`, registrada em `ApiExceptionHandler` junto às demais). Os
+  dois `409` deste domínio descrevem problemas diferentes para quem chama:
+  transição inválida significa "este job não está `FAILED`, não há o que
+  reenviar" (tentar de novo mais tarde, se o job vier a falhar, pode
+  funcionar); limite de tentativas excedido significa "este job está
+  `FAILED` e é elegível em princípio, mas já foi reenviado o número máximo
+  de vezes" (reenviar de novo por este endpoint nunca vai funcionar — quem
+  chama precisa de outro remédio, ex. investigar a impressora). Colapsar os
+  dois numa única exceção/código esconderia essa distinção de quem
+  consome a API.
+
+  `MAX_RETRY_COUNT` é uma constante fixa pequena (`3`), não configurável
+  por job: nada no projeto hoje precisa que ela varie (nenhum consumidor,
+  nenhuma tela de Admin para isso ainda) — um parâmetro de configuração
+  seria especulativo, mesma disciplina YAGNI do resto desta seção. O valor
+  escolhido espelha o tipo de orçamento pequeno e fixo de tentativas comum
+  para falhas transitórias de hardware (impressora momentaneamente fora do
+  ar/sem papel), sem deixar uma impressora permanentemente quebrada
+  acumular jobs pra sempre.
+
+  **Migration**: `V18__add_print_job_retry_count_column.sql` adiciona
+  `retry_count INTEGER NOT NULL DEFAULT 0` (com `CHECK (retry_count >= 0)`)
+  a `print_job` — o limite máximo em si (`MAX_RETRY_COUNT`) **não** vira um
+  `CHECK` no banco: é política de aplicação que pode mudar independente do
+  schema, mesmo raciocínio já usado para as próprias regras de transição de
+  status deste domínio (nunca viraram `CHECK` de banco).
+
+  **`PrintJobResponse.retryCount`**: novo campo na resposta (presente em
+  todos os endpoints do domínio, não só em `/retry`) — deixa um consumidor
+  futuro (ex: uma tela de Admin) ver quantas vezes um job já foi reenviado
+  sem precisar de uma consulta separada.
+
+  **Testes**: novos casos em `PrintJobControllerIntegrationTests` — retry
+  bem-sucedido de um job `FAILED` (status vira `PENDING`, `retryCount`
+  incrementa, e o job reaparece em `GET /api/v1/print-jobs`), `409` ao
+  tentar `retry` num job `PENDING` ou `PRINTED`, `404` para `id`
+  inexistente, e um teste dedicado do limite de tentativas (cicla
+  `FAILED` → retry → `FAILED` `MAX_RETRY_COUNT` vezes, confirmando que cada
+  uma é aceita e incrementa `retryCount`, e que a tentativa seguinte é
+  rejeitada com `PRINT_JOB_RETRY_LIMIT_EXCEEDED`, com o job permanecendo
+  `FAILED` e `retryCount` parado em `MAX_RETRY_COUNT`).
 
 ## inventory
 

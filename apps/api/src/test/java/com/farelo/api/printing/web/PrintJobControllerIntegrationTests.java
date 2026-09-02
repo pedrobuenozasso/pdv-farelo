@@ -43,10 +43,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Integration test for {@code GET /api/v1/print-jobs} (FARELO-076) and for
+ * Integration test for {@code GET /api/v1/print-jobs} (FARELO-076), for
  * {@code POST /api/v1/print-jobs/{id}/printed}/{@code /failed} (FARELO-077),
- * against a real PostgreSQL instance (Testcontainers) — the {@code printing}
- * domain's REST endpoints.
+ * and for {@code POST /api/v1/print-jobs/{id}/retry} (FARELO-079), against a
+ * real PostgreSQL instance (Testcontainers) — the {@code printing} domain's
+ * REST endpoints.
  *
  * <p>Unlike the kitchen queue tests in {@code OrderControllerIntegrationTests}
  * (which scope assertions to their own order ids because {@code orders} is a
@@ -346,6 +347,103 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", UUID.randomUUID()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PRINT_JOB_NOT_FOUND"));
+    }
+
+    // --- POST /api/v1/print-jobs/{id}/retry (FARELO-079) ---
+
+    // Mirrors PrintJobService.MAX_RETRY_COUNT (package-private, not visible
+    // from this .web test package) — see that constant's javadoc for why
+    // this exact value was chosen.
+    private static final int MAX_RETRY_COUNT = 3;
+
+    @Test
+    void marksFailedPrintJobAsPendingViaRetryAndItReappearsInTheListing() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+        markStatus(order, PrintJobStatus.FAILED);
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(printJobId.toString()))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.retryCount").value(1));
+
+        PrintJob job = printJobRepository.findById(printJobId).orElseThrow();
+        assertThat(job.getStatus()).isEqualTo(PrintJobStatus.PENDING);
+        assertThat(job.getRetryCount()).isEqualTo(1);
+
+        // Retried job is PENDING again, so it must reappear in the Edge
+        // Agent's poll — the entire point of the retry endpoint.
+        List<PrintJobResponse> jobs = listPrintJobs();
+        assertThat(jobs).hasSize(1);
+        assertThat(jobs.get(0).id()).isEqualTo(printJobId);
+    }
+
+    @Test
+    void returnsConflictWhenRetryingAPendingPrintJob() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PRINT_JOB_INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsConflictWhenRetryingAPrintedPrintJob() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+        markStatus(order, PrintJobStatus.PRINTED);
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PRINT_JOB_INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsNotFoundWhenRetryingUnknownPrintJob() throws Exception {
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PRINT_JOB_NOT_FOUND"));
+    }
+
+    @Test
+    void returnsConflictWhenRetryingAPrintJobPastTheRetryLimit() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+
+        // Cycle FAILED -> retry (PENDING) -> FAILED again, MAX_RETRY_COUNT
+        // times: each retry succeeds and bumps retryCount by one.
+        for (int attempt = 1; attempt <= MAX_RETRY_COUNT; attempt++) {
+            markStatus(order, PrintJobStatus.FAILED);
+
+            mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("PENDING"))
+                    .andExpect(jsonPath("$.retryCount").value(attempt));
+        }
+
+        // retryCount is now MAX_RETRY_COUNT — one more FAILED->retry attempt
+        // must be rejected instead of retried again.
+        markStatus(order, PrintJobStatus.FAILED);
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PRINT_JOB_RETRY_LIMIT_EXCEEDED"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+
+        PrintJob job = printJobRepository.findById(printJobId).orElseThrow();
+        assertThat(job.getStatus()).isEqualTo(PrintJobStatus.FAILED);
+        assertThat(job.getRetryCount()).isEqualTo(MAX_RETRY_COUNT);
     }
 
 }

@@ -5,10 +5,11 @@ package com.farelo.api.printing;
  * {@code Order criado → PrintJob PENDING → Farelo Edge Agent → impressora →
  * PRINTED}; on failure, {@code FAILED}, allowing retry.
  *
- * <p>No retry mechanism exists yet (e.g. a way to move a {@code FAILED} job
- * back to {@code PENDING}) — that's future work once a real Edge Agent
- * reporting flow exists to drive it; this ticket (FARELO-071) only models
- * the three states themselves.
+ * <p>{@link PrintJob#retry()}/{@code PrintJobService#retry(UUID)}
+ * (FARELO-079) move a {@code FAILED} job back to {@code PENDING}, capped at
+ * a maximum number of attempts ({@code PrintJobRetryLimitExceededException}
+ * once exhausted) — see {@code PrintJobService#retry(UUID)}'s javadoc for
+ * the full design rationale.
  */
 public enum PrintJobStatus {
     PENDING,

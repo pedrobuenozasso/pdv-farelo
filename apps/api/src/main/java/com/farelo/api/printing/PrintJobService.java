@@ -89,9 +89,67 @@ import java.util.function.Consumer;
  * Product.productionStation} itself already rejected a default — see its
  * javadoc: a wrong default would misroute a ticket without anyone having
  * chosen that).
+ *
+ * <h2>Retry ({@code FAILED} → {@code PENDING}, FARELO-079)</h2>
+ *
+ * The prompt mestre (seção 10) is explicit that a {@code FAILED} job should
+ * allow retry, but until this ticket nothing actually implemented that: a
+ * job stayed {@code FAILED} forever, since the Edge Agent only polls for
+ * {@code PENDING} work ({@link #listPending()}).
+ *
+ * <p><b>Manual endpoint, not scheduled/automatic retry.</b> Two shapes were
+ * considered: (a) a manual {@code POST /api/v1/print-jobs/{id}/retry} that
+ * simply flips {@code FAILED} → {@code PENDING} on request, so the job
+ * reappears in the next {@code GET /api/v1/print-jobs} poll; or (b) the
+ * backend (or the Edge Agent) automatically rescheduling a failed job after
+ * some delay, with its own attempt counter and backoff. This class
+ * implements (a). Reasons:
+ * <ul>
+ *   <li>The Edge Agent (prompt mestre seção 11) already lists "manter fila
+ *       temporária local" as a <em>future, not-yet-implemented</em>
+ *       responsibility — there is no local queue/backoff mechanism on that
+ *       side today for a scheduled retry to build on, and building one here
+ *       in the backend instead would mean inventing a scheduling/timing
+ *       policy (how long to wait, exponential backoff or not) with no real
+ *       failure-pattern data to base it on yet.</li>
+ *   <li>There is no consumer today asking for unattended automatic retry —
+ *       every other endpoint in this domain follows the same YAGNI
+ *       discipline already applied to {@code Printer}/{@code Ingredient}
+ *       (deliberately minimal first cut, extended later once a concrete
+ *       need shows up).</li>
+ *   <li>A manual endpoint composes correctly with option (b) later: nothing
+ *       here prevents a future ticket from adding a scheduler that simply
+ *       calls this same {@link #retry(UUID)} method on a timer, once the
+ *       Edge Agent's local queue (or some other driver) exists to decide
+ *       when. Building the manual path first doesn't paint that option
+ *       into a corner.</li>
+ * </ul>
+ *
+ * <p><b>Retry limit.</b> An unbounded retry (an operator — today, a human;
+ * the endpoint doesn't distinguish who calls it — clicking "retry" forever
+ * on a job whose printer is simply gone) would leave a job cycling
+ * {@code PENDING}/{@code FAILED} indefinitely with no signal that it is
+ * stuck. {@link PrintJob#getRetryCount()} (new column, {@code
+ * V18__add_print_job_retry_count_column.sql}) counts how many times a job
+ * has been retried; {@link #retry(UUID)} rejects a further attempt once
+ * {@code retryCount} reaches {@link #MAX_RETRY_COUNT}, via {@link
+ * PrintJobRetryLimitExceededException} (distinct from {@link
+ * PrintJobInvalidTransitionException} — see that exception's javadoc for
+ * why). {@code MAX_RETRY_COUNT} is a small fixed constant rather than a
+ * configurable/per-job value: nothing in this codebase today needs it to
+ * vary (no consumer, no admin UI for it), so a config knob would be
+ * speculative — same YAGNI reasoning as the rest of this section. Chosen
+ * value (3) mirrors the kind of small fixed retry budget common for
+ * transient hardware failures (printer momentarily offline/out of paper)
+ * without letting a permanently broken printer accumulate print jobs
+ * forever.
  */
 @Service
 public class PrintJobService {
+
+    // See class javadoc, "Retry limit", for why this is a small fixed
+    // constant rather than configurable.
+    static final int MAX_RETRY_COUNT = 3;
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
@@ -212,6 +270,48 @@ public class PrintJobService {
     @Transactional
     public PrintJob markFailed(UUID id) {
         return transition(id, PrintJobStatus.FAILED, PrintJob::markFailed);
+    }
+
+    /**
+     * Moves a {@code FAILED} job back to {@code PENDING} (FARELO-079) so it
+     * reappears in {@link #listPending()}/{@code GET /api/v1/print-jobs}
+     * for the Edge Agent to attempt again. Reports the outcome of {@code
+     * POST /api/v1/print-jobs/{id}/retry}. See class javadoc, "Retry", for
+     * the full design rationale (manual endpoint, retry limit).
+     *
+     * <p>Not implemented via the shared {@link #transition(UUID,
+     * PrintJobStatus, Consumer)} helper used by {@link #markPrinted(UUID)}/
+     * {@link #markFailed(UUID)}: unlike those two (which both require the
+     * same {@code PENDING} origin), this transition requires {@code FAILED}
+     * as its origin <em>and</em> has an extra precondition (the retry
+     * limit) that has nothing to do with the origin status — bolting that
+     * onto the shared helper (which only knows how to compare a status and
+     * call a mutator) would make it do two unrelated things. A small
+     * dedicated method stays simpler to read than generalizing the helper
+     * for a single caller.
+     *
+     * @throws PrintJobNotFoundException if no job exists for {@code id}.
+     * @throws PrintJobInvalidTransitionException if the job's current
+     *         status isn't {@code FAILED} — in particular, retrying a
+     *         {@code PENDING} job (nothing to retry) or an already-{@code
+     *         PRINTED} job is rejected rather than silently accepted.
+     * @throws PrintJobRetryLimitExceededException if the job has already
+     *         been retried {@link #MAX_RETRY_COUNT} times.
+     */
+    @Transactional
+    public PrintJob retry(UUID id) {
+        PrintJob job = getById(id);
+        PrintJobStatus currentStatus = job.getStatus();
+
+        if (currentStatus != PrintJobStatus.FAILED) {
+            throw new PrintJobInvalidTransitionException(id, currentStatus, PrintJobStatus.PENDING);
+        }
+        if (job.getRetryCount() >= MAX_RETRY_COUNT) {
+            throw new PrintJobRetryLimitExceededException(id, job.getRetryCount(), MAX_RETRY_COUNT);
+        }
+
+        job.retry();
+        return printJobRepository.save(job);
     }
 
     // Shared by markPrinted/markFailed above: fetch, validate the job's
