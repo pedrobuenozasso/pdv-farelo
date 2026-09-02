@@ -91,3 +91,25 @@ export async function markOrderReady(orderId: string): Promise<Order> {
   });
   return parseResponse<Order>(response);
 }
+
+// POST /api/v1/orders/{id}/deliver — READY → DELIVERED, closes the normal
+// order lifecycle.
+// POST /api/v1/orders/{id}/cancel — CANCELLED, from any non-terminal status
+// (CREATED/CONFIRMED/PREPARING/READY).
+// Same no-body/updated-OrderResponse shape as markOrderPreparing/
+// markOrderReady above. First callers of either endpoint from the
+// frontend — app/pdv/page.tsx (OrderCard), closing the gap where an order
+// stayed visually stuck in READY forever.
+export async function markOrderDelivered(orderId: string): Promise<Order> {
+  const response = await fetch(`/api/v1/orders/${orderId}/deliver`, {
+    method: "POST",
+  });
+  return parseResponse<Order>(response);
+}
+
+export async function markOrderCancelled(orderId: string): Promise<Order> {
+  const response = await fetch(`/api/v1/orders/${orderId}/cancel`, {
+    method: "POST",
+  });
+  return parseResponse<Order>(response);
+}
