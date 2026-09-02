@@ -175,7 +175,7 @@ function CommandWithMenu({
       ) : menu.sections.length === 0 ? (
         <EmptyMenuMessage />
       ) : (
-        <Menu sections={menu.sections} />
+        <Menu sections={menu.sections} commandNumber={command.number} />
       )}
     </main>
   );

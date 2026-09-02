@@ -19,6 +19,20 @@ export class ApiError extends Error {
   }
 }
 
+// Same "is this an ApiError, or something else (network failure, etc.)?"
+// ternary that showed up independently in the Admin's category and
+// product forms — third occurrence (orders.ts's checkout form), so it
+// moved here instead of getting copy-pasted again. Returns null when
+// there's no error at all.
+export function apiErrorMessage(
+  error: unknown,
+  fallback: string,
+): string | null {
+  if (error instanceof ApiError) return error.message;
+  if (error) return fallback;
+  return null;
+}
+
 export async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
