@@ -31,3 +31,11 @@ management:
 outbox:
   retention:
     processed-days: 7
+  worker:
+    # FARELO-063: max PENDING rows OutboxWorker locks (FOR UPDATE SKIP
+    # LOCKED) and processes per poll. See OutboxWorker's javadoc.
+    batch-size: 100
+    # How often OutboxWorker's @Scheduled trigger fires, in ms. See
+    # OutboxWorker's javadoc for why this is configurable rather than a
+    # literal 5000 in the annotation.
+    poll-interval-ms: 5000

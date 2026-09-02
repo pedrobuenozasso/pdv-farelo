@@ -16,6 +16,40 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> 
     // first, same FIFO reasoning as OrderRepository's queue query.
     List<OutboxEvent> findByStatusOrderByCreatedAtAsc(OutboxEventStatus status);
 
+    // Backs OutboxWorker#processPendingEvents' polling loop (FARELO-063 —
+    // see the class javadoc and docs/domain-model.md's "Outbox" section for
+    // why this replaced findByStatusOrderByCreatedAtAsc(...) there
+    // specifically). `FOR UPDATE SKIP LOCKED` is what makes concurrent
+    // worker instances safe against double-processing the same row: each
+    // caller's transaction row-locks whatever it selects, and any other
+    // transaction running this same query concurrently silently skips rows
+    // already locked elsewhere instead of blocking on them (or, without
+    // SKIP LOCKED, both would happily select the very same PENDING rows and
+    // both would go on to "process" them). `LIMIT :limit` bounds how many
+    // rows a single call can lock, so one worker execution can never hold
+    // an unbounded number of row locks — see OutboxWorker's `batchSize`.
+    //
+    // Native SQL, not JPQL: JPQL has no `SKIP LOCKED` keyword. Hibernate
+    // does have an undocumented trick for this via
+    // `@Lock(PESSIMISTIC_WRITE)` plus a `jakarta.persistence.lock.timeout`
+    // query hint set to Hibernate's internal SKIP_LOCKED sentinel (-2), but
+    // that leans on an internal implementation detail rather than a
+    // documented, stable API. A native query that spells out exactly the
+    // SQL Postgres runs is the more explicit, more portable-across-Hibernate
+    // -versions way to express this — no less "real JPA" than a native
+    // query is anywhere else, and the entity mapping still works
+    // automatically here because the declared return type is the managed
+    // entity and `SELECT *` yields column labels that already match
+    // OutboxEvent's own @Column names.
+    //
+    // `status` is bound as a String (the enum's name()), not the enum
+    // itself — native queries don't go through the entity's
+    // @Enumerated(STRING) parameter conversion the way JPQL/derived queries
+    // do, so the caller passes the already-stringified value explicitly.
+    @Query(value = "SELECT * FROM outbox_event WHERE status = :status ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED",
+            nativeQuery = true)
+    List<OutboxEvent> findPendingForUpdateSkipLocked(@Param("status") String status, @Param("limit") int limit);
+
     // Backs OutboxMetrics' "outbox.events.pending" gauge (FARELO-062).
     // Standard Spring Data derived count query — cheap, and this is polled
     // on every metrics scrape.
