@@ -8,8 +8,13 @@ import com.farelo.api.catalog.ProductRepository;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandRepository;
 import com.farelo.api.command.CommandStatus;
+import com.farelo.api.ordering.Order;
 import com.farelo.api.ordering.OrderItem;
 import com.farelo.api.ordering.OrderItemRepository;
+import com.farelo.api.ordering.OrderRepository;
+import com.farelo.api.ordering.OrderStatus;
+import com.farelo.api.ordering.OrderStatusHistory;
+import com.farelo.api.ordering.OrderStatusHistoryRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -63,7 +69,13 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     private ProductRepository productRepository;
 
     @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
     private OrderItemRepository orderItemRepository;
+
+    @Autowired
+    private OrderStatusHistoryRepository orderStatusHistoryRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -296,6 +308,35 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                         .content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void createsExactlyOneCreatedHistoryEntryOnOrderCreation() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("5.00"));
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}]
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        OrderResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), OrderResponse.class);
+        Order order = orderRepository.findById(response.id()).orElseThrow();
+
+        List<OrderStatusHistory> history = orderStatusHistoryRepository.findByOrderOrderByChangedAtAsc(order);
+
+        assertThat(history).hasSize(1);
+        assertThat(history.get(0).getFromStatus()).isNull();
+        assertThat(history.get(0).getToStatus()).isEqualTo(OrderStatus.CREATED);
+        assertThat(history.get(0).getChangedAt()).isNotNull();
     }
 
 }

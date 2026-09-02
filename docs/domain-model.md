@@ -138,3 +138,34 @@ domínios `command`/`catalog`; adiciona `CommandCannotAcceptOrdersException`
 `ProductNotAvailableException` (`catalog`, produto inativo). Ver
 `docs/api.md` para o endpoint completo, incluindo a decisão de negócio
 sobre `AVAILABLE`→`OPEN` automático ao criar o primeiro pedido.
+
+`GET /api/v1/commands/{number}/orders` (FARELO-055) lista os pedidos de
+uma comanda, cada um com seus itens, sem paginação. Implementado em
+`CommandOrdersController` (pacote `ordering.web`, apesar da URL começar
+com `/commands` — decisão de manter a dependência `ordering`→`command`
+numa direção só, ver javadoc da classe).
+
+- **`OrderStatusHistory`** (FARELO-056): entidade JPA append-only — `id`
+  (UUID, mesma estratégia dos demais domínios), `order` (`@ManyToOne`
+  obrigatório para `Order`), `fromStatus` (enum `OrderStatus`,
+  **nullable** — a primeira entrada, quando o pedido é criado como
+  `CREATED`, não tem "de onde veio"), `toStatus` (enum `OrderStatus`,
+  obrigatório), `changedAt` (UTC). **Sem setters** — diferente de
+  `OrderItem` (que tem setters mesmo sendo "imutável por enquanto" só
+  porque nenhum endpoint edita ainda), `OrderStatusHistory` é uma
+  trilha de auditoria append-only por natureza: uma transição passada é
+  um fato histórico que nunca deveria ser reescrito, então a entidade
+  não expõe forma alguma de mutar uma linha depois de criada. Tabela
+  `order_status_history` criada pela migration
+  `V9__create_order_status_history_table.sql`, com FK `NOT NULL` para
+  `orders(id)`, `from_status`/`to_status` como `VARCHAR` + `CHECK`
+  (mesma convenção de `orders.status`, `from_status` sem `NOT NULL`).
+  `OrderStatusHistoryRepository` expõe
+  `findByOrderOrderByChangedAtAsc(Order)` para consulta futura.
+
+  `OrderService.create(...)` (FARELO-052/053) passou a gravar a
+  primeira entrada de histórico (`fromStatus = null`,
+  `toStatus = CREATED`) na mesma transação da criação do pedido. Ainda
+  sem endpoint para consultar o histórico nem as transições
+  `PREPARING`/`READY` — escopo de FARELO-057/058, que vão reaproveitar
+  esse mecanismo para cada transição futura.
