@@ -613,6 +613,69 @@ Pacote: `com.farelo.api.printing`.
   os já reservados por outros testes (1-18, 101, 999; ver javadoc da
   própria classe para a lista completa).
 
+- **`GET /api/v1/print-jobs`** (FARELO-076): primeiro endpoint REST do
+  domínio `printing` — até aqui não existia nenhum, nem para `PrintJob`
+  nem para `Printer`. Novo subpacote `com.farelo.api.printing.web`, mesmo
+  padrão de `com.farelo.api.ordering.web`. Existe para o Farelo Edge Agent
+  (FARELO-075, `apps/edge-agent`) consultar quais `PrintJob`s ainda
+  precisam ser impressos — contrato consumido diretamente por aquele
+  ticket, então a forma exata da resposta é deliberadamente estável. Ver
+  `docs/api.md` para o endpoint completo.
+
+  **`PrintJobService.listPending()`**: novo método (`@Transactional(readOnly
+  = true)`, mesmo raciocínio de `listQueue()`/`listByCommand(...)`) que
+  delega para `PrintJobRepository#findByStatusOrderByCreatedAtAsc(PENDING)`
+  — status `PENDING`, `createdAt` ASC (FIFO), mesmo padrão já usado por
+  `OrderRepository#findByStatusInOrderByCreatedAtAsc` (fila da cozinha) e
+  `OutboxEventRepository#findByStatusOrderByCreatedAtAsc`. `PrintJobController`
+  passa por esse service em vez de chamar o repository diretamente — mesma
+  convenção de todo outro controller do projeto (`ProductController`/
+  `OrderController` nunca chamam repository sem passar por um service).
+  Sem filtro de status via query param e sem paginação: mesma lógica já
+  usada em `GET /api/v1/orders` (a fila da cozinha) — o propósito inteiro
+  do endpoint já é "o que está pendente", e o volume de impressão é
+  naturalmente baixo.
+
+  **`PrintJobRepository#findByStatusOrderByCreatedAtAsc` usa `JOIN FETCH
+  p.order`**: mesma razão de `OrderRepository`'s queries (evitar
+  `LazyInitializationException` — lição do FARELO-055) — `PrintJobResponse`
+  lê `job.getOrder().getId()` no controller, depois que a transação
+  (curta) do repository já fechou.
+
+  **`PrintJobResponse.content` é o objeto desserializado, não a string
+  JSON crua**: `PrintJob.content` é armazenado como uma string JSON
+  (snapshot serializado — ver decisão de desenho 2 na entrada do
+  `PrintJob` acima). Servi-la como está forçaria o Edge Agent a fazer
+  double-parsing (uma string de JSON aninhada dentro do JSON da resposta).
+  `PrintJobResponse.from(...)` desserializa via Jackson de volta para
+  `PrintJobContent` — reaproveitando o mesmo record que `PrintJobService`
+  já constrói e persiste, em vez de inventar uma segunda forma (ex: um
+  `JsonNode` genérico) para manter sincronizada. `PrintJobContent` vive em
+  `com.farelo.api.printing` (não `.web`), então essa é uma referência
+  comum entre subpacotes do mesmo domínio — sem problema de cross-package,
+  diferente de alcançar um pacote de outro domínio.
+
+  **Teste**: `PrintJobControllerIntegrationTests` (pacote `printing.web`) —
+  diferente da fila da cozinha (`OrderControllerIntegrationTests`, que
+  escopa asserções aos próprios ids porque `orders` é uma tabela
+  compartilhada por muitas outras classes de teste), esta classe limpa a
+  própria tabela `print_job` em `@BeforeEach` para um ponto de partida
+  determinístico a cada teste, inclusive uma asserção literal de lista
+  vazia — mesmo raciocínio já documentado em
+  `CategoryControllerIntegrationTests` para limpar as tabelas de catálogo.
+  Seguro aqui especificamente porque `print_job` é uma tabela filha pura
+  (nada mais referencia `PrintJob`) e porque as classes de teste desta
+  suíte rodam sequencialmente, não concorrentemente. Cobre lista vazia,
+  conteúdo desserializado corretamente (via um pedido real criado por
+  `OrderService.create(...)` e drenado por `outboxWorker.
+  processPendingEvents()` — mesmo wiring de produção do FARELO-072),
+  ordenação FIFO (dois pedidos com `createdAt` distinto), e exclusão de
+  jobs `PRINTED`/`FAILED` (marcados diretamente via `PrintJob.markPrinted()`/
+  `markFailed()` + `printJobRepository.save(...)`, já que ainda não existe
+  endpoint para essas transições — FARELO-077+). Usa o número de comanda
+  semeado 20 — o próximo livre após todos os já reservados (1-19, 101,
+  999).
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —

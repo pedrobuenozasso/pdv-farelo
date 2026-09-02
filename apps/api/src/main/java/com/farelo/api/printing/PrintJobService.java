@@ -150,6 +150,26 @@ public class PrintJobService {
         return printJobs;
     }
 
+    /**
+     * Lists every {@code PENDING} {@link PrintJob}, oldest first (FIFO) —
+     * backs {@code GET /api/v1/print-jobs} (FARELO-076), the Edge Agent's
+     * (FARELO-075) source for what still needs to be printed. No pagination,
+     * same YAGNI reasoning already applied to the kitchen queue ({@code
+     * OrderService#listQueue}, {@code GET /api/v1/orders}) — print volume is
+     * naturally low. {@code @Transactional(readOnly = true)}, same reasoning
+     * as {@code OrderService#listQueue}: without it, the repository call
+     * below runs in its own short transaction that has already closed by the
+     * time the controller builds the response — the {@code JOIN FETCH} in
+     * {@link PrintJobRepository#findByStatusOrderByCreatedAtAsc} is what
+     * actually prevents {@code LazyInitializationException} there; this
+     * annotation just makes the read one logical unit, consistent with the
+     * rest of this class.
+     */
+    @Transactional(readOnly = true)
+    public List<PrintJob> listPending() {
+        return printJobRepository.findByStatusOrderByCreatedAtAsc(PrintJobStatus.PENDING);
+    }
+
     private String serialize(PrintJobContent content, UUID orderId) {
         try {
             return objectMapper.writeValueAsString(content);
