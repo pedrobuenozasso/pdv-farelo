@@ -399,8 +399,11 @@ Se o preço do produto mudar depois, o pedido já criado mantém o preço
 antigo (AGENTS.md, convenção de snapshot de preço).
 
 Toda a operação (validar comanda, validar produtos, criar o pedido e seus
-itens, e a transição `AVAILABLE`→`OPEN` quando aplicável) roda em uma
-única transação — sem outbox/eventos ainda (Epic 5, FARELO-060+).
+itens, a transição `AVAILABLE`→`OPEN` quando aplicável, e a publicação do
+evento de outbox `OrderCreated` — FARELO-060, ver seção "Outbox" em
+`docs/domain-model.md`) roda em uma única transação: ou tudo comita junto,
+ou nada comita. Ainda sem consumidor real do evento (impressão/notificação/
+estoque são epics futuros, não iniciados) — só o mecanismo de publicação.
 
 **Response — `201 Created`**
 

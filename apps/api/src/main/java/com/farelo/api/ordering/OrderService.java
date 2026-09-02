@@ -5,6 +5,7 @@ import com.farelo.api.catalog.ProductNotAvailableException;
 import com.farelo.api.catalog.ProductService;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandService;
+import com.farelo.api.outbox.OutboxPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,18 +30,21 @@ public class OrderService {
     private final OrderStatusHistoryRepository orderStatusHistoryRepository;
     private final CommandService commandService;
     private final ProductService productService;
+    private final OutboxPublisher outboxPublisher;
 
     public OrderService(
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
             OrderStatusHistoryRepository orderStatusHistoryRepository,
             CommandService commandService,
-            ProductService productService) {
+            ProductService productService,
+            OutboxPublisher outboxPublisher) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.orderStatusHistoryRepository = orderStatusHistoryRepository;
         this.commandService = commandService;
         this.productService = productService;
+        this.outboxPublisher = outboxPublisher;
     }
 
     /**
@@ -53,7 +57,11 @@ public class OrderService {
      * snapshot). Also writes the order's first {@link OrderStatusHistory}
      * entry ({@code fromStatus = null}, {@code toStatus = CREATED}) —
      * FARELO-056; future status transitions (FARELO-057/058) append their
-     * own entries the same way. No outbox/events yet (Epic 5, FARELO-060+).
+     * own entries the same way. Also publishes an {@code OrderCreated}
+     * outbox event ({@link OrderCreatedEvent}) via {@link OutboxPublisher}
+     * — FARELO-060, the first real Transactional Outbox integration — in
+     * this same transaction, so it commits or rolls back together with
+     * everything above.
      */
     @Transactional
     public OrderWithItems create(int commandNumber, List<NewOrderItem> newItems) {
@@ -78,7 +86,10 @@ public class OrderService {
             items.add(orderItemRepository.save(item));
         }
 
-        return new OrderWithItems(order, items);
+        OrderWithItems result = new OrderWithItems(order, items);
+        outboxPublisher.publish("Order", order.getId(), "OrderCreated", OrderCreatedEvent.from(result));
+
+        return result;
     }
 
     /**

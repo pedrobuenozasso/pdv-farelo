@@ -15,6 +15,10 @@ import com.farelo.api.ordering.OrderRepository;
 import com.farelo.api.ordering.OrderStatus;
 import com.farelo.api.ordering.OrderStatusHistory;
 import com.farelo.api.ordering.OrderStatusHistoryRepository;
+import com.farelo.api.outbox.OutboxEvent;
+import com.farelo.api.outbox.OutboxEventRepository;
+import com.farelo.api.outbox.OutboxEventStatus;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -77,6 +81,9 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Autowired
     private OrderStatusHistoryRepository orderStatusHistoryRepository;
+
+    @Autowired
+    private OutboxEventRepository outboxEventRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -359,6 +366,52 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(history.get(0).getFromStatus()).isNull();
         assertThat(history.get(0).getToStatus()).isEqualTo(OrderStatus.CREATED);
         assertThat(history.get(0).getChangedAt()).isNotNull();
+    }
+
+    // FARELO-060: the reference Transactional Outbox integration —
+    // OrderService#create publishes OrderCreated in the same transaction
+    // as the order/items/history above. Generic atomicity (rollback also
+    // rolls back the outbox row) is covered by
+    // OutboxPublisherIntegrationTests; this proves the real production
+    // wiring end to end.
+    @Test
+    void publishesOrderCreatedOutboxEventOnOrderCreation() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("5.00"));
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 3}]
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        OrderResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), OrderResponse.class);
+
+        OutboxEvent event = outboxEventRepository.findByStatusOrderByCreatedAtAsc(OutboxEventStatus.PENDING)
+                .stream()
+                .filter(e -> e.getAggregateId().equals(response.id()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("expected OrderCreated outbox event was not published"));
+
+        assertThat(event.getAggregateType()).isEqualTo("Order");
+        assertThat(event.getEventType()).isEqualTo("OrderCreated");
+        assertThat(event.getStatus()).isEqualTo(OutboxEventStatus.PENDING);
+
+        // Parsed rather than raw-string-matched: jsonb's exact text
+        // representation (spacing, key order) isn't part of the contract.
+        JsonNode payload = objectMapper.readTree(event.getPayload());
+        assertThat(payload.get("orderId").asText()).isEqualTo(response.id().toString());
+        assertThat(payload.get("commandNumber").asInt()).isEqualTo(COMMAND_AVAILABLE);
+        assertThat(payload.get("items")).hasSize(1);
+        assertThat(payload.get("items").get(0).get("productId").asText()).isEqualTo(espresso.getId().toString());
+        assertThat(payload.get("items").get(0).get("quantity").asInt()).isEqualTo(3);
     }
 
     @Test
