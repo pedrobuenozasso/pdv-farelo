@@ -1,4 +1,4 @@
--- V14__create_print_job_table.sql
+-- V15__create_print_job_table.sql
 -- Printing domain (FARELO-071): a request to print the kitchen/bar ticket
 -- for a specific order. See PrintJob's javadoc for the full design
 -- rationale (why it references orders and not printer, why content is a

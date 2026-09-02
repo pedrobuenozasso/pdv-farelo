@@ -337,7 +337,7 @@ Pacote: `com.farelo.api.printing`.
   `PRINTED`, `FAILED` — literal da seção 10 do prompt mestre,
   `@Enumerated(EnumType.STRING)`, default `PENDING`), `createdAt`/
   `updatedAt` (`OffsetDateTime` em UTC, mesmo padrão dos demais domínios).
-  Tabela criada pela migration `V14__create_print_job_table.sql`, com FK
+  Tabela criada pela migration `V15__create_print_job_table.sql`, com FK
   `NOT NULL` para `orders(id)` e `status` na mesma convenção `VARCHAR` +
   `CHECK` de `command.status`/`orders.status`/`outbox_event.status`.
 

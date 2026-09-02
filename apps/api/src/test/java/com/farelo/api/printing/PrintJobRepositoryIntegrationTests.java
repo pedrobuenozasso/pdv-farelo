@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Verifies that {@link PrintJob} maps correctly onto the table created by
- * {@code V14__create_print_job_table.sql}, including its FK to {@link
+ * {@code V15__create_print_job_table.sql}, including its FK to {@link
  * Order}, against a real PostgreSQL instance.
  */
 @SpringBootTest
