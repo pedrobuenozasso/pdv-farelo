@@ -12,7 +12,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `command` | `Command` (comanda) e seu ciclo de vida | Em andamento |
 | `ordering` | `Order`, `OrderItem`, snapshot de preço, histórico de status | Em andamento |
 | `kitchen` | KDS — visualização e transição de status de preparo | Não iniciado — `GET /api/v1/orders` (fila da cozinha, FARELO-059) já existe, mas ficou em `ordering` por enquanto; ver nota na seção `ordering` abaixo |
-| `printing` | `Printer`, `PrintJob`, integração com Edge Agent | Não iniciado |
+| `printing` | `Printer`, `PrintJob`, integração com Edge Agent | Em andamento |
 | `inventory` | `Ingredient`, `InventoryMovement` (ledger) | Não iniciado |
 | `recipe` | `Recipe`, `RecipeItem` — ficha técnica de produtos | Não iniciado |
 | `notification` | `Notification`, adapter WhatsApp Cloud API | Não iniciado |
@@ -302,6 +302,31 @@ follow-up não ticketado que já aconteceu com FARELO-019).
 
   Ver `docs/api.md` para os endpoints `POST /api/v1/orders/{id}/deliver`
   e `POST /api/v1/orders/{id}/cancel`.
+
+## printing
+
+Pacote: `com.farelo.api.printing`.
+
+- **`Printer`** (FARELO-070): entidade JPA — `id` (UUID, mesma estratégia
+  de `Category`/`Product`/`Command`), `name` (identificação legível do
+  dispositivo físico, ex: "Impressora Bar"), `active` (default `true`,
+  mesmo padrão de `Category`/`Product`), `createdAt`/`updatedAt`
+  (`OffsetDateTime` em UTC, mesmo padrão dos demais domínios). Tabela
+  criada pela migration `V13__create_printer_table.sql`. Sem endpoint REST
+  ainda (mesmo padrão minimalista do primeiro ticket de outros domínios,
+  ex: `Category`/FARELO-010).
+
+  Escopo deliberadamente restrito: sem `productionStation` aqui — isso é
+  escopo de FARELO-073/074, e pertence a `Product` (roteamento de
+  impressão por setor de produção), não a `Printer`. Primeira peça do
+  Epic 6 (Impressão, ver `docs/PROMPT_MESTRE.md` seções 10-12): pedidos
+  vão gerar `PrintJob`s (FARELO-071/072) — nunca impressos diretamente da
+  transação HTTP — que um `Farelo Edge Agent` separado (FARELO-075+, fora
+  do escopo do backend) busca e imprime.
+
+  `PrinterRepository` (Spring Data JPA), sem métodos de consulta próprios
+  ainda além do CRUD padrão do `JpaRepository` — mesmo formato de
+  `CategoryRepository`.
 
 ## Outbox (infraestrutura cross-cutting)
 
