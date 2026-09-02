@@ -72,11 +72,28 @@ carrinho; erros de negócio (`COMMAND_CANNOT_ACCEPT_ORDERS`,
 carrinho nem os dados já digitados — mesmo tratamento genérico de
 `ApiError` usado no Admin (extraído para `apiErrorMessage` em
 `src/lib/api/client.ts`, terceira ocorrência do padrão).
+FARELO-035 adicionou a primeira tela do PDV (`app.farelo.com.br/pdv`,
+interface **interna**, tom/densidade de atendente — diferente do
+cardápio do cliente): uma grade com os números 1-100 (gerada no próprio
+frontend — não existe `GET /api/v1/commands` de listagem, e os números
+são fixos desde o seed, então inventar um endpoint só pra isso seria
+prematuro); ao selecionar um número, busca `GET /api/v1/commands/{number}`
+e `GET /api/v1/commands/{number}/orders` e mostra tudo num painel inline
+(pedidos com itens e subtotal em BRL), com botões "Abrir
+comanda"/"Fechar comanda" habilitados conforme o status atual
+(`AVAILABLE`→abrir; `OPEN`/`PAYMENT_REQUESTED`→fechar). Client Component
+com TanStack Query, mesmo padrão das páginas do Admin (sem necessidade de
+SSR aqui — ferramenta interna, muita interatividade). `commands.ts`
+(antes só usado por Server Component) virou isomórfico, mesmo padrão de
+`categories.ts`/`products.ts`, para servir tanto `/c/[commandNumber]`
+quanto o novo `/pdv`; `listCommandOrders` foi para `orders.ts` (já dono
+dos tipos `Order`/`OrderItem`), mesmo que a URL fique aninhada sob
+`/commands`.
 Ainda não há shadcn/ui, nem edição/exclusão de categoria (sem endpoint
 `PUT`/`DELETE` para categoria no backend ainda) nem exclusão de produto
-(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem as demais
-rotas de negócio (`/pdv`, `/kitchen`, shell completo de `/admin`) — isso
-é escopo de tickets futuros.
+(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem shell de
+navegação completo de `/pdv`/`/admin`, nem `/kitchen` — isso é escopo de
+tickets futuros.
 
 ## Como rodar
 
@@ -99,9 +116,9 @@ faz o proxy de `/api/*` para o backend via `rewrites()`, usando a env var
 produção esse proxy não é necessário — o Caddy assume esse papel (ver
 `infra/README.md`) — mas ele também funciona com `next start` standalone.
 
-Para testar as telas `/admin/categories`, `/admin/products` ou
-`/c/[commandNumber]` de ponta a ponta, suba o Postgres e o backend antes
-do frontend:
+Para testar as telas `/admin/categories`, `/admin/products`,
+`/c/[commandNumber]` ou `/pdv` de ponta a ponta, suba o Postgres e o
+backend antes do frontend:
 
 ```bash
 cp infra/.env.example infra/.env
@@ -112,10 +129,11 @@ cd apps/api && ./mvnw spring-boot:run
 Depois, com o frontend rodando (`npm run dev`), acesse
 [http://localhost:3000/admin/categories](http://localhost:3000/admin/categories),
 [http://localhost:3000/admin/products](http://localhost:3000/admin/products)
-(crie ao menos uma categoria antes de cadastrar produtos) ou
+(crie ao menos uma categoria antes de cadastrar produtos),
 [http://localhost:3000/c/1](http://localhost:3000/c/1) (comandas 1-100
 já vêm no seed — qualquer número fora desse intervalo mostra a mensagem
-de "não encontrada").
+de "não encontrada") ou [http://localhost:3000/pdv](http://localhost:3000/pdv)
+(selecione qualquer número de 1 a 100).
 
 ## Build
 
