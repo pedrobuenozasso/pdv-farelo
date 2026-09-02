@@ -62,3 +62,32 @@ export async function listCommandOrders(
   });
   return parseResponse<Order[]>(response);
 }
+
+// GET /api/v1/orders (FARELO-059) — the kitchen queue: every order from
+// every command still waiting on the kitchen (CREATED/CONFIRMED/PREPARING,
+// so anything before READY), oldest first. Client-only (called from
+// app/kds/page.tsx with polling), same relative-path/no-store convention
+// as listCommandOrders above.
+export async function listKitchenQueue(): Promise<Order[]> {
+  const response = await fetch("/api/v1/orders", { cache: "no-store" });
+  return parseResponse<Order[]>(response);
+}
+
+// POST /api/v1/orders/{id}/preparing (FARELO-057) — CREATED → PREPARING.
+// POST /api/v1/orders/{id}/ready (FARELO-058) — PREPARING → READY.
+// Both take no request body; the backend returns the updated OrderResponse
+// (same shape as everything else in this file). First callers of either
+// endpoint from the frontend — app/kds/page.tsx (FARELO-059/KDS).
+export async function markOrderPreparing(orderId: string): Promise<Order> {
+  const response = await fetch(`/api/v1/orders/${orderId}/preparing`, {
+    method: "POST",
+  });
+  return parseResponse<Order>(response);
+}
+
+export async function markOrderReady(orderId: string): Promise<Order> {
+  const response = await fetch(`/api/v1/orders/${orderId}/ready`, {
+    method: "POST",
+  });
+  return parseResponse<Order>(response);
+}
