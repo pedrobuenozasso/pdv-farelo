@@ -2,6 +2,7 @@ package com.farelo.api.web;
 
 import com.farelo.api.catalog.CategoryNotFoundException;
 import com.farelo.api.catalog.ProductNotFoundException;
+import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -73,6 +74,13 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleCommandNotAvailable(CommandNotAvailableException ex) {
         return new ErrorResponse("COMMAND_NOT_AVAILABLE", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict, same reasoning as CommandNotAvailableException above.
+    @ExceptionHandler(CommandCannotBeClosedException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleCommandCannotBeClosed(CommandCannotBeClosedException ex) {
+        return new ErrorResponse("COMMAND_CANNOT_BE_CLOSED", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

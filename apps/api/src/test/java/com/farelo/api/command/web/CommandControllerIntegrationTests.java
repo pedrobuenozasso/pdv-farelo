@@ -20,16 +20,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Integration test for {@code GET}/{@code POST .../open
- * /api/v1/commands/{number}}, against a real PostgreSQL instance
+ * Integration test for {@code GET}/{@code POST .../open}/{@code POST
+ * .../close /api/v1/commands/{number}}, against a real PostgreSQL instance
  * (Testcontainers).
  *
- * <p>The {@code open} tests use dedicated seeded numbers (2, 3) — distinct
- * from the ones the {@code GET} tests read (1) and
+ * <p>The mutating tests ({@code open}/{@code close}) use dedicated seeded
+ * numbers (2-7) — distinct from the ones the {@code GET} tests read (1) and
  * {@code CommandSeedIntegrationTests} samples (1, 50, 100) — and reset
- * their status back to {@code AVAILABLE} in {@code @AfterEach}, since
- * opening a command mutates state shared with every other test class via
- * the singleton Postgres container (see {@link AbstractIntegrationTest}).
+ * their status back to {@code AVAILABLE} in {@code @AfterEach}, since these
+ * mutate state shared with every other test class via the singleton
+ * Postgres container (see {@link AbstractIntegrationTest}).
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -37,6 +37,10 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
 
     private static final int OPEN_TEST_NUMBER = 2;
     private static final int CONFLICT_TEST_NUMBER = 3;
+    private static final int CLOSE_FROM_OPEN_NUMBER = 4;
+    private static final int CLOSE_FROM_PAYMENT_REQUESTED_NUMBER = 5;
+    private static final int CLOSE_FROM_AVAILABLE_NUMBER = 6;
+    private static final int CLOSE_ALREADY_CLOSED_NUMBER = 7;
 
     @Autowired
     private MockMvc mockMvc;
@@ -45,9 +49,13 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
     private CommandRepository commandRepository;
 
     @AfterEach
-    void resetOpenTestCommands() {
+    void resetMutatedTestCommands() {
         resetToAvailable(OPEN_TEST_NUMBER);
         resetToAvailable(CONFLICT_TEST_NUMBER);
+        resetToAvailable(CLOSE_FROM_OPEN_NUMBER);
+        resetToAvailable(CLOSE_FROM_PAYMENT_REQUESTED_NUMBER);
+        resetToAvailable(CLOSE_FROM_AVAILABLE_NUMBER);
+        resetToAvailable(CLOSE_ALREADY_CLOSED_NUMBER);
     }
 
     private void resetToAvailable(int number) {
@@ -55,6 +63,15 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
             command.setStatus(CommandStatus.AVAILABLE);
             commandRepository.save(command);
         });
+    }
+
+    // Test-only setup: sets a command straight to a given status, bypassing
+    // the API (there's no endpoint yet to reach PAYMENT_REQUESTED, for
+    // instance) — just to arrange the scenario before exercising close().
+    private void setStatus(int number, CommandStatus status) {
+        Command command = commandRepository.findByNumber(number).orElseThrow();
+        command.setStatus(status);
+        commandRepository.save(command);
     }
 
     @Test
@@ -106,6 +123,62 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void returnsCommandNotFoundWhenOpeningUnknownNumber() throws Exception {
         mockMvc.perform(post("/api/v1/commands/{number}/open", 999))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"));
+    }
+
+    @Test
+    void closesOpenCommand() throws Exception {
+        setStatus(CLOSE_FROM_OPEN_NUMBER, CommandStatus.OPEN);
+
+        mockMvc.perform(post("/api/v1/commands/{number}/close", CLOSE_FROM_OPEN_NUMBER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.number").value(CLOSE_FROM_OPEN_NUMBER))
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+
+        Optional<Command> persisted = commandRepository.findByNumber(CLOSE_FROM_OPEN_NUMBER);
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getStatus()).isEqualTo(CommandStatus.CLOSED);
+    }
+
+    @Test
+    void closesPaymentRequestedCommand() throws Exception {
+        setStatus(CLOSE_FROM_PAYMENT_REQUESTED_NUMBER, CommandStatus.PAYMENT_REQUESTED);
+
+        mockMvc.perform(post("/api/v1/commands/{number}/close", CLOSE_FROM_PAYMENT_REQUESTED_NUMBER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+
+        Optional<Command> persisted = commandRepository.findByNumber(CLOSE_FROM_PAYMENT_REQUESTED_NUMBER);
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getStatus()).isEqualTo(CommandStatus.CLOSED);
+    }
+
+    @Test
+    void returnsConflictWhenClosingAvailableCommand() throws Exception {
+        // CLOSE_FROM_AVAILABLE_NUMBER is left at its seed default
+        // (AVAILABLE) — never opened, so it can't be closed.
+        mockMvc.perform(post("/api/v1/commands/{number}/close", CLOSE_FROM_AVAILABLE_NUMBER))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("COMMAND_CANNOT_BE_CLOSED"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsConflictWhenClosingAlreadyClosedCommand() throws Exception {
+        setStatus(CLOSE_ALREADY_CLOSED_NUMBER, CommandStatus.CLOSED);
+
+        mockMvc.perform(post("/api/v1/commands/{number}/close", CLOSE_ALREADY_CLOSED_NUMBER))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("COMMAND_CANNOT_BE_CLOSED"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsCommandNotFoundWhenClosingUnknownNumber() throws Exception {
+        mockMvc.perform(post("/api/v1/commands/{number}/close", 999))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"));
     }

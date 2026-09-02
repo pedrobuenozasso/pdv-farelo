@@ -38,4 +38,12 @@ public class CommandController {
         return CommandResponse.from(command);
     }
 
+    // Same POST-not-PATCH reasoning as open() above. No payment/fiscal
+    // validation yet (FARELO-034) — that's Epic 10/FARELO-143.
+    @PostMapping("/{number}/close")
+    public CommandResponse close(@PathVariable int number) {
+        Command command = commandService.close(number);
+        return CommandResponse.from(command);
+    }
+
 }
