@@ -8,6 +8,8 @@ import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
 import com.farelo.api.inventory.IngredientNotFoundException;
+import com.farelo.api.inventory.RecipeAlreadyExistsException;
+import com.farelo.api.inventory.RecipeNotFoundException;
 import com.farelo.api.ordering.OrderInvalidTransitionException;
 import com.farelo.api.ordering.OrderNotFoundException;
 import com.farelo.api.printing.PrintJobInvalidTransitionException;
@@ -137,6 +139,20 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ErrorResponse handleIngredientNotFound(IngredientNotFoundException ex) {
         return new ErrorResponse("INGREDIENT_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(RecipeNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleRecipeNotFound(RecipeNotFoundException ex) {
+        return new ErrorResponse("RECIPE_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: the product already has an active recipe — see
+    // Recipe's javadoc.
+    @ExceptionHandler(RecipeAlreadyExistsException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleRecipeAlreadyExists(RecipeAlreadyExistsException ex) {
+        return new ErrorResponse("RECIPE_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {
