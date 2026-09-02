@@ -17,6 +17,8 @@ import com.farelo.api.ordering.OrderNotFoundException;
 import com.farelo.api.printing.PrintJobInvalidTransitionException;
 import com.farelo.api.printing.PrintJobNotFoundException;
 import com.farelo.api.printing.PrintJobRetryLimitExceededException;
+import com.farelo.api.security.UserEmailAlreadyExistsException;
+import com.farelo.api.security.UserNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -179,6 +181,20 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleRecipeItemAlreadyExists(RecipeItemAlreadyExistsException ex) {
         return new ErrorResponse("RECIPE_ITEM_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(UserNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleUserNotFound(UserNotFoundException ex) {
+        return new ErrorResponse("USER_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: email is the (future) login identifier and must be
+    // unique — see UserEmailAlreadyExistsException's javadoc.
+    @ExceptionHandler(UserEmailAlreadyExistsException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleUserEmailAlreadyExists(UserEmailAlreadyExistsException ex) {
+        return new ErrorResponse("USER_EMAIL_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

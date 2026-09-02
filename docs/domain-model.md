@@ -6,7 +6,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 
 | Domínio | Responsabilidade | Status |
 |---|---|---|
-| `auth` | Autenticação e RBAC de usuários internos | Não iniciado |
+| `security` | `User` (contas de quem opera o sistema), futura autenticação/RBAC | Em andamento |
 | `catalog` | `Product`, `Category` — fonte única de verdade do cardápio | Em andamento |
 | `customer` | Dados do cliente coletados no fluxo de pedido (nome, WhatsApp) | Snapshot simples em `orders` (ver seção `ordering`) — domínio próprio ainda **não iniciado** |
 | `command` | `Command` (comanda) e seu ciclo de vida | Em andamento |
@@ -1135,6 +1135,120 @@ Pacote: `com.farelo.api.inventory`.
   único, e como toda consulta deste domínio é sempre filtrada por um
   `recipeId` específico, nenhuma asserção depende dessas tabelas
   compartilhadas estarem vazias.
+
+## security
+
+Pacote: `com.farelo.api.security`.
+
+- **`User`** (FARELO-120): entidade JPA — `id` (UUID, mesma estratégia dos
+  demais domínios), `name`, `email` (obrigatório, **único**, backed por
+  `uk_app_user_email` — será o identificador de login quando FARELO-121
+  existir, mesmo que o mecanismo de login em si ainda não exista),
+  `passwordHash`, `role` (enum `UserRole`, ver decisão dedicada abaixo),
+  `active` (default `true`, mesmo padrão de `Category`/`Product`/`Printer`/
+  `Ingredient` — permite desativar um funcionário sem apagar histórico),
+  `createdAt`/`updatedAt` (UTC). Tabela `app_user` (não `user` — palavra
+  reservada em SQL, mesmo raciocínio já usado para `orders` vs. `order` no
+  domínio `ordering`) criada pela migration `V20__create_user_table.sql`.
+
+  **Escopo deste ticket, explicitamente**: só a entidade `User` em si e seu
+  CRUD básico — o cadastro de quem *pode* existir no sistema. **Nada aqui
+  autentica ninguém**: sem login, sem verificação de senha, sem
+  tokens/sessão, sem Spring Security habilitado, sem nenhum endpoint
+  protegido (nem os já existentes, nem os novos deste próprio ticket). Isso
+  é o Epic 9 completo do prompt mestre (seção 26/47): FARELO-121
+  (autenticação), FARELO-122 (RBAC), FARELO-123/124 (proteger Admin/PDV) —
+  todos tickets futuros e distintos.
+
+  **`passwordHash` — decisão de algoritmo e de dependência**: sempre um hash
+  BCrypt (`BCryptPasswordEncoder`), nunca texto plano — `UserService` é o
+  único escritor do campo e sempre hasheia antes de persistir; a senha em
+  texto plano recebida no `POST`/`PATCH .../password` nunca é logada em
+  lugar nenhum (nem em log de erro, nem em mensagem de exceção — ver
+  `UserEmailAlreadyExistsException`, que carrega só o email).
+
+  A pergunta em aberto era **de onde vem o encoder**: trazer
+  `spring-boot-starter-security` agora (a dependência que FARELO-121 vai
+  precisar de qualquer forma para autenticação de verdade) ou esperar por
+  aquele ticket. **Decisão: nenhuma das duas — trazer só
+  `spring-security-crypto`** (o módulo standalone de `BCryptPasswordEncoder`,
+  sem depender de `spring-security-core`/`-web`/`-config`). Motivo decisivo:
+  o starter completo autoconfigura, só por estar no classpath, uma cadeia de
+  segurança padrão que exige autenticação em **toda** requisição (login
+  gerado, senha aleatória no log de boot) a menos que um
+  `SecurityFilterChain` diga o contrário — isso quebraria instantaneamente
+  todo endpoint já existente no projeto (categorias, produtos, comandas,
+  pedidos, print jobs, ingredientes, receitas — nenhum protegido hoje, por
+  desenho, até FARELO-123/124), obrigando este ticket a escrever uma
+  configuração `permitAll()` só para não quebrar a suíte — ou seja,
+  pré-decidir o desenho de FARELO-121/123 dentro de um ticket que as
+  instruções explicitamente pedem para não tocar nisso. `spring-security-crypto`
+  evita esse efeito colateral por completo (a autoconfiguração do Spring
+  Boot é condicionada a classes dos outros módulos, ausentes aqui), resolve
+  "decidir a biblioteca de hash duas vezes" (FARELO-121 reaproveita o mesmo
+  bean `PasswordEncoder`), e mantém este ticket mínimo. Ver javadoc de
+  `PasswordEncoderConfig` para o raciocínio completo.
+
+  **`role` — decisão de incluir agora**: a seção 26 do prompt mestre já
+  nomeia literalmente um conjunto fechado de cinco perfis (`ADMIN`,
+  `MANAGER`, `CASHIER`, `KITCHEN`, `ATTENDANT`). Diferente de adivinhar um
+  desenho que FARELO-122 (RBAC) ainda não decidiu, transcrever essa lista já
+  dada é o mesmo raciocínio já aplicado a `ProductionStation`
+  (`BAR`/`KITCHEN`, literal do prompt mestre para FARELO-073). **Decisão:
+  incluir `role` agora** como coluna `VARCHAR` + `CHECK` (mesma convenção de
+  `IngredientUnit`/`ProductionStation`/`CommandStatus`) — nada lê ou aplica
+  esse campo ainda (nenhuma checagem de permissão em lugar nenhum do
+  código), então isso é só rótulo de dado, não RBAC. Ver javadoc de
+  `UserRole` para a lista completa de motivos e para o que
+  **deliberadamente não** foi antecipado (nenhum mapeamento
+  papel→permissão — a seção 21 lista "Usuários" e "Permissões" como módulos
+  Admin separados, e um modelo de permissões mais granular, se algum dia for
+  necessário, é decisão de FARELO-122, não deste ticket).
+
+  `UserRepository` expõe `findByEmail` (Spring Data) — chave natural da
+  entidade (mesmo raciocínio de `RecipeRepository#findByProductIdAndActiveTrue`),
+  usada por `UserService` para o pré-check de unicidade e reaproveitável por
+  FARELO-121 para localizar o usuário no login.
+
+CRUD REST em `/api/v1/users` (`UserController`, pacote `security.web`):
+
+- `POST /api/v1/users` — cria um usuário (`name`/`email`/`password`/`role`
+  em texto plano no request, hasheado pelo `UserService` antes de
+  persistir). `409 USER_EMAIL_ALREADY_EXISTS` se o email já existir.
+- `GET /api/v1/users` / `GET /api/v1/users/{id}` — lista (ordenada por
+  `name`, sem filtro `active`-only ainda, mesma YAGNI de
+  `Category`/`Ingredient`) e busca por id (`404 USER_NOT_FOUND`).
+- `PUT /api/v1/users/{id}` — substituição completa de
+  `name`/`email`/`role`/`active` (mesmo formato de
+  `PUT /api/v1/ingredients/{id}`, `active` como `Boolean` para forçar envio
+  explícito). Reverifica unicidade de email (ignorando o próprio usuário).
+- `PATCH /api/v1/users/{id}/password` — endpoint **separado** para trocar
+  senha, decisão deliberada em vez de incluir a senha no `PUT` geral: trocar
+  senha tem implicações de segurança distintas de editar nome/email. **Sem
+  exigir a senha atual**: como o mecanismo de login/autenticação
+  (FARELO-121) ainda não existe, não há nenhuma identidade autenticada de
+  chamador para validar contra — pedir a senha atual hoje seria só mais um
+  campo em texto plano que este mesmo endpoint teria que também nunca logar,
+  sem nada real para checar. Revisitar quando FARELO-121 existir: um fluxo
+  de "trocar minha própria senha" provavelmente vai querer confirmar a senha
+  atual (ou reautenticação), enquanto um reset feito por um admin para outra
+  conta normalmente não — essa distinção não existe ainda hoje (existe
+  exatamente uma forma de chamador: um cliente HTTP autenticado-em-nada
+  batendo na API do Admin), então não foi adivinhada aqui.
+
+**`UserResponse` nunca inclui `passwordHash`** — em nenhum dos cinco
+endpoints acima, sem exceção (mais crítico que o padrão usual de "nunca
+expor entidade JPA direto", já que aqui o campo é literalmente segredo).
+Confirmado por teste dedicado (`neverExposesPasswordHashInAnyResponse`,
+`UserControllerIntegrationTests`), que bate em todos os cinco endpoints e
+verifica a ausência do campo no JSON de cada resposta — em vez de apenas
+assumir que omitir o campo do record é suficiente. Outro teste dedicado
+(`createsUserAndPersistsIt`) prova que o valor persistido nunca é igual à
+senha em texto plano enviada e que verifica com sucesso através do encoder
+real (BCrypt) — prova de que o hash está sendo aplicado de verdade, não só
+"alguma string diferente".
+
+Ver `docs/api.md` para os cinco endpoints completos.
 
 ## Outbox (infraestrutura cross-cutting)
 

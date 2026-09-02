@@ -52,6 +52,22 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
+        <!--
+            spring-security-crypto only (NOT spring-boot-starter-security),
+            for BCryptPasswordEncoder — see
+            com.farelo.api.security.PasswordEncoderConfig's javadoc (FARELO-120)
+            for the full reasoning. In short: the full starter auto-configures
+            a login-protected filter chain for every endpoint the moment it's
+            on the classpath, which would lock down every existing endpoint in
+            this codebase (a behavior change far outside this ticket's scope,
+            and premature — that's FARELO-121/123/124's job). This module has
+            no dependency on spring-security-core/-web/-config, so it doesn't
+            trigger any of that autoconfiguration — just the password encoder.
+        -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
