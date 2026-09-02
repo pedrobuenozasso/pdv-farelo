@@ -49,8 +49,11 @@ Cloudflare, Caddy, GitHub Actions.
 
 ## Roadmap de milestones
 
-1. **Primeira entrega**: Admin cadastra produto → aparece no QR → cliente cria pedido →
-   aparece no PDV/KDS → fica READY. Sem fiscal, estoque avançado ou WhatsApp.
+1. **Primeira entrega** ✅ **completa** (FARELO-059, KDS): Admin cadastra produto → aparece
+   no QR → cliente cria pedido → aparece no PDV/KDS → fica READY. Sem fiscal, estoque
+   avançado ou WhatsApp. Falta ainda, fora do escopo deste marco: deploy real em produção
+   (VPS/Caddy/Cloudflare — infra-agent não tem ticket para isso no roadmap dado) e as
+   transições `DELIVERED`/`CANCELLED` do pedido (não ticketadas ainda).
 2. **Segunda**: Print Agent, impressão, estoque, receitas.
 3. **Terceira**: WhatsApp, pagamentos, auditoria completa.
 4. **Quarta**: NFC-e, fiscal, relatórios.
