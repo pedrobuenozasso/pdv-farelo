@@ -7,6 +7,8 @@ import com.farelo.api.command.CommandCannotAcceptOrdersException;
 import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
+import com.farelo.api.ordering.OrderInvalidTransitionException;
+import com.farelo.api.ordering.OrderNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -98,6 +100,20 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleProductNotAvailable(ProductNotAvailableException ex) {
         return new ErrorResponse("PRODUCT_NOT_AVAILABLE", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(OrderNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleOrderNotFound(OrderNotFoundException ex) {
+        return new ErrorResponse("ORDER_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict, same state-conflict reasoning as the command
+    // exceptions above.
+    @ExceptionHandler(OrderInvalidTransitionException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleOrderInvalidTransition(OrderInvalidTransitionException ex) {
+        return new ErrorResponse("ORDER_INVALID_TRANSITION", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

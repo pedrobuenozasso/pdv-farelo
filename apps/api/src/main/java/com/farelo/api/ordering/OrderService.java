@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class OrderService {
@@ -100,6 +101,54 @@ public class OrderService {
         return orders.stream()
                 .map(order -> new OrderWithItems(order, orderItemRepository.findByOrder(order)))
                 .toList();
+    }
+
+    // Used by markAsPreparing/markAsReady below. See OrderRepository's
+    // findByIdWithCommand javadoc for why it's not a plain findById.
+    public Order getById(UUID id) {
+        return orderRepository.findByIdWithCommand(id)
+                .orElseThrow(() -> new OrderNotFoundException(id));
+    }
+
+    /**
+     * {@code CREATED} → {@code PREPARING} (FARELO-057). Valid origin
+     * status: {@code CREATED} only — {@code CONFIRMED} is reserved in the
+     * enum but has no transition into or out of it yet on the roadmap, so
+     * this deliberately doesn't accept it as a starting point.
+     */
+    @Transactional
+    public OrderWithItems markAsPreparing(UUID orderId) {
+        return transition(orderId, OrderStatus.CREATED, OrderStatus.PREPARING);
+    }
+
+    /**
+     * {@code PREPARING} → {@code READY} (FARELO-058). Valid origin status:
+     * {@code PREPARING} only — going straight from {@code CREATED} skips
+     * the kitchen's "in progress" signal, so it's rejected the same as any
+     * other invalid origin.
+     */
+    @Transactional
+    public OrderWithItems markAsReady(UUID orderId) {
+        return transition(orderId, OrderStatus.PREPARING, OrderStatus.READY);
+    }
+
+    // Shared by markAsPreparing/markAsReady: fetch, validate origin status,
+    // transition, record the OrderStatusHistory entry (FARELO-056's
+    // mechanism), save — same read-check-write shape (and the same
+    // unaddressed-concurrency caveat) as CommandService#open/close.
+    private OrderWithItems transition(UUID orderId, OrderStatus requiredCurrentStatus, OrderStatus targetStatus) {
+        Order order = getById(orderId);
+
+        if (order.getStatus() != requiredCurrentStatus) {
+            throw new OrderInvalidTransitionException(orderId, order.getStatus(), targetStatus);
+        }
+
+        order.setStatus(targetStatus);
+        Order saved = orderRepository.save(order);
+        orderStatusHistoryRepository.save(new OrderStatusHistory(saved, requiredCurrentStatus, targetStatus));
+
+        List<OrderItem> items = orderItemRepository.findByOrder(saved);
+        return new OrderWithItems(saved, items);
     }
 
 }

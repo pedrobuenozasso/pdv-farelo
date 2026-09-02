@@ -496,4 +496,72 @@ Lista vazia (`[]`) quando a comanda ainda não tem pedidos.
 - `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
   `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
 
+### `POST /api/v1/orders/{id}/preparing`
+
+Marca um pedido como em preparo: transição de status `CREATED` →
+`PREPARING`. (FARELO-057)
+
+Mesma razão para `POST` em vez de `PATCH` do `open`/`close` de comanda —
+é uma ação, não uma atualização parcial da representação do recurso.
+
+**Estado de origem válido**: apenas `CREATED`. `CONFIRMED` é um status
+reservado no enum `OrderStatus`, mas ainda não tem nenhuma transição
+para ou a partir dele no roadmap — não é aceito aqui.
+
+Grava uma entrada em `OrderStatusHistory` (`fromStatus: "CREATED"`,
+`toStatus: "PREPARING"`), reaproveitando o mecanismo do FARELO-056.
+
+**Response — `200 OK`**
+
+`OrderResponse` atualizado, com `status: "PREPARING"`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhum pedido existente,
+  `code: "ORDER_NOT_FOUND"`.
+- `409 Conflict` — o pedido existe mas não está `CREATED`:
+
+  ```json
+  {
+    "code": "ORDER_INVALID_TRANSITION",
+    "message": "Order d4e5f6a7-8901-2bcd-ef34-567890abcdef cannot transition to PREPARING (current status: PREPARING)",
+    "correlationId": "..."
+  }
+  ```
+
+### `POST /api/v1/orders/{id}/ready`
+
+Marca um pedido como pronto: transição de status `PREPARING` → `READY`.
+(FARELO-058)
+
+**Estado de origem válido**: apenas `PREPARING` — pular direto de
+`CREATED` para `READY` (sem passar pela cozinha) é rejeitado como
+qualquer outra origem inválida.
+
+Grava uma entrada em `OrderStatusHistory` (`fromStatus: "PREPARING"`,
+`toStatus: "READY"`).
+
+`ORDER_NOT_FOUND`/`ORDER_INVALID_TRANSITION` são um `code`/exceção únicos
+e reaproveitados pelos dois endpoints acima (`OrderInvalidTransitionException`)
+— diferente de `COMMAND_NOT_AVAILABLE`/`COMMAND_CANNOT_BE_CLOSED` (dois
+`code`s distintos no domínio `command`). Lá, reaproveitar um único `code`
+teria deixado a mensagem invertida no caso mais comum de erro do `close`
+(uma comanda `AVAILABLE` *está* disponível — por isso não pode ser
+fechada). Aqui a mensagem já nomeia o status atual e o status-alvo
+explicitamente, então não há essa ambiguidade a evitar.
+
+**Response — `200 OK`**
+
+`OrderResponse` atualizado, com `status: "READY"`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhum pedido existente,
+  `code: "ORDER_NOT_FOUND"`.
+- `409 Conflict` — o pedido existe mas não está `PREPARING`, mesmo
+  formato de `ORDER_INVALID_TRANSITION` acima.
+
+Ainda não há transição para `CONFIRMED`, `DELIVERED`, `CANCELLED`, nem
+endpoint para consultar o histórico — escopo de tickets futuros.
+
 _(demais endpoints a preencher conforme implementados)_
