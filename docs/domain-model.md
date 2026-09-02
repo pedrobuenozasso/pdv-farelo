@@ -375,6 +375,85 @@ Pacote: `com.farelo.api.printing`.
   ainda além do CRUD padrão do `JpaRepository` — mesmo formato de
   `CategoryRepository`.
 
+- **`PrintJob`** (FARELO-071): entidade JPA — `id` (UUID, mesma estratégia
+  dos demais domínios), `order` (`@ManyToOne` obrigatório para `Order` —
+  todo `PrintJob` existe para imprimir o conteúdo de um pedido específico,
+  mesmo formato de `OrderItem.order`), `content` (snapshot do que precisa
+  ser impresso — número da comanda e nomes/quantidades dos itens — ver
+  decisão de desenho abaixo), `status` (enum `PrintJobStatus`: `PENDING`,
+  `PRINTED`, `FAILED` — literal da seção 10 do prompt mestre,
+  `@Enumerated(EnumType.STRING)`, default `PENDING`), `createdAt`/
+  `updatedAt` (`OffsetDateTime` em UTC, mesmo padrão dos demais domínios).
+  Tabela criada pela migration `V15__create_print_job_table.sql`, com FK
+  `NOT NULL` para `orders(id)` e `status` na mesma convenção `VARCHAR` +
+  `CHECK` de `command.status`/`orders.status`/`outbox_event.status`.
+
+  **Escopo deste ticket**: só a entidade em si. Nada cria um `PrintJob`
+  automaticamente quando um `Order` é criado ainda — isso é FARELO-072.
+  Nada roteia um job para um `Printer` específico ainda — isso é
+  roteamento por `productionStation` (FARELO-073/074, seção 12). Sem
+  endpoint REST (mesmo padrão minimalista do primeiro ticket de outros
+  domínios, ex: `Printer`/FARELO-070).
+
+  **Decisão de desenho 1 — referencia `Order`, não `Printer`**: `order` é
+  `@ManyToOne` obrigatório, mesmo formato de `OrderItem.order` — um
+  `PrintJob` sempre existe para imprimir um pedido específico. Não
+  referencia `Printer`: qual impressora física recebe o job é uma decisão
+  de roteamento (por `productionStation`, por item, seção 12) que ainda
+  não existe — modelar isso agora seria adivinhar um desenho que
+  FARELO-073/074 ainda não decidiu. Um pedido com itens de estações
+  diferentes pode inclusive virar mais de um ticket impresso nesse
+  momento futuro; acoplar `PrintJob` a um único `Printer` hoje atrapalharia
+  isso.
+
+  **Decisão de desenho 2 — `content` é snapshot congelado, não referência
+  viva a `Order`**: `content` guarda o que precisa ser impresso (número da
+  comanda, nome/quantidade de cada item) capturado no momento da criação
+  do job — não é só a FK `order` para quem consome (`Edge Agent`) buscar
+  os itens depois via API. Mesmo raciocínio do snapshot de preço em
+  `OrderItem.unitPrice` e do snapshot de itens dentro de
+  `OrderCreatedEvent`: o que foi pedido no momento da impressão não pode
+  mudar depois só porque, por exemplo, um produto foi renomeado ou um
+  `OrderItem` foi editado por alguma feature futura — uma comanda impressa
+  já é, ela mesma, um registro histórico físico, e precisa refletir a
+  realidade de quando foi enfileirada, não o que o banco disser sempre que
+  o Edge Agent conseguir drenar a fila (que pode ser segundos depois, ou
+  muito mais se uma impressora estiver fora do ar).
+
+  Há um segundo motivo, independente do snapshot: o prompt mestre (seção
+  11) é explícito que o Edge Agent "nunca deve possuir regra de negócio de
+  pedidos — é apenas infraestrutura de dispositivos". Se `PrintJob`
+  guardasse só a referência a `Order`, quem lê o job (o Edge Agent, ou
+  algo que prepara os dados para ele) precisaria saber buscar o pedido,
+  percorrer seus itens e formatar um ticket — regra de negócio de pedido
+  vazando para dentro da infraestrutura de dispositivo. Embutir o snapshot
+  já pronto mantém o lado do Edge Agent burro: ler `content`, imprimir,
+  reportar o resultado.
+
+  **Armazenamento de `content`**: mapeado como `String` com
+  `@JdbcTypeCode(SqlTypes.JSON)`, coluna `jsonb` — a mesma convenção já
+  usada por `OutboxEvent.payload` para "dado estruturado de snapshot cujo
+  formato esta classe não precisa opinar": quem constrói um `PrintJob`
+  (FARELO-072) serializa o snapshot (ex: um record pequeno com número da
+  comanda e uma lista de nome/quantidade por item) para JSON antes de
+  construir esta entidade; a entidade só guarda e devolve a string como
+  está.
+
+  **`markPrinted()`/`markFailed()`**: únicos jeitos de mudar `status` depois
+  da criação (sem setter público) — mesmo espírito de
+  `OutboxEvent.markProcessed()`. Nenhuma validação de transição ainda (ex:
+  rejeitar sair de um estado já terminal): não existe nenhum chamador real
+  desses métodos ainda (isso é FARELO-072+), então adicionar essa guarda
+  agora seria adivinhar uma regra sem um caso de uso real para testar
+  contra. Também não existe transição de volta `FAILED`→`PENDING`
+  (retry) — a seção 10 do prompt mestre menciona "permitindo retry", mas o
+  mecanismo real de retry (quem decide re-enfileirar, com que critério)
+  ainda não foi desenhado; ver `PrintJobStatus` para a nota completa.
+
+  `PrintJobRepository` (Spring Data JPA), sem métodos de consulta próprios
+  ainda além do CRUD padrão — mesmo formato minimalista de
+  `PrinterRepository`.
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —
