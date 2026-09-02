@@ -206,6 +206,69 @@ notificações à cozinha, etc) que justifiquem o pacote próprio.
   iniciados), então isto só prova o mecanismo de publicação, não é um
   contrato de evento fechado para consumidores futuros.
 
+**Fechamento do ciclo de vida do pedido** (`markAsDelivered`/
+`markAsCancelled`, `OrderService`): follow-up sem número FARELO explícito
+no roadmap original — `OrderStatus` já tinha `DELIVERED`/`CANCELLED`
+desde FARELO-050, mas nenhuma transição para eles existia até aqui, então
+um pedido ficava travado em `READY` para sempre (mesmo padrão de
+follow-up não ticketado que já aconteceu com FARELO-019).
+
+- `markAsDelivered`: `READY` → `DELIVERED`, único estado de origem —
+  mesmo formato de `markAsPreparing`/`markAsReady` (FARELO-057/058),
+  reaproveita o helper privado `transition(...)` sem alteração de
+  comportamento.
+- `markAsCancelled`: `CANCELLED`, a partir de qualquer status
+  não-terminal (`CREATED`, `CONFIRMED`, `PREPARING` ou `READY`).
+  Diferente das transições de único estado de origem acima, isso não se
+  encaixava no helper `transition(orderId, requiredCurrentStatus,
+  targetStatus)` existente. **Decisão**: sobrecarregar `transition(...)`
+  com uma variante `transition(orderId, Set<OrderStatus>
+  validCurrentStatuses, targetStatus)` que checa pertencimento ao invés
+  de igualdade; a variante de status único vira um wrapper fino que chama
+  a nova com `Set.of(requiredCurrentStatus)`. Alternativa descartada: uma
+  segunda cópia do método só para o caso de múltiplos estados, que
+  duplicaria a lógica de fetch/validação/histórico/save já existente.
+  Resultado: `markAsPreparing`/`markAsReady`/`markAsDelivered` continuam
+  chamando a mesma assinatura de sempre, sem nenhuma mudança nelas.
+
+  `DELIVERED` e `CANCELLED` são estados terminais — nenhuma transição sai
+  deles. Cancelar um pedido já `DELIVERED`, ou cancelar um já
+  `CANCELLED`, é rejeitado como qualquer outra transição inválida
+  (`OrderInvalidTransitionException`/`ORDER_INVALID_TRANSITION`,
+  reaproveitado sem alteração).
+
+  Ambas gravam sua entrada em `OrderStatusHistory`, mesmo mecanismo do
+  FARELO-056/057/058.
+
+  **Efeito no `GET /api/v1/orders` (fila do KDS)**: nenhuma mudança
+  necessária — `QUEUE_STATUSES` (`CREATED`/`CONFIRMED`/`PREPARING`) nunca
+  incluiu `DELIVERED`/`CANCELLED`, então um pedido que chega a qualquer
+  um dos dois já desaparece da fila automaticamente, mesma forma como
+  `READY` já desaparecia. Confirmado com teste
+  (`kitchenQueueExcludesDeliveredAndCancelledOrders`) em vez de assumido.
+
+  **Transições válidas de `OrderStatus`** (visão completa do ciclo de
+  vida até aqui):
+
+  ```
+  CREATED → PREPARING → READY → DELIVERED
+     \          \          \
+      \          \          +--→ CANCELLED
+       \          +-------------→ CANCELLED
+        +------------------------→ CANCELLED
+  ```
+
+  `CONFIRMED` permanece reservado no enum sem nenhuma transição de/para
+  ele em nenhum endpoint real — só alcançável manipulando o registro
+  diretamente (ex: em teste) — mas, por ser não-terminal, já está incluído
+  como origem válida de `markAsCancelled` acima; cabe a um ticket futuro
+  decidir se/quando ele ganha uma transição real. `DELIVERED` e
+  `CANCELLED` são os dois únicos estados terminais — nenhuma seta sai
+  deles.
+
+  Ver `docs/api.md` para os endpoints `POST /api/v1/orders/{id}/deliver`
+  e `POST /api/v1/orders/{id}/cancel`.
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —

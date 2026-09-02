@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -21,9 +22,19 @@ public class OrderService {
     // has no transition into or out of it yet on the roadmap (see
     // OrderStatus/markAsPreparing's javadoc), but is included here since
     // conceptually it's still "not yet in the kitchen's hands", same as
-    // CREATED.
+    // CREATED. DELIVERED/CANCELLED are terminal (see markAsDelivered/
+    // markAsCancelled below) and were never in this list — an order
+    // reaching either already disappears from the queue with no change
+    // needed here.
     private static final List<OrderStatus> QUEUE_STATUSES =
             List.of(OrderStatus.CREATED, OrderStatus.CONFIRMED, OrderStatus.PREPARING);
+
+    // Valid origin statuses for markAsCancelled below: every non-terminal
+    // status. DELIVERED and CANCELLED are terminal and deliberately
+    // excluded — cancelling an already-delivered order, or cancelling one
+    // twice, is rejected the same as any other invalid transition.
+    private static final Set<OrderStatus> CANCELLABLE_STATUSES =
+            Set.of(OrderStatus.CREATED, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY);
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
@@ -173,20 +184,70 @@ public class OrderService {
         return transition(orderId, OrderStatus.PREPARING, OrderStatus.READY);
     }
 
-    // Shared by markAsPreparing/markAsReady: fetch, validate origin status,
-    // transition, record the OrderStatusHistory entry (FARELO-056's
-    // mechanism), save — same read-check-write shape (and the same
-    // unaddressed-concurrency caveat) as CommandService#open/close.
-    private OrderWithItems transition(UUID orderId, OrderStatus requiredCurrentStatus, OrderStatus targetStatus) {
-        Order order = getById(orderId);
+    /**
+     * {@code READY} → {@code DELIVERED}. Valid origin status: {@code READY}
+     * only — same single-origin shape as {@link #markAsPreparing(UUID)}/
+     * {@link #markAsReady(UUID)}, so it reuses the existing single-status
+     * {@link #transition(UUID, OrderStatus, OrderStatus)} overload as-is.
+     */
+    @Transactional
+    public OrderWithItems markAsDelivered(UUID orderId) {
+        return transition(orderId, OrderStatus.READY, OrderStatus.DELIVERED);
+    }
 
-        if (order.getStatus() != requiredCurrentStatus) {
-            throw new OrderInvalidTransitionException(orderId, order.getStatus(), targetStatus);
+    /**
+     * Cancels an order. Unlike {@link #markAsDelivered(UUID)} and the
+     * FARELO-057/058 transitions, cancellation is valid from <em>any</em>
+     * non-terminal status ({@link #CANCELLABLE_STATUSES}: {@code CREATED},
+     * {@code CONFIRMED}, {@code PREPARING}, {@code READY}) — cancelling an
+     * order makes sense regardless of how far it got through the kitchen,
+     * as long as it hasn't reached a terminal status yet. {@code DELIVERED}
+     * and {@code CANCELLED} are terminal and rejected as any other invalid
+     * origin would be.
+     *
+     * <p>This doesn't fit the single-{@code requiredCurrentStatus} shape of
+     * {@link #transition(UUID, OrderStatus, OrderStatus)}, so it uses the
+     * {@link #transition(UUID, Set, OrderStatus)} overload instead (see that
+     * method's javadoc for why an overload, rather than changing the
+     * existing single-status method's signature).
+     */
+    @Transactional
+    public OrderWithItems markAsCancelled(UUID orderId) {
+        return transition(orderId, CANCELLABLE_STATUSES, OrderStatus.CANCELLED);
+    }
+
+    // Single-origin convenience overload, used by markAsPreparing/
+    // markAsReady/markAsDelivered — unchanged in signature and behavior
+    // from FARELO-057/058, now just a thin wrapper around the Set-based
+    // overload below.
+    private OrderWithItems transition(UUID orderId, OrderStatus requiredCurrentStatus, OrderStatus targetStatus) {
+        return transition(orderId, Set.of(requiredCurrentStatus), targetStatus);
+    }
+
+    // Shared by every transition above: fetch, validate the order's
+    // current status is one of validCurrentStatuses, transition, record
+    // the OrderStatusHistory entry (FARELO-056's mechanism), save — same
+    // read-check-write shape (and the same unaddressed-concurrency caveat)
+    // as CommandService#open/close.
+    //
+    // A Set<OrderStatus> overload, rather than changing the single-status
+    // method above, because markAsCancelled (multiple valid origins) needs
+    // a genuinely different shape than markAsPreparing/markAsReady/
+    // markAsDelivered (exactly one valid origin each): every existing
+    // caller keeps passing a single OrderStatus with no change at all,
+    // and the Set-based method is where the one new piece of logic
+    // (membership check instead of equality) actually lives.
+    private OrderWithItems transition(UUID orderId, Set<OrderStatus> validCurrentStatuses, OrderStatus targetStatus) {
+        Order order = getById(orderId);
+        OrderStatus currentStatus = order.getStatus();
+
+        if (!validCurrentStatuses.contains(currentStatus)) {
+            throw new OrderInvalidTransitionException(orderId, currentStatus, targetStatus);
         }
 
         order.setStatus(targetStatus);
         Order saved = orderRepository.save(order);
-        orderStatusHistoryRepository.save(new OrderStatusHistory(saved, requiredCurrentStatus, targetStatus));
+        orderStatusHistoryRepository.save(new OrderStatusHistory(saved, currentStatus, targetStatus));
 
         List<OrderItem> items = orderItemRepository.findByOrder(saved);
         return new OrderWithItems(saved, items);
