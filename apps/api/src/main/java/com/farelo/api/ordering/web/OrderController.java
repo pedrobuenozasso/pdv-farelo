@@ -5,6 +5,7 @@ import com.farelo.api.ordering.OrderService;
 import com.farelo.api.ordering.OrderWithItems;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -45,6 +46,21 @@ public class OrderController {
                 .toUri();
 
         return ResponseEntity.created(location).body(OrderResponse.from(result));
+    }
+
+    // Kitchen queue (FARELO-059): every order across every command that
+    // still needs kitchen attention (CREATED/CONFIRMED/PREPARING), oldest
+    // first. Conceptually a `kitchen` domain concern (see docs/domain-model
+    // .md), but it's a single read endpoint reusing OrderService/Order
+    // entirely — putting it here reuses the existing `/api/v1/orders` root
+    // resource controller instead of standing up a new `kitchen` package
+    // for one endpoint (AGENTS.md: no abstração prematura). Revisit if/when
+    // `kitchen` gains real responsibilities of its own (KDS printing, etc).
+    @GetMapping
+    public List<OrderResponse> queue() {
+        return orderService.listQueue().stream()
+                .map(OrderResponse::from)
+                .toList();
     }
 
     // POST, not PATCH — same reasoning as
