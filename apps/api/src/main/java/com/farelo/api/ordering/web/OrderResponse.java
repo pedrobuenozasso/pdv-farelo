@@ -19,6 +19,8 @@ public record OrderResponse(
         int commandNumber,
         OrderStatus status,
         List<OrderItemResponse> items,
+        String customerName,
+        String customerPhone,
         OffsetDateTime createdAt) {
 
     public static OrderResponse from(OrderWithItems result) {
@@ -32,6 +34,8 @@ public record OrderResponse(
                 order.getCommand().getNumber(),
                 order.getStatus(),
                 items,
+                order.getCustomerName(),
+                order.getCustomerPhone(),
                 order.getCreatedAt());
     }
 

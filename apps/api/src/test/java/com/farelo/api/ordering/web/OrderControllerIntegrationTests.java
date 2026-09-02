@@ -36,6 +36,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -166,11 +167,18 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.commandNumber").value(COMMAND_AVAILABLE))
                 .andExpect(jsonPath("$.status").value("CREATED"))
                 .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.customerName").value(nullValue()))
+                .andExpect(jsonPath("$.customerPhone").value(nullValue()))
                 .andExpect(jsonPath("$.createdAt").exists())
                 .andReturn();
 
         OrderResponse response = objectMapper.readValue(
                 result.getResponse().getContentAsString(), OrderResponse.class);
+
+        // customerName/customerPhone weren't sent in the request body above
+        // — both optional, and must come back null rather than fail.
+        assertThat(response.customerName()).isNull();
+        assertThat(response.customerPhone()).isNull();
 
         OrderItemResponse espressoItem = response.items().stream()
                 .filter(item -> item.productId().equals(espresso.getId()))
@@ -193,6 +201,38 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
 
         OrderItem persistedItem = orderItemRepository.findById(espressoItem.id()).orElseThrow();
         assertThat(persistedItem.getUnitPrice()).isEqualByComparingTo(new BigDecimal("7.50"));
+    }
+
+    @Test
+    void createsOrderWithCustomerNameAndPhone() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}],
+                  "customerName": "Maria",
+                  "customerPhone": "+55 11 91234-5678"
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.customerName").value("Maria"))
+                .andExpect(jsonPath("$.customerPhone").value("+55 11 91234-5678"))
+                .andReturn();
+
+        OrderResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), OrderResponse.class);
+        assertThat(response.customerName()).isEqualTo("Maria");
+        assertThat(response.customerPhone()).isEqualTo("+55 11 91234-5678");
+
+        // Persisted, not just echoed back in the response.
+        Order order = orderRepository.findById(response.id()).orElseThrow();
+        assertThat(order.getCustomerName()).isEqualTo("Maria");
+        assertThat(order.getCustomerPhone()).isEqualTo("+55 11 91234-5678");
     }
 
     @Test

@@ -9,9 +9,12 @@ import java.util.List;
 /**
  * Request body for {@code POST /api/v1/orders}.
  *
- * <p>No customer name/phone here — those fields stay client-side only for
- * now (FARELO-045); persisting customer data belongs to a {@code customer}
- * domain that no ticket has created yet, so this ticket doesn't invent it.
+ * <p>{@code customerName}/{@code customerPhone} are optional and carry no
+ * format validation — this is a plain snapshot of contact info for staff
+ * (PDV/KDS), not an identity check, so a phone-format validator would be
+ * YAGNI right now (see {@link com.farelo.api.ordering.Order}'s javadoc).
+ * Persisting them is deliberately still not a {@code customer} domain —
+ * see docs/domain-model.md.
  *
  * <p>{@code commandNumber} is {@code Integer} (wrapper), not a primitive
  * {@code int}: a missing field must fail validation with a clear 400
@@ -20,5 +23,7 @@ import java.util.List;
  */
 public record CreateOrderRequest(
         @NotNull Integer commandNumber,
-        @NotEmpty @Valid List<OrderItemRequest> items) {
+        @NotEmpty @Valid List<OrderItemRequest> items,
+        String customerName,
+        String customerPhone) {
 }
