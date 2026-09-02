@@ -389,11 +389,11 @@ Pacote: `com.farelo.api.printing`.
   `CHECK` de `command.status`/`orders.status`/`outbox_event.status`.
 
   **Escopo deste ticket**: só a entidade em si. Nada cria um `PrintJob`
-  automaticamente quando um `Order` é criado ainda — isso é FARELO-072.
-  Nada roteia um job para um `Printer` específico ainda — isso é
-  roteamento por `productionStation` (FARELO-073/074, seção 12). Sem
-  endpoint REST (mesmo padrão minimalista do primeiro ticket de outros
-  domínios, ex: `Printer`/FARELO-070).
+  automaticamente quando um `Order` é criado ainda — isso é FARELO-072
+  (ver entrada dedicada logo abaixo). Nada roteia um job para um `Printer`
+  específico ainda — isso é roteamento por `productionStation`
+  (FARELO-073/074, seção 12). Sem endpoint REST (mesmo padrão minimalista
+  do primeiro ticket de outros domínios, ex: `Printer`/FARELO-070).
 
   **Decisão de desenho 1 — referencia `Order`, não `Printer`**: `order` é
   `@ManyToOne` obrigatório, mesmo formato de `OrderItem.order` — um
@@ -452,7 +452,61 @@ Pacote: `com.farelo.api.printing`.
 
   `PrintJobRepository` (Spring Data JPA), sem métodos de consulta próprios
   ainda além do CRUD padrão — mesmo formato minimalista de
-  `PrinterRepository`.
+  `PrinterRepository` — até FARELO-072 abaixo, que adiciona
+  `findByOrder(Order)`.
+
+- **Criar `PrintJob` em `ORDER_CREATED`** (FARELO-072): fecha a lacuna
+  deixada pelo FARELO-071 — o `OutboxWorker` (ver seção "Outbox" abaixo)
+  ganha aqui seu **primeiro consumidor real**: ao drenar um evento
+  `OrderCreated`, ele cria um `PrintJob` `PENDING` para aquele pedido.
+  Novas classes em `printing`: `PrintJobContent` (record — `commandNumber`
+  + lista de `Item(productName, quantity)`, o shape exato já usado por
+  `PrintJobRepositoryIntegrationTests` desde o FARELO-071) e
+  `PrintJobService` (`createForOrder(UUID orderId)` — busca o pedido,
+  monta o `PrintJobContent`, serializa via Jackson e salva o `PrintJob`).
+  Mecanismo de dispatch e tratamento de falha ficam documentados no
+  javadoc de `OutboxWorker` (ver seção "Outbox" abaixo, entrada do próprio
+  `OutboxWorker`) — aqui só as decisões específicas de `printing`:
+
+  **Decisão — de onde vem o conteúdo (nome dos itens)**: `OrderCreatedEvent`
+  (o payload do evento) só carrega `productId`, não o nome do produto —
+  mas `PrintJob.content` precisa de um nome legível para virar um ticket.
+  Duas opções cogitadas: (a) desserializar o payload do evento e buscar os
+  nomes dos produtos em lote (um novo método de "buscar produtos por
+  lista de ids", que não existe hoje); ou (b) ignorar o payload para esse
+  fim e buscar `Order`+`OrderItem`s direto do banco pelo `aggregateId`
+  (o id do próprio pedido), reaproveitando a query `JOIN FETCH product`
+  que `OrderItemRepository#findByOrder` já expõe (a mesma que
+  `CommandOrdersController`/a fila da cozinha já usam para evitar
+  `LazyInitializationException` lendo `item.getProduct().getName()`).
+  Escolhida a opção (b): reaproveita busca já existente e testada, em vez
+  de duplicá-la atrás de um método novo que mais ninguém precisa ainda —
+  e, como efeito colateral, `PrintJobService` nunca precisou conhecer o
+  formato do payload do evento, só o `aggregateId`, então `OrderCreatedEvent`
+  continua livre para mudar de forma independente do que a impressão
+  precisa dele. `PrintJobRepository` ganhou `findByOrder(Order)` (derivado,
+  Spring Data) só para permitir que os testes confirmem qual `PrintJob`
+  foi criado para um pedido.
+
+  **Decisão — nenhum split por estação ainda**: um `PrintJob` por pedido,
+  não um por `productionStation` — isso é FARELO-074, ticket seguinte,
+  fora de escopo aqui (`Product.productionStation`, FARELO-073, ainda não
+  é lido por nada em `printing`).
+
+  Teste de integração: `OutboxWorkerPrintJobIntegrationTests` (pacote
+  `outbox`, mesmo padrão de `OutboxWorkerIntegrationTests`) cria um pedido
+  de verdade via `OrderService.create(...)`, chama
+  `OutboxWorker#processPendingEvents()` explicitamente e confirma um
+  `PrintJob` `PENDING` com `content` correto (nomes/quantidades dos dois
+  itens, número da comanda) — mais um segundo teste que prova o
+  comportamento de falha documentado no `OutboxWorker` (evento com
+  `aggregateId` que não corresponde a nenhum pedido: a exceção propaga,
+  o lote inteiro reverte, o evento permanece `PENDING`). Contexto Spring
+  próprio (`outbox.worker.poll-interval-ms` bem alto via
+  `@TestPropertySource`), mesma razão de
+  `OutboxWorkerBatchSizeIntegrationTests`: sem isso, o `@Scheduled` real
+  de um contexto já em cache poderia disputar as mesmas linhas com as
+  chamadas explícitas deste teste.
 
 ## Outbox (infraestrutura cross-cutting)
 
@@ -505,16 +559,63 @@ momento)."
   garantia nenhuma de atomicidade.
 - **`OutboxWorker`**: `@Component` com um método `@Scheduled` (a cada 5s)
   que busca eventos `PENDING` (`OutboxEventRepository.
-  findByStatusOrderByCreatedAtAsc`, FIFO) e, por enquanto, apenas loga e
-  marca cada um como `PROCESSED` — **stub deliberado**: não existe nenhum
-  consumidor real ainda (impressão/notificação/estoque são epics futuros,
-  ainda não iniciados). Ponto de extensão futuro documentado no javadoc da
-  classe: quando um consumidor real aparecer, ele se pluga em torno desse
-  loop, provavelmente via um handler registrado por `event_type` —
-  mecanismo de dispatch deliberadamente não decidido/construído agora
-  (YAGNI, não há um segundo consumidor ainda para desenhar contra).
-  Requer `@EnableScheduling` em `FareloApiApplication` (primeiro uso de
-  `@Scheduled` no projeto).
+  findByStatusOrderByCreatedAtAsc`/depois `findPendingForUpdateSkipLocked`,
+  ver FARELO-063 abaixo, FIFO). Requer `@EnableScheduling` em
+  `FareloApiApplication` (primeiro uso de `@Scheduled` no projeto).
+
+  **Primeiro consumidor real (FARELO-072)**: até aqui o worker era um
+  **stub deliberado** — logava cada evento `PENDING` e marcava
+  `PROCESSED`, sem nenhum dispatch real, porque não existia nenhum
+  consumidor (impressão/notificação/estoque eram epics futuros ainda não
+  iniciados). Isso muda no FARELO-072: um evento `eventType ==
+  "OrderCreated"` agora resulta na criação de um `PrintJob` `PENDING`
+  (ver `PrintJobService`, seção `printing` acima). Notificação e estoque
+  continuam sem consumidor — qualquer outro `eventType` (nenhum existe
+  hoje) permanece um no-op.
+
+  **Mecanismo de dispatch**: um método privado `dispatch(OutboxEvent)`
+  com um `if` direto em `event.getEventType()` — não um registro
+  plugável de handlers (ex: `Map<String, OutboxEventHandler>`).
+  Deliberado (YAGNI), não descuido: com exatamente um `eventType`
+  (`OrderCreated`) e um consumidor (impressão), um registro seria uma
+  abstração com uma única entrada — não há um segundo caso real para
+  desenhar a forma certa contra (um handler por evento, ou vários
+  inscritos no mesmo tipo? síncrono ou enfileirado? como falhas parciais
+  entre handlers se comportam?). Isso deve virar um mecanismo de verdade
+  quando um segundo `eventType`/consumidor aparecer — ex: `inventory`
+  reagindo a `OrderCreated` também, ou um `eventType` novo para
+  `notification` (ambos epics futuros) — só então há dois casos reais
+  para desenhar a abstração contra, em vez de um caso imaginado.
+
+  **Direção de dependência, revisada**: até o FARELO-071, esta seção
+  dizia que o pacote `outbox` "nunca depende de volta para um pacote de
+  domínio" (ver nota no final desta seção, "Direção de dependência"). Isso
+  muda aqui: `OutboxWorker` agora depende de
+  `com.farelo.api.printing.PrintJobService` para fazer o dispatch real.
+  Exceção deliberada e estreita — despachar um evento para trabalho de
+  verdade exige necessariamente chamar o domínio que faz esse trabalho;
+  revisitar com um registro de handlers de verdade (que restauraria um
+  worker genérico) quando um segundo consumidor real justificar a
+  abstração. Ver o javadoc revisado do `package-info.java` de `outbox`
+  para o texto completo.
+
+  **Falha ao despachar (FARELO-072)**: `dispatch(event)` roda dentro da
+  mesma transação `@Transactional` de `processPendingEvents()`, antes do
+  evento ser marcado `PROCESSED`. Se lançar (ex: `PrintJobService` não
+  encontra o pedido — não esperado na prática, já que o pedido foi
+  escrito na mesma transação que publicou o evento, mas sem nenhuma
+  proteção contra isso além de deixar a exceção propagar), a exceção
+  propaga e a transação do método inteiro reverte:
+  **todo** o lote atual volta a `PENDING` (nada nele chegou a ser
+  commitado como `PROCESSED`), não só o evento que falhou. Limitação
+  conhecida e documentada no javadoc da classe, não um bug escondido — um
+  mecanismo de retry/isolamento por evento (ex: marcar só o evento
+  problemático de alguma forma, sem bloquear os vizinhos do mesmo lote)
+  é deliberadamente **não** construído aqui; isso é FARELO-079 ("Criar
+  retry de impressão"), escopado para quando um modo de falha real
+  (impressora fora do ar etc) justificar. Coberto por
+  `OutboxWorkerPrintJobIntegrationTests#dispatchFailureRollsBackTheBatchLeavingTheEventPending`
+  (ver seção `printing`, entrada FARELO-072, para o teste completo).
 - **`OutboxRetentionCleaner`** (FARELO-061): resolve uma lacuna
   operacional deixada pelo FARELO-060 — `OutboxWorker` marca eventos como
   `PROCESSED`, mas nunca os remove, então `outbox_event` cresceria sem
@@ -680,7 +781,22 @@ momento)."
   `@TestPropertySource`, tornando essa corrida impossível em vez de só
   improvável — os demais testes do worker continuam no default de 5s.
 
-**Direção de dependência**: domínios de negócio (ex: `ordering`) dependem
-de `outbox` para publicar eventos; `outbox` nunca depende de volta para um
-pacote de domínio — o formato de cada payload (ex: `OrderCreatedEvent`)
-vive no domínio que o produz, não aqui.
+**Direção de dependência (publicação)**: domínios de negócio (ex:
+`ordering`) dependem de `outbox` para publicar eventos — o formato de cada
+payload (ex: `OrderCreatedEvent`) vive no domínio que o produz, não aqui.
+Isso continua valendo sem exceção: `OutboxEvent`/`OutboxPublisher` não
+sabem nada sobre `printing`, `ordering` ou qualquer outro domínio, só como
+guardar/publicar `(aggregateType, aggregateId, eventType, payload)`
+opacos.
+
+**Direção de dependência (dispatch), revisada no FARELO-072**: do lado do
+consumo, isso não vale mais sem exceção. `OutboxWorker` agora depende de
+`com.farelo.api.printing.PrintJobService` para de fato fazer algo com um
+evento `OrderCreated` (criar um `PrintJob`) — ver a entrada do
+`OutboxWorker` acima para a justificativa completa e o `package-info.java`
+de `outbox` para o texto formal. Despachar um evento para trabalho real
+exige chamar o domínio que faz esse trabalho; com exatamente um consumidor
+real hoje, não há uma segunda instância para desenhar uma abstração
+genérica contra sem adivinhar. Revisitar com um registro de handlers
+quando um segundo consumidor real aparecer (`inventory`, `notification` —
+epics futuros).
