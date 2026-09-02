@@ -34,6 +34,26 @@ const LF = 0x0a;
 /** ESC @ — reseta a impressora para o estado inicial (limpa buffer/formatação residual). */
 const INIT = Buffer.from([ESC, 0x40]);
 
+/**
+ * ESC t n — seleciona a tabela de código (code page) usada pra interpretar
+ * os bytes de texto acima de 0x7F. `n = 16` é o índice mais comumente usado
+ * em impressoras Epson/compatíveis (a esmagadora maioria dos modelos
+ * térmicos de rede vendidos no Brasil, incluindo clones) pra "WPC1252"
+ * (Windows-1252) — que é idêntico a ISO-8859-1/Latin-1 em toda a faixa de
+ * caracteres acentuados do português (á, ã, â, à, é, ê, í, ó, ô, õ, ú, ç e
+ * variantes maiúsculas), daí `textLine` codificar como `"latin1"` abaixo
+ * (mapeamento 1:1 de code point pra byte, sem a corrupção silenciosa que
+ * `"ascii"` causava — ver histórico do arquivo).
+ *
+ * **Ressalva importante**: o índice exato da tabela WPC1252 varia entre
+ * fabricantes/firmwares (não é universal como ESC @ ou GS V) — `16` é o
+ * valor documentado no datasheet da família Epson TM-T e replicado pela
+ * maioria dos clones, mas isso não foi validado contra uma impressora
+ * física de verdade (nenhuma disponível neste ambiente — ver README.md).
+ * Se o hardware real usar uma tabela diferente, ajustar só esta constante.
+ */
+const SELECT_CODEPAGE_WPC1252 = Buffer.from([ESC, 0x74, 16]);
+
 /** ESC a n — alinhamento: 0 = esquerda, 1 = centro. */
 const ALIGN_LEFT = Buffer.from([ESC, 0x61, 0x00]);
 const ALIGN_CENTER = Buffer.from([ESC, 0x61, 0x01]);
@@ -57,9 +77,18 @@ const CUT = Buffer.from([GS, 0x56, 0x00]);
 
 const SEPARATOR = "-".repeat(32);
 
-/** Converte uma linha de texto (ASCII) + quebra de linha (LF) para bytes. */
+/**
+ * Converte uma linha de texto + quebra de linha (LF) para bytes, usando
+ * `"latin1"` (mapeamento 1:1 de code point Unicode 0-255 pra um único
+ * byte — cobre toda a faixa de acentuação do português) em vez de
+ * `"ascii"`: `Buffer.from(text, "ascii")` mascara cada code point pros 7
+ * bits baixos, então `"é"` (U+00E9) virava `0x69` ('i') em vez de rejeitar
+ * ou preservar o caractere — corrupção silenciosa, não uma limitação
+ * documentada. Ver `SELECT_CODEPAGE_WPC1252` acima pra por que os bytes
+ * latin1 batem com a tabela de código selecionada na impressora.
+ */
 function textLine(text: string): Buffer {
-  return Buffer.concat([Buffer.from(text, "ascii"), Buffer.from([LF])]);
+  return Buffer.concat([Buffer.from(text, "latin1"), Buffer.from([LF])]);
 }
 
 function stationLine(productionStation: string | null): string {
@@ -84,6 +113,7 @@ function stationLine(productionStation: string | null): string {
 export function buildEscPosTicket(content: PrintJobContent): Buffer {
   const parts: Buffer[] = [
     INIT,
+    SELECT_CODEPAGE_WPC1252,
     ALIGN_CENTER,
     PRINT_MODE_COMMAND_HIGHLIGHT,
     textLine(`COMANDA ${content.commandNumber}`),

@@ -115,17 +115,43 @@ describe("buildEscPosTicket", () => {
         { productName: "Pao de Queijo", quantity: 5 },
       ],
     };
-    // Deliberadamente sem acentuação neste fixture — ver limitação
-    // documentada no README (encode ASCII trunca/distorce caracteres fora
-    // da faixa ASCII, ex: "ã" vira outro caractere via truncamento dos 7
-    // bits baixos, não é removido nem preservado). Não é escopo deste
-    // ticket resolver codepage; aqui só se prova ordem/quantidade/nome
-    // corretos para nomes que já são ASCII puro.
     const text = buildEscPosTicket(content).toString("ascii");
 
     assert.match(text, /COMANDA 42/);
     assert.match(text, /Estacao: KITCHEN/);
     assert.match(text, /3x Croissant/);
     assert.match(text, /5x Pao de Queijo/);
+  });
+
+  it("seleciona a tabela de código WPC1252 (ESC t 16) logo após a inicialização", () => {
+    const ticket = buildEscPosTicket(baseContent);
+    assert.deepEqual(ticket.subarray(2, 5), Buffer.from([0x1b, 0x74, 16]));
+  });
+
+  it("preserva caracteres acentuados do português como bytes latin1, não os corrompe (ver textLine)", () => {
+    const content: PrintJobContent = {
+      commandNumber: 7,
+      productionStation: "Salão",
+      items: [
+        { productName: "Café com Açaí", quantity: 1 },
+        { productName: "Pão de Queijo", quantity: 2 },
+      ],
+    };
+    const ticket = buildEscPosTicket(content);
+    // Decodifica como latin1 (o mesmo encoding usado por textLine) — não
+    // "ascii", que é exatamente o encoding errado que causava a corrupção.
+    const text = ticket.toString("latin1");
+
+    assert.match(text, /Estacao: Salão/);
+    assert.match(text, /1x Café com Açaí/);
+    assert.match(text, /2x Pão de Queijo/);
+
+    // E confirma que os bytes acentuados batem exatamente com o mapeamento
+    // Latin-1/WPC1252 de cada caractere (não um valor arbitrário).
+    const cafeBytes = Buffer.from("Café", "latin1");
+    assert.ok(
+      ticket.includes(cafeBytes),
+      "bytes latin1 de 'Café' não encontrados no ticket",
+    );
   });
 });

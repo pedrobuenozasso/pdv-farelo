@@ -198,18 +198,23 @@ Comandos ESC/POS usados (todos padrão, família ESC/GS — ver
 | Comando   | Bytes                 | Efeito                                              |
 | --------- | --------------------- | --------------------------------------------------- |
 | `ESC @`   | `1B 40`               | Inicializa a impressora (limpa estado residual)     |
+| `ESC t n` | `1B 74 10`            | Seleciona a tabela de código WPC1252 (n=16)         |
 | `ESC a n` | `1B 61 00`/`1B 61 01` | Alinhamento esquerda (`00`) / centro (`01`)         |
 | `ESC ! n` | `1B 21 38`/`1B 21 00` | Negrito + fonte dobrada (`38`) / modo normal (`00`) |
 | `GS V m`  | `1D 56 00`            | Corte total de papel                                |
 
-**Limitação conhecida — codificação de texto**: o texto do ticket é
-codificado como ASCII puro (`Buffer.from(text, "ascii")`). Nomes de
-produto/estação com acentuação (ex: "Pão", "Café") não são impressos
-corretamente — o encode ASCII do Node trunca/distorce caracteres fora da
-faixa ASCII (não os remove nem os transliteram de forma legível). Suportar a
-codepage correta (ex: CP850/CP860, comum em impressoras térmicas para
-português) é responsabilidade de um ticket futuro, fora do escopo aqui — não
-antecipado por YAGNI (nenhum caso de uso real testado contra hardware ainda).
+**Acentuação (revisão pós-implementação)**: o texto do ticket é codificado
+como `latin1` (`Buffer.from(text, "latin1")`) — mapeamento 1:1 de code point
+Unicode 0-255 pra um único byte, que cobre toda a faixa de acentuação do
+português (á, ã, â, à, é, ê, í, ó, ô, õ, ú, ç). O ticket também seleciona a
+tabela de código `WPC1252` na impressora (`ESC t 16`) antes de imprimir
+qualquer texto — `WPC1252` é idêntico a Latin-1 na faixa de caracteres
+acentuados, e `16` é o índice documentado no datasheet da família Epson
+TM-T, replicado pela maioria dos clones vendidos no Brasil. **Ressalva**: o
+índice exato da tabela de código varia por fabricante/firmware — `16` não
+foi validado contra uma impressora física de verdade (nenhuma disponível
+neste ambiente, ver seção abaixo); se o hardware real usar uma tabela
+diferente, o ajuste é a constante `SELECT_CODEPAGE_WPC1252` em `escpos.ts`.
 
 ## Limitação deste ambiente — sem impressora física
 
