@@ -312,7 +312,50 @@ recebe corpo algum.
   `COMMAND_NOT_AVAILABLE` é o `code` de exemplo usado na seção "Convenções
   previstas" deste documento para o formato de erro padrão.
 
-Ainda não há endpoints para as demais transições de status da comanda
-(pagamento, fechamento, bloqueio) — escopo de tickets futuros.
+### `POST /api/v1/commands/{number}/close`
+
+Fecha uma comanda: transição de status `OPEN`/`PAYMENT_REQUESTED` →
+`CLOSED`. (FARELO-034)
+
+**Sem validação de pagamento/fiscal ainda** — por enquanto é só a
+transição de estado; validar que o total foi pago antes de fechar é o
+FARELO-143 (Epic 10).
+
+Mesma razão para `POST` em vez de `PATCH` do `open` acima.
+
+**Estados de origem válidos**: `OPEN` e `PAYMENT_REQUESTED` — ambos fazem
+sentido operacionalmente (a comanda pode ser fechada direto ou depois de
+pedir o pagamento). `AVAILABLE`, `CLOSED` e `BLOCKED` são inválidos como
+origem.
+
+**Response — `200 OK`**
+
+`CommandResponse` atualizado, com `status: "CLOSED"`.
+
+**Erros**
+
+- `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
+  `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
+- `409 Conflict` — a comanda existe mas não está em um estado fechável
+  (`AVAILABLE`, já `CLOSED`, ou `BLOCKED`):
+
+  ```json
+  {
+    "code": "COMMAND_CANNOT_BE_CLOSED",
+    "message": "Command 6 cannot be closed (current status: AVAILABLE, expected OPEN or PAYMENT_REQUESTED)",
+    "correlationId": "..."
+  }
+  ```
+
+  Usa um `code`/exceção próprios (`COMMAND_CANNOT_BE_CLOSED`), em vez de
+  reaproveitar `COMMAND_NOT_AVAILABLE` do `open` — a mensagem "not
+  available" só faz sentido quando `AVAILABLE` é o único estado de origem
+  válido (caso do `open`); reaproveitá-la aqui soaria invertido no caso
+  mais comum de erro (uma comanda ainda `AVAILABLE`, nunca aberta, *está*
+  disponível — é exatamente por isso que não pode ser fechada).
+
+Ainda não há endpoint para transição a `PAYMENT_REQUESTED` nem para
+`BLOCKED` — escopo de tickets futuros. Isso fecha o Epic 2 (Comandas) do
+lado do backend por enquanto.
 
 _(demais endpoints a preencher conforme implementados)_
