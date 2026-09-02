@@ -1,4 +1,4 @@
--- V13__add_product_production_station_column.sql
+-- V14__add_product_production_station_column.sql
 -- Catalog domain (FARELO-073): which physical station (BAR/KITCHEN)
 -- prepares a product — used to route printed tickets per station once
 -- FARELO-074 splits PrintJobs by it (prompt mestre seção 12).
