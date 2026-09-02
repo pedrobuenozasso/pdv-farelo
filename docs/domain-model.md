@@ -488,10 +488,10 @@ Pacote: `com.farelo.api.printing`.
   Spring Data) só para permitir que os testes confirmem qual `PrintJob`
   foi criado para um pedido.
 
-  **Decisão — nenhum split por estação ainda**: um `PrintJob` por pedido,
-  não um por `productionStation` — isso é FARELO-074, ticket seguinte,
-  fora de escopo aqui (`Product.productionStation`, FARELO-073, ainda não
-  é lido por nada em `printing`).
+  **Decisão — nenhum split por estação ainda** (revisado no FARELO-074,
+  ver entrada dedicada logo abaixo): neste ticket, um `PrintJob` por
+  pedido, não um por `productionStation` — `Product.productionStation`
+  (FARELO-073) ainda não era lido por nada em `printing`.
 
   Teste de integração: `OutboxWorkerPrintJobIntegrationTests` (pacote
   `outbox`, mesmo padrão de `OutboxWorkerIntegrationTests`) cria um pedido
@@ -506,6 +506,112 @@ Pacote: `com.farelo.api.printing`.
   fragilidade estrutural da suíte — corrigida na raiz em
   `AbstractIntegrationTest`, não aqui: ver a seção "Idempotência sob
   workers concorrentes" abaixo.
+
+- **Separar `PrintJob`s por estação** (FARELO-074): fecha a lacuna deixada
+  pelo FARELO-072 — `PrintJobService.createForOrder(...)` agora cria **um
+  `PrintJob` por `productionStation` presente no pedido**, não mais um por
+  pedido inteiro com todos os itens misturados. Implementa literalmente o
+  exemplo do prompt mestre (seção 12): um pedido com 2 Cappuccino + 1
+  Coca-Cola (`BAR`) + 1 Croissant (`KITCHEN`) gera dois `PrintJob`s — um
+  `BAR` com os dois primeiros itens, um `KITCHEN` com o Croissant.
+
+  **Agrupamento**: os `OrderItem`s já buscados (mesma query `JOIN FETCH
+  product` do FARELO-072, `OrderItemRepository#findByOrder`) são agrupados
+  por `item.getProduct().getProductionStation()` num `Map<ProductionStation,
+  List<OrderItem>>` — **não** via `Collectors.groupingBy`, mas com um loop
+  simples e `Map#computeIfAbsent` (`LinkedHashMap`, só por ordem
+  determinística de iteração — sem significado de negócio). Motivo
+  descoberto durante a implementação, não hipotético: o classificador de
+  `Collectors.groupingBy` faz `Objects.requireNonNull(...)` internamente
+  desde o Java 9 e lança `NullPointerException` ("element cannot be mapped
+  to a null key") quando a função de classificação devolve `null` — exatamente
+  o caso de um item cujo produto não tem `productionStation` atribuído (ver
+  decisão abaixo). Um `HashMap`/`LinkedHashMap` comum não tem essa restrição:
+  `computeIfAbsent(null, ...)` funciona como qualquer outra chave. Um
+  `PrintJob` é criado por grupo não vazio; um pedido cujos itens
+  pertencem todos à mesma estação (ou todos sem estação) continua gerando
+  exatamente 1 `PrintJob` — o agrupamento simplesmente colapsa para uma
+  única entrada, sem regressão silenciosa do caso comum.
+
+  **Itens sem estação atribuída** (`productionStation == null` no
+  produto, ver nota em `catalog`/FARELO-073): **não são descartados da
+  impressão**. Eles são agrupados na própria chave `null` do `Map`, e esse
+  grupo também vira um `PrintJob` de verdade — com
+  `PrintJobContent.productionStation` explicitamente `null`. Duas
+  alternativas descartadas: (a) simplesmente ignorar/pular esses itens —
+  rejeitada porque a equipe perderia rastro físico do que precisa ser
+  preparado, só um aviso verbal (frágil, exatamente o tipo de coisa que um
+  ticket impresso existe para evitar); (b) fabricar uma estação default
+  (ex: sempre `KITCHEN`) — rejeitada pela mesma razão que
+  `Product.productionStation` já rejeitou um default ao ser criado
+  (FARELO-073): um default errado desviaria silenciosamente um ticket sem
+  ninguém ter escolhido isso. A escolha feita — grupo próprio, sinalizado
+  explicitamente como "sem estação" no `content` — garante que o pedido
+  seja impresso (nada é perdido) e que quem lê o ticket (hoje, um humano
+  olhando o JSON/futuramente o Edge Agent formatando o papel) perceba
+  claramente que aquele item não tem estação definida, em vez de aparecer
+  misturado sem explicação num dos outros tickets.
+
+  **`PrintJobContent` ganhou o campo `productionStation`**
+  (`ProductionStation`, nullable, mesmo enum de `Product`): antes só
+  `commandNumber` + `items`. Cada `PrintJobContent` agora nomeia
+  explicitamente a estação daquele grupo, para que um consumidor futuro
+  (Edge Agent, FARELO-076+) saiba qual ticket é de qual estação **sem
+  precisar inferir a partir dos itens** — inferir colocaria conhecimento de
+  negócio (quais produtos pertencem a qual estação) de volta na
+  infraestrutura do dispositivo, o que o prompt mestre (seção 11) diz
+  explicitamente que o Edge Agent nunca deve ter. Como nenhuma configuração
+  de `ObjectMapper` no projeto suprime campos nulos na serialização, o
+  grupo "sem estação" serializa como `"productionStation":null` — presença
+  explícita do campo no JSON, não uma chave ausente que um leitor futuro
+  poderia confundir com "campo que ainda não existia". A formatação do
+  ticket físico em si (ex: um cabeçalho de alerta) continua fora de escopo
+  aqui — trabalho do Edge Agent.
+
+  **`createForOrder` passou a retornar `List<PrintJob>`** (antes,
+  `PrintJob` único) — reflete que agora pode criar mais de um job por
+  chamada. Único chamador, `OutboxWorker.dispatch(...)`, já descartava o
+  valor de retorno, então não precisou de nenhuma alteração.
+
+  **Sem migration nova**: `productionStation` em `PrintJobContent` vive só
+  dentro do JSON de `PrintJob.content` (coluna `jsonb` já existente desde
+  o FARELO-071) — nenhuma coluna nova na tabela `print_job`.
+
+  **Escopo**: só a lógica de agrupamento/criação dentro de
+  `PrintJobService`/`PrintJobContent`. `OutboxWorker` não foi alterado — a
+  chamada a `printJobService.createForOrder(...)` continua idêntica, só o
+  que acontece dentro do método mudou.
+
+  **Teste**: `PrintJobServiceIntegrationTests` (pacote `printing`, novo
+  arquivo) — deliberadamente chama `PrintJobService.createForOrder(...)`
+  diretamente, sem passar por `OutboxWorker#processPendingEvents()` como
+  `OutboxWorkerPrintJobIntegrationTests` faz. O escopo deste ticket é
+  estritamente a lógica de agrupamento dentro de `PrintJobService`; o
+  mecanismo de dispatch/rollback do outbox já está coberto naquele outro
+  arquivo e não muda aqui — passar pela camada de outbox de novo só
+  adicionaria indireção sem exercitar nada novo. Cobre os três cenários
+  pedidos: pedido só com itens de uma estação (continua gerando exatamente
+  1 `PrintJob`), pedido com itens de estações diferentes (replica o
+  exemplo do prompt mestre — 2 Cappuccino + 1 Coca-Cola no `BAR`, 1
+  Croissant na `KITCHEN`, cada `PrintJob` só com os itens certos), e
+  pedido com item sem estação atribuída (gera o grupo "sem estação",
+  confirmando `productionStation` explicitamente `null` no JSON via
+  `JsonNode#isNull()`/`has(...)`, não só ausência de assert).
+
+  **Nota de manutenção de teste**: como `PrintJobServiceIntegrationTests`
+  chama `PrintJobService` diretamente (não `OutboxWorker`), o evento de
+  outbox `OrderCreated` publicado por `OrderService.create(...)` nunca é
+  drenado organicamente nesses testes — o `@AfterEach` chama
+  `outboxWorker.processPendingEvents()` explicitamente antes de apagar o
+  pedido, para não deixar um `OutboxEvent` `PENDING` órfão (apontando para
+  um pedido já deletado) que quebraria um teste não relacionado assim que
+  a suíte inteira drenasse a fila real mais tarde
+  (`OrderNotFoundException`). Isso cria um segundo conjunto de `PrintJob`s
+  via `OutboxWorker`/`PrintJobService` chamado de novo — inofensivo, já
+  limpo pelo mesmo `printJobRepository.findByOrder(order).forEach(...)`
+  que já existia. Usa o número de comanda semeado 19 — distinto de todos
+  os já reservados por outros testes (1-18, 101, 999; ver javadoc da
+  própria classe para a lista completa).
 
 ## Outbox (infraestrutura cross-cutting)
 
