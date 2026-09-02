@@ -1,5 +1,6 @@
 package com.farelo.api.outbox;
 
+import com.farelo.api.printing.PrintJobService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,13 +14,59 @@ import java.util.List;
  * Polls {@code outbox_event} for {@code PENDING} rows and drains them
  * (FARELO-060 — see {@code com.farelo.api.outbox}'s package-info).
  *
- * <p><strong>Stub, by design.</strong> There is no real consumer yet:
- * printing, notification and inventory — the eventual readers of these
- * events — are future epics that haven't started. This method only logs
- * each pending event and marks it {@code PROCESSED}, which is enough to
- * prove the publish → poll → drain mechanism end to end (see {@code
- * OrderService#create}'s {@code OrderCreated} event for a real producer)
- * without inventing a dispatch mechanism nobody needs yet.
+ * <p><strong>First real consumer (FARELO-072).</strong> An {@code
+ * OrderCreated} event now results in a {@link PrintJobService#createForOrder
+ * PrintJob being created} for that order — the {@code Order criado →
+ * PrintJob PENDING → Farelo Edge Agent → impressora → PRINTED} flow from
+ * the prompt mestre (seção 10) starts here. Every other event type is
+ * still a no-op (see {@link #dispatch(OutboxEvent)}): notification and
+ * inventory, the other eventual readers of outbox events, are future
+ * epics that haven't started.
+ *
+ * <h2>Dispatch mechanism</h2>
+ *
+ * {@link #dispatch(OutboxEvent)} is a plain {@code if} on {@code
+ * event.getEventType()}, not a pluggable handler registry (e.g. a {@code
+ * Map<String, OutboxEventHandler>} looked up by event type). That's a
+ * deliberate YAGNI call, not an oversight: with exactly one event type
+ * ({@code OrderCreated}) and one consumer (printing), a registry would be
+ * an abstraction with a single entry — there's no second case yet to prove
+ * the right shape against (would it dispatch to one handler per event
+ * type, or let several subscribe to the same type? synchronously or
+ * queued? how do partial failures across handlers behave?). Answering
+ * those questions now means guessing. <strong>This should become a real
+ * registered-handler mechanism once a second event type or consumer shows
+ * up</strong> (e.g. inventory reacting to {@code OrderCreated} too, or a
+ * new event type entirely for notifications — both future epics) — at that
+ * point there are two real cases to design the abstraction against instead
+ * of one imagined one.
+ *
+ * <h2>Failure handling (FARELO-072)</h2>
+ *
+ * {@link #dispatch(OutboxEvent)} runs inside this method's
+ * {@code @Transactional} boundary, before the dispatched event is marked
+ * {@code PROCESSED}. If it throws (e.g. {@code PrintJobService} can't find
+ * the order — not expected in practice, since the order was written in the
+ * same transaction that published the event, but not guarded against
+ * beyond this), the exception propagates out of {@link
+ * #processPendingEvents()} and the whole method's transaction rolls back —
+ * <strong>every</strong> event in the current batch, not just the one that
+ * failed, reverts to {@code PENDING} (nothing in it was ever committed as
+ * {@code PROCESSED}). Locks taken by {@code FOR UPDATE} are released with
+ * the rollback, so the next poll cycle (or another instance, per the
+ * concurrency note below) picks the whole batch back up and retries it
+ * unchanged.
+ *
+ * <p>This is a known, deliberate limitation, not a bug being hidden: a
+ * genuinely broken event sitting first in a batch would make every poll
+ * cycle re-attempt (and re-fail on) that same event before ever reaching
+ * the healthy ones behind it in that batch, effectively stalling the
+ * queue. Isolating one failing event from the rest of its batch (e.g.
+ * catching per-event, marking a failed event some other way so it stops
+ * blocking its neighbors, with real retry/backoff) is a sophisticated
+ * mechanism this ticket deliberately does not build — that's FARELO-079
+ * ("Criar retry de impressão"), scoped for when a real failure mode
+ * (printer down, etc) actually needs it.
  *
  * <p><strong>Safe under concurrent worker instances (FARELO-063).</strong>
  * Today only one instance of this application runs, so this method never
@@ -59,27 +106,27 @@ import java.util.List;
  * trigger firing mid-test and racing the explicit call over the same rows
  * — see {@code OutboxWorkerBatchSizeIntegrationTests}, which needs an
  * exact count of what one direct call processed.
- *
- * <p><strong>Future extension point</strong>: when a real consumer shows
- * up, it plugs in around the loop below — most likely a handler registered
- * per {@code event_type} and dispatched from here instead of today's
- * log-and-mark-processed body. That dispatch shape is deliberately
- * <em>not</em> decided or built now (YAGNI) — there's only one "consumer"
- * (this stub) to design it against, which isn't enough information to get
- * it right.
  */
 @Component
 public class OutboxWorker {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxWorker.class);
 
+    // The only event type with a real consumer today — see class javadoc,
+    // "Dispatch mechanism", for why this is a plain if-check rather than a
+    // registered-handler lookup.
+    private static final String ORDER_CREATED_EVENT_TYPE = "OrderCreated";
+
     private final OutboxEventRepository outboxEventRepository;
+    private final PrintJobService printJobService;
     private final int batchSize;
 
     public OutboxWorker(
             OutboxEventRepository outboxEventRepository,
+            PrintJobService printJobService,
             @Value("${outbox.worker.batch-size:100}") int batchSize) {
         this.outboxEventRepository = outboxEventRepository;
+        this.printJobService = printJobService;
         this.batchSize = batchSize;
     }
 
@@ -96,7 +143,12 @@ public class OutboxWorker {
                 OutboxEventStatus.PENDING.name(), batchSize);
 
         for (OutboxEvent event : pending) {
-            log.info("Outbox event {} processed: {} on {} {} (stub — no real consumer yet, see class javadoc)",
+            // See class javadoc, "Failure handling": a dispatch failure
+            // here is deliberately left to propagate and roll back this
+            // whole method's transaction, rather than being caught and
+            // isolated per event.
+            dispatch(event);
+            log.info("Outbox event {} processed: {} on {} {}",
                     event.getId(), event.getEventType(), event.getAggregateType(), event.getAggregateId());
             event.markProcessed();
         }
@@ -106,6 +158,16 @@ public class OutboxWorker {
         }
 
         return pending;
+    }
+
+    // See class javadoc, "Dispatch mechanism", for why this is a plain
+    // if-check instead of a registered-handler lookup. Any event type
+    // other than OrderCreated is a no-op today — there is nothing else to
+    // dispatch to yet.
+    private void dispatch(OutboxEvent event) {
+        if (ORDER_CREATED_EVENT_TYPE.equals(event.getEventType())) {
+            printJobService.createForOrder(event.getAggregateId());
+        }
     }
 
 }
