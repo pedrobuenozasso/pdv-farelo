@@ -38,13 +38,15 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Integration test for {@code GET /api/v1/print-jobs} (FARELO-076), against
- * a real PostgreSQL instance (Testcontainers) — first REST endpoint of the
- * {@code printing} domain.
+ * Integration test for {@code GET /api/v1/print-jobs} (FARELO-076) and for
+ * {@code POST /api/v1/print-jobs/{id}/printed}/{@code /failed} (FARELO-077),
+ * against a real PostgreSQL instance (Testcontainers) — the {@code printing}
+ * domain's REST endpoints.
  *
  * <p>Unlike the kitchen queue tests in {@code OrderControllerIntegrationTests}
  * (which scope assertions to their own order ids because {@code orders} is a
@@ -241,10 +243,11 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(jobs.get(0).status()).isEqualTo(PrintJobStatus.PENDING);
     }
 
-    // No endpoint transitions a PrintJob's status yet (that's FARELO-077+)
-    // — reaches into the repository directly, same "test setup via
-    // repository" pattern already used elsewhere (e.g.
-    // OrderControllerIntegrationTests#setOrderStatus).
+    // Used to seed PRINTED/FAILED jobs directly for tests that don't care
+    // how they got there (e.g. the listing-exclusion test above) — reaches
+    // into the repository directly rather than going through the FARELO-077
+    // endpoints under test below, same "test setup via repository" pattern
+    // already used elsewhere (e.g. OrderControllerIntegrationTests#setOrderStatus).
     private void markStatus(Order order, PrintJobStatus status) {
         PrintJob job = printJobRepository.findByOrder(order).get(0);
         if (status == PrintJobStatus.PRINTED) {
@@ -255,6 +258,94 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
             throw new IllegalArgumentException("Unsupported status for test setup: " + status);
         }
         printJobRepository.save(job);
+    }
+
+    // --- POST /api/v1/print-jobs/{id}/printed, POST .../failed (FARELO-077) ---
+
+    @Test
+    void marksPendingPrintJobAsPrinted() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", printJobId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(printJobId.toString()))
+                .andExpect(jsonPath("$.status").value("PRINTED"));
+
+        PrintJob job = printJobRepository.findById(printJobId).orElseThrow();
+        assertThat(job.getStatus()).isEqualTo(PrintJobStatus.PRINTED);
+    }
+
+    @Test
+    void marksPendingPrintJobAsFailed() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", printJobId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(printJobId.toString()))
+                .andExpect(jsonPath("$.status").value("FAILED"));
+
+        PrintJob job = printJobRepository.findById(printJobId).orElseThrow();
+        assertThat(job.getStatus()).isEqualTo(PrintJobStatus.FAILED);
+    }
+
+    @Test
+    void returnsConflictWhenMarkingAnAlreadyPrintedJobAsPrintedAgain() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+        markStatus(order, PrintJobStatus.PRINTED);
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", printJobId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PRINT_JOB_INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsConflictWhenMarkingAnAlreadyFailedJobAsPrinted() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+        markStatus(order, PrintJobStatus.FAILED);
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", printJobId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PRINT_JOB_INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsConflictWhenMarkingAnAlreadyPrintedJobAsFailed() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+        markStatus(order, PrintJobStatus.PRINTED);
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", printJobId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PRINT_JOB_INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsNotFoundWhenMarkingUnknownPrintJobAsPrinted() throws Exception {
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PRINT_JOB_NOT_FOUND"));
+    }
+
+    @Test
+    void returnsNotFoundWhenMarkingUnknownPrintJobAsFailed() throws Exception {
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PRINT_JOB_NOT_FOUND"));
     }
 
 }

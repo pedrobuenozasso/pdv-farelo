@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Builds and persists the {@link PrintJob}s for a given {@link Order}
@@ -168,6 +169,70 @@ public class PrintJobService {
     @Transactional(readOnly = true)
     public List<PrintJob> listPending() {
         return printJobRepository.findByStatusOrderByCreatedAtAsc(PrintJobStatus.PENDING);
+    }
+
+    // Used by markPrinted/markFailed below, and by their shared transition
+    // helper. Same JOIN FETCH reasoning as OrderService#getById — the order
+    // association must be eagerly loaded here, since PrintJobResponse reads
+    // job.getOrder().getId() in the controller, after this read's own
+    // transaction has already closed.
+    public PrintJob getById(UUID id) {
+        return printJobRepository.findByIdWithOrder(id)
+                .orElseThrow(() -> new PrintJobNotFoundException(id));
+    }
+
+    /**
+     * Marks a job successfully printed by the Edge Agent (FARELO-077):
+     * {@code PENDING} → {@code PRINTED}. Reports the outcome of {@code POST
+     * /api/v1/print-jobs/{id}/printed}.
+     *
+     * @throws PrintJobNotFoundException if no job exists for {@code id}.
+     * @throws PrintJobInvalidTransitionException if the job's current
+     *         status isn't {@code PENDING} — in particular, printing an
+     *         already-{@code PRINTED} or already-{@code FAILED} job again
+     *         is rejected rather than silently accepted.
+     */
+    @Transactional
+    public PrintJob markPrinted(UUID id) {
+        return transition(id, PrintJobStatus.PRINTED, PrintJob::markPrinted);
+    }
+
+    /**
+     * Marks a job failed to print (e.g. the Edge Agent reported a printer
+     * error, FARELO-077): {@code PENDING} → {@code FAILED}. Reports the
+     * outcome of {@code POST /api/v1/print-jobs/{id}/failed}. No structured
+     * failure reason is accepted — YAGNI, nothing consumes it yet; see
+     * docs/domain-model.md, seção {@code printing}, for the full rationale.
+     *
+     * @throws PrintJobNotFoundException if no job exists for {@code id}.
+     * @throws PrintJobInvalidTransitionException if the job's current
+     *         status isn't {@code PENDING}, same as {@link
+     *         #markPrinted(UUID)}.
+     */
+    @Transactional
+    public PrintJob markFailed(UUID id) {
+        return transition(id, PrintJobStatus.FAILED, PrintJob::markFailed);
+    }
+
+    // Shared by markPrinted/markFailed above: fetch, validate the job's
+    // current status is PENDING (the only valid origin for either
+    // transition — unlike OrderService#transition, no Set overload is
+    // needed here since both callers require the exact same single origin
+    // status), apply the entity mutation, save. The entity methods
+    // (PrintJob#markPrinted/markFailed, FARELO-071) still do no validation
+    // themselves — that responsibility lives here, same service/entity
+    // split already established by OrderService#transition vs. Order's
+    // plain setStatus.
+    private PrintJob transition(UUID id, PrintJobStatus targetStatus, Consumer<PrintJob> mutator) {
+        PrintJob job = getById(id);
+        PrintJobStatus currentStatus = job.getStatus();
+
+        if (currentStatus != PrintJobStatus.PENDING) {
+            throw new PrintJobInvalidTransitionException(id, currentStatus, targetStatus);
+        }
+
+        mutator.accept(job);
+        return printJobRepository.save(job);
     }
 
     private String serialize(PrintJobContent content, UUID orderId) {

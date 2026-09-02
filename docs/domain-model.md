@@ -676,6 +676,78 @@ Pacote: `com.farelo.api.printing`.
   semeado 20 — o próximo livre após todos os já reservados (1-19, 101,
   999).
 
+- **`POST /api/v1/print-jobs/{id}/printed` e `POST /api/v1/print-jobs/{id}/failed`**
+  (FARELO-077): fecha o ciclo aberto pelo FARELO-076 — o Edge Agent
+  consultava `GET /api/v1/print-jobs`, mas nunca reportava de volta o
+  resultado, então todo `PrintJob` ficava `PENDING` para sempre. Estes dois
+  endpoints deixam o Edge Agent dizer "imprimi este" (`PENDING` →
+  `PRINTED`) ou "falhei ao imprimir este" (`PENDING` → `FAILED`). Ver
+  `docs/api.md` para os dois endpoints completos, incluindo exemplos de
+  request/response.
+
+  **`PrintJobService.markPrinted(UUID)`/`markFailed(UUID)`**: novos
+  métodos, reaproveitando `PrintJob.markPrinted()`/`markFailed()` — que já
+  existiam desde o FARELO-071, mas sem nenhuma validação de estado (não
+  havia chamador real ainda para escrever um teste contra). A validação de
+  transição entra aqui, no `Service`, não na entidade — mesma divisão de
+  responsabilidade já estabelecida por `OrderService#transition` vs.
+  `Order#setStatus` (`ordering`): a entidade continua um mutador burro
+  (`this.status = ...`, sem checagem), e o `Service` é quem decide se a
+  transição é válida antes de chamá-la. Ambos os métodos compartilham um
+  helper privado `transition(id, targetStatus, mutator)` — mais simples que
+  o par de overloads de `OrderService#transition` (`OrderStatus`/`Set
+  <OrderStatus>`), porque aqui as duas transições têm exatamente a mesma
+  origem válida (`PENDING`), sem o caso de múltiplos estados de origem que
+  motivou o overload com `Set` em `ordering` (`markAsCancelled`).
+
+  **Estado de origem válido**: só `PENDING`, para as duas transições —
+  marcar um job já `PRINTED` ou já `FAILED` de novo (com qualquer um dos
+  dois endpoints) é rejeitado como qualquer outra transição inválida
+  (`PrintJobInvalidTransitionException`/`PRINT_JOB_INVALID_TRANSITION`),
+  não aceito silenciosamente. Nenhuma transição de volta `FAILED` →
+  `PENDING` (retry) — mesma nota já registrada em `PrintJobStatus` desde o
+  FARELO-071: o mecanismo real de retry ainda não foi desenhado
+  (FARELO-079).
+
+  **`PrintJobNotFoundException`/`PrintJobInvalidTransitionException`**
+  (pacote `printing`): espelham `OrderNotFoundException`/
+  `OrderInvalidTransitionException` (`ordering`) — mesmo formato de
+  mensagem, mesma decisão de uma única exceção reutilizada pelas duas
+  transições (a mensagem já nomeia tanto o status atual quanto o alvo
+  tentado, então não há ambiguidade a evitar separando por endpoint).
+  Registradas em `ApiExceptionHandler` como `404`/`PRINT_JOB_NOT_FOUND` e
+  `409`/`PRINT_JOB_INVALID_TRANSITION`, mesmo padrão dos pares já
+  existentes de `ordering`/`command`.
+
+  **`PrintJobRepository.findByIdWithOrder(UUID)`**: nova query derivada
+  com `JOIN FETCH p.order` — mesma razão de `findByStatusOrderByCreatedAtAsc`
+  (FARELO-076) e de `OrderRepository#findByIdWithCommand`: `PrintJobResponse`
+  lê `job.getOrder().getId()` no controller, depois que a transação (curta)
+  do service já fechou; sem o fetch antecipado, `order` ficaria um proxy
+  lazy não inicializado nesse ponto (`LazyInitializationException`).
+
+  **Sem corpo de requisição em `/failed`**: nenhum motivo estruturado da
+  falha é aceito — YAGNI, sem nenhum consumidor para esse dado ainda (ex:
+  um painel mostrando por que uma impressora falhou); se um caso de uso
+  real precisar disso no futuro, é escopo de um ticket próprio, não
+  antecipado aqui.
+
+  **Sem migration nova**: a coluna `print_job.status` e seu `CHECK
+  (status IN ('PENDING', 'PRINTED', 'FAILED'))` já suportam os três
+  valores desde `V15__create_print_job_table.sql` (FARELO-071) — este
+  ticket só adiciona validação de transição na camada de aplicação, nenhuma
+  mudança de schema.
+
+  **Testes**: adicionados a `PrintJobControllerIntegrationTests` (mesma
+  classe do FARELO-076, agora cobrindo os três endpoints REST do domínio)
+  — transições válidas de `PENDING` para cada endpoint, `409` ao tentar
+  transicionar um job já `PRINTED`/já `FAILED` (para os dois endpoints, já
+  que ambos compartilham a mesma origem válida), e `404` para um `id` de
+  job inexistente em cada endpoint. O helper `markStatus(...)` já existente
+  (usado para preparar jobs `PRINTED`/`FAILED` sem passar pelos novos
+  endpoints, ex. para o teste de exclusão da listagem do FARELO-076)
+  continua reaproveitado como setup desses novos testes.
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —

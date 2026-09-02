@@ -150,11 +150,15 @@ public class PrintJob {
     }
 
     /**
-     * Marks this job successfully printed by the Edge Agent. No-op
-     * validation on the current status yet (e.g. rejecting a transition out
-     * of an already-terminal state) — there is no caller of this method
-     * yet (FARELO-072+); add that guard once a real caller/use case exists
-     * to write a test against, rather than guessing at it now.
+     * Marks this job successfully printed by the Edge Agent. No validation
+     * of the current status here (e.g. rejecting a transition out of an
+     * already-terminal state) — that responsibility lives in the caller,
+     * {@link PrintJobService#markPrinted(UUID)} (FARELO-077), same
+     * service/entity split already established by {@code
+     * com.farelo.api.ordering.OrderService#transition} vs. {@link
+     * com.farelo.api.ordering.Order#setStatus}. Calling this method
+     * directly (e.g. in a test, bypassing the service) still performs no
+     * validation of its own.
      */
     public void markPrinted() {
         this.status = PrintJobStatus.PRINTED;
@@ -162,8 +166,9 @@ public class PrintJob {
 
     /**
      * Marks this job failed (e.g. the Edge Agent reported a printer error).
-     * See {@link PrintJobStatus} for why no retry-to-{@code PENDING}
-     * transition exists yet.
+     * Same "no validation here, see {@link PrintJobService#markFailed(UUID)}"
+     * reasoning as {@link #markPrinted()}. See {@link PrintJobStatus} for
+     * why no retry-to-{@code PENDING} transition exists yet.
      */
     public void markFailed() {
         this.status = PrintJobStatus.FAILED;

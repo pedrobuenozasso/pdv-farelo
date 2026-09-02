@@ -779,4 +779,67 @@ Lista vazia (`[]`) quando não há `PrintJob`s pendentes.
 Sem erros específicos — sempre `200 OK` (lista, potencialmente vazia; sem
 parâmetro de path para validar), mesmo formato de `GET /api/v1/orders`.
 
+### `POST /api/v1/print-jobs/{id}/printed`
+
+Reporta que o Edge Agent imprimiu o ticket com sucesso: transição de status
+`PENDING` → `PRINTED`. (FARELO-077)
+
+Fecha o ciclo aberto pelo FARELO-076 (`GET /api/v1/print-jobs`): o Edge
+Agent consultava os `PrintJob`s pendentes, mas nunca reportava de volta o
+resultado — os jobs ficavam `PENDING` para sempre.
+
+Mesma razão para `POST` em vez de `PATCH` dos demais endpoints de ação
+deste projeto (ex: `/api/v1/orders/{id}/deliver`/`/cancel`): é uma ação,
+não uma atualização parcial de representação. Sem corpo de requisição —
+nada a reportar além do próprio `id` do job.
+
+**Estado de origem válido**: apenas `PENDING` — mesmo formato de único
+estado de origem de `/preparing`/`/ready`/`/deliver` em
+`OrderController`, reaproveitando o mesmo mecanismo de transição
+(`PrintJobService`) usado por `/failed` abaixo. Marcar um job já
+`PRINTED`/`FAILED` como `PRINTED` de novo é rejeitado como qualquer outra
+transição inválida, não aceito silenciosamente.
+
+**Response — `200 OK`**
+
+`PrintJobResponse` atualizado (mesmo formato de `GET /api/v1/print-jobs`),
+com `status: "PRINTED"`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhum `PrintJob` existente,
+  `code: "PRINT_JOB_NOT_FOUND"`.
+- `409 Conflict` — o job existe mas não está `PENDING`:
+
+  ```json
+  { "code": "PRINT_JOB_INVALID_TRANSITION", "message": "...", "correlationId": "..." }
+  ```
+
+### `POST /api/v1/print-jobs/{id}/failed`
+
+Reporta que o Edge Agent falhou ao imprimir o ticket: transição de status
+`PENDING` → `FAILED`. (FARELO-077)
+
+Mesma razão para `POST` em vez de `PATCH`, e mesmo formato de resposta/erros
+de `/printed` acima. Sem corpo de requisição: nenhum motivo estruturado da
+falha é aceito por enquanto — YAGNI, não existe nenhum consumidor para esse
+dado ainda (ex: um painel mostrando por que uma impressora falhou); se isso
+for necessário no futuro, é escopo de outro ticket. Sem transição de volta
+`FAILED` → `PENDING` (retry) — ver `docs/domain-model.md`, seção
+`printing`, para o mecanismo de retry ainda não desenhado (FARELO-079).
+
+**Estado de origem válido**: apenas `PENDING`, mesmo raciocínio de
+`/printed` acima.
+
+**Response — `200 OK`**
+
+`PrintJobResponse` atualizado, com `status: "FAILED"`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhum `PrintJob` existente,
+  `code: "PRINT_JOB_NOT_FOUND"`.
+- `409 Conflict` — o job existe mas não está `PENDING`, mesmo formato de
+  `PRINT_JOB_INVALID_TRANSITION` acima.
+
 _(demais endpoints a preencher conforme implementados)_
