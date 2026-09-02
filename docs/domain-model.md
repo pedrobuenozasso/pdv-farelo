@@ -41,8 +41,55 @@ Pacote: `com.farelo.api.catalog`.
   migration `V3__create_product_table.sql`, com FK para `category(id)`.
   Ganhou `availableOnMenu`/`availableOnPos` (default `true` cada, visibilidade
   independente no cardápio QR vs. no PDV) em FARELO-017. Escopo ainda restrito
-  propositalmente: sem `productionStation` (FARELO-073), sem `fiscalProfileId`
-  (FARELO-151/Epic 11), sem receita/estoque.
+  propositalmente: sem `fiscalProfileId` (FARELO-151/Epic 11), sem
+  receita/estoque.
+
+  **`productionStation`** (FARELO-073): enum `ProductionStation` (`BAR`,
+  `KITCHEN` — `@Enumerated(EnumType.STRING)`, mesma convenção de
+  `CommandStatus`/`OrderStatus`), indicando qual estação física prepara o
+  produto — usado para rotear tickets de impressão por setor quando um
+  pedido é criado (prompt mestre seção 12, Epic 6/"Impressão por setor": 2
+  Cappuccino + 1 Coca-Cola vão para o ticket do `BAR`, 1 Croissant vai para
+  o ticket da `KITCHEN`). **Escopo deste ticket é só o campo** — a
+  separação real de `PrintJob`s por estação é FARELO-074.
+
+  **Por que só `BAR`/`KITCHEN`**: são os dois valores de exemplo dados
+  literalmente no prompt mestre, e já cobrem a divisão natural do fluxo de
+  produção de uma cafeteria — bebidas/itens de balcão (`BAR`) vs. comida
+  que exige preparo/cozimento (`KITCHEN`). Nenhum terceiro valor foi
+  adicionado sem uma necessidade concreta (AGENTS.md: não criar
+  abstrações prematuras); estender o enum no futuro custa uma migration de
+  follow-up para ampliar o `CHECK` constraint (mesmo trade-off já aceito
+  para `CommandStatus`/`OrderStatus`, ver `V5__create_command_table.sql`).
+
+  **Nullable, diferente de `availableOnMenu`/`availableOnPos`**: aqueles
+  dois booleanos têm um default inequívoco e seguro (`true` — um produto
+  novo deveria ser visível em todo lugar até dizerem o contrário).
+  `productionStation` não tem esse default: fabricar um (ex: sempre
+  `KITCHEN`) estaria silenciosamente errado para muitos produtos (um suco
+  não é obviamente `BAR` nem `KITCHEN` por alguma regra universal) e, uma
+  vez que FARELO-074 passar a rotear tickets por este campo, um default
+  errado desviaria um ticket impresso sem ninguém ter escolhido isso.
+  `null` significa "ainda não atribuído" — a equipe define explicitamente
+  por produto.
+
+  Coluna `production_station` adicionada pela migration
+  `V13__add_product_production_station_column.sql`
+  (`VARCHAR(20)`, sem `NOT NULL`, com `CHECK` espelhando os valores do
+  enum — mesma convenção `VARCHAR` + `CHECK` de `command.status`/
+  `orders.status`). **Sem backfill**: produtos existentes ficam `NULL`
+  ("sem estação atribuída") em vez de receber um valor fabricado — mesmo
+  raciocínio da decisão de nullability acima, agora aplicado às linhas já
+  existentes na tabela. Nos DTOs (`ProductRequest`/`ProductUpdateRequest`
+  em `catalog.web`), o campo é opcional em ambos — inclusive no `PUT`
+  (diferente de `active`/`availableOnMenu`/`availableOnPos`, que são
+  `@NotNull` lá): como `null` é ele mesmo um valor legítimo e não um
+  placeholder de "campo esquecido", uma substituição completa via `PUT`
+  precisa poder enviá-lo para limpar uma estação já atribuída. Sem o
+  gotcha de primitivo-vs-wrapper do Jackson que motivou `Boolean` em vez de
+  `boolean` nesses três campos (documentado em `ProductUpdateRequest`) —
+  um enum já é tipo referência, então um campo ausente no JSON simplesmente
+  vira `null` sem risco de default silencioso.
 
 CRUD REST completo do lado do backend: `Category` (`POST`/`GET`,
 FARELO-012/013), `Product` (`POST`/`GET`/`PUT`, FARELO-014/015/016). Sem
