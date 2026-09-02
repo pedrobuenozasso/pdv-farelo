@@ -10,7 +10,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `catalog` | `Product`, `Category` — fonte única de verdade do cardápio | Em andamento |
 | `customer` | Dados do cliente coletados no fluxo de pedido (nome, WhatsApp) | Não iniciado |
 | `command` | `Command` (comanda) e seu ciclo de vida | Em andamento |
-| `ordering` | `Order`, `OrderItem`, snapshot de preço, histórico de status | Não iniciado |
+| `ordering` | `Order`, `OrderItem`, snapshot de preço, histórico de status | Em andamento |
 | `kitchen` | KDS — visualização e transição de status de preparo | Não iniciado |
 | `printing` | `Printer`, `PrintJob`, integração com Edge Agent | Não iniciado |
 | `inventory` | `Ingredient`, `InventoryMovement` (ledger) | Não iniciado |
@@ -69,8 +69,39 @@ Pacote: `com.farelo.api.command`.
   Comandas nunca são apagadas — cada ciclo operacional (visita de um
   cliente) deixa um registro histórico; reabertura/histórico por `number`
   fica para tickets futuros. `CommandRepository` expõe `findByNumber(int)`,
-  já pensando no FARELO-032. Ainda sem endpoints REST (FARELO-032+).
+  já pensando no FARELO-032.
 - **Seed 1-100** (FARELO-031): migration `V6__seed_commands_1_to_100.sql`
   insere as 100 comandas físicas do estabelecimento (`INSERT INTO command
   (number) SELECT generate_series(1, 100)`), todas com `status` `AVAILABLE`
   (default da coluna, não precisa ser especificado no `INSERT`).
+
+CRUD REST do lado do backend, focado no ciclo de vida: `GET /{number}`
+(FARELO-032), `POST /{number}/open` (`AVAILABLE`→`OPEN`, FARELO-033),
+`POST /{number}/close` (`OPEN`/`PAYMENT_REQUESTED`→`CLOSED`, sem validação
+de pagamento/fiscal ainda — FARELO-143/Epic 10 — FARELO-034). Fecha o
+Epic 2 (Comandas) do lado do backend por enquanto. Ver `docs/api.md`.
+
+## ordering
+
+Pacote: `com.farelo.api.ordering`.
+
+- **`Order`** (FARELO-050): entidade JPA — `id` (UUID, mesma estratégia dos
+  demais domínios), `command` (`@ManyToOne` obrigatório para `Command` —
+  todo pedido pertence a uma comanda), `status` (enum `OrderStatus`:
+  `CREATED`, `CONFIRMED`, `PREPARING`, `READY`, `DELIVERED`, `CANCELLED` —
+  `@Enumerated(EnumType.STRING)`, default `CREATED`),
+  `createdAt`/`updatedAt` (UTC, mesmo padrão dos demais domínios). Tabela
+  criada pela migration `V7__create_order_table.sql`, com FK para
+  `command(id)`.
+
+  **Nota de nomeação**: a tabela é `orders` (plural), não `order` —
+  `ORDER` é palavra reservada em SQL (usada em `ORDER BY`); um nome de
+  tabela `order` sem aspas quebraria qualquer SQL bruto que a referenciasse,
+  incluindo migrations futuras (ex: FK de `OrderItem` no FARELO-051). O
+  arquivo de migration manteve o nome `V7__create_order_table.sql` do
+  ticket por rastreabilidade, mas cria a tabela `orders`. `status` usa a
+  mesma convenção `VARCHAR` + `CHECK` constraint de `command.status`
+  (`V5__create_command_table.sql`), por consistência.
+
+  Escopo restrito propositalmente: sem `OrderItem` (FARELO-051), sem
+  snapshot de preço (FARELO-052), sem endpoints REST (FARELO-053+).
