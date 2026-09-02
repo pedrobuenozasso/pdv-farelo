@@ -829,6 +829,91 @@ Pacote: `com.farelo.api.inventory`.
   os quatro endpoints — sucesso, validação e `404` — mesmo formato de
   `ProductControllerIntegrationTests`).
 
+- **`Recipe`** (FARELO-091): entidade JPA — o "cabeçalho" da receita/ficha
+  técnica (prompt mestre seção 15) de um `Product` (ex: "pão com ovos e
+  bacon" consome 3 UN ovos + 1 UN pão + 80 G bacon + 10 G manteiga). `id`
+  (UUID, mesma estratégia dos demais domínios), `product` (`@ManyToOne`
+  obrigatório para `Product`), `active` (default `true`, mesmo padrão de
+  `Category`/`Product`/`Printer`/`Ingredient`), `createdAt`/`updatedAt`
+  (UTC). Tabela criada pela migration `V17__create_recipe_table.sql`.
+
+  **Escopo deste ticket é só o cabeçalho.** A lista de ingredientes e
+  quantidades que compõem a receita (`RecipeItem`) é FARELO-092, tickets
+  futuros — deliberadamente não modelada aqui, mesma abordagem incremental
+  de `Ingredient` não carregar campos de saldo de estoque até um ticket
+  precisar deles. Nenhuma lógica de consumo de receita ao criar pedido
+  (FARELO-096) tampouco — este ticket só estabelece que uma receita existe
+  para um produto.
+
+  **Decisão de desenho — relação com `Product`: `@ManyToOne` + índice único
+  parcial, não `@OneToOne`**: o alvo do roadmap é "um produto tem no máximo
+  uma receita *ativa* por vez" (nada no prompt mestre pede histórico/
+  versionamento de receita), o que sugeriria `@OneToOne`. Mas isso forçaria
+  toda "troca de receita" a mutar a mesma linha no lugar (sem histórico) ou
+  apagar-e-recriar, descartando um trilha de auditoria natural e barata.
+  `@ManyToOne` + `active` (mesmo padrão que toda outra entidade deste
+  código já carrega) mantém toda receita passada quando uma nova a
+  substitui — desativa a antiga, insere uma nova ativa — sem custo extra de
+  modelagem e com um benefício real (a composição de um produto num
+  momento específico é reconstituível depois, relevante quando
+  `InventoryMovement` referenciar uma receita específica no consumo). A
+  regra de "só uma ativa por vez" continua garantida — só que via índice
+  único parcial (`CREATE UNIQUE INDEX ... WHERE active`, ver
+  `V17__create_recipe_table.sql`) em vez da cardinalidade do FK. Essa é a
+  fonte de verdade real da regra (duas requisições concorrentes poderiam
+  passar por uma checagem só na camada de aplicação antes de qualquer uma
+  commitar); `RecipeService#create` também checa isso primeiro (falha
+  rápido sem bater no banco, e traduz violação de constraint em
+  `RecipeAlreadyExistsException` — mesmo formato independente de qual das
+  duas camadas pegar primeiro).
+
+  `RecipeRepository` (Spring Data JPA): `findByProductIdAndActiveTrue`
+  (chave natural da entidade). **`findByIdWithProduct`/
+  `findAllWithProductOrderByCreatedAtAsc` usam `JOIN FETCH r.product`** —
+  mesmo raciocínio de `PrintJobRepository#findByIdWithOrder`/
+  `findByStatusOrderByCreatedAtAsc` (a lição do FARELO-055, originalmente
+  documentada em `OrderRepository`): `open-in-view` é `false`
+  (`application.yml`), e `RecipeResponse#from` lê
+  `recipe.getProduct().getName()` no controller, depois que a transação
+  (curta) do método do repository já fechou — sem buscar `product` de
+  forma antecipada aqui, isso seria um proxy lazy não inicializado
+  precisando de uma sessão viva, ou seja, um `LazyInitializationException`
+  garantido. **Isso foi encontrado e corrigido em revisão** (o agente
+  original usou `findById`/`findAll` simples) — ver histórico do commit.
+
+  CRUD REST (`/api/v1/recipes`): `POST` (cria, recebendo `productId`; 404
+  `PRODUCT_NOT_FOUND` se o produto não existir, 409
+  `RECIPE_ALREADY_EXISTS` se já houver receita ativa pro produto),
+  `GET`/`GET {id}` (404 `RECIPE_NOT_FOUND`), e `PATCH /{id}/deactivate`
+  (desativa — **`PATCH`, não `PUT`**: diferente de `Ingredient`/`Product`,
+  que usam `PUT` de substituição completa por terem vários campos
+  editáveis independentemente, `Recipe` só tem uma coisa que este ticket
+  permite mudar — `active` — então um `PATCH` parcial que só recebe esse
+  campo cabe melhor que um endpoint de substituição completa que seria só
+  um alias do mesmo campo único). Reatribuir uma receita a outro produto
+  não é suportado — o caminho certo pra mudar a composição é desativar e
+  criar uma nova receita. Ver `docs/api.md` para os endpoints.
+
+  **Testes**: `RecipeRepositoryIntegrationTests` (mapeamento JPA contra
+  Postgres real, incluindo o índice único parcial rejeitando duas receitas
+  ativas pro mesmo produto) e `RecipeControllerIntegrationTests` (HTTP real
+  via `MockMvc`, cobrindo sucesso, 404 e 409). **Nota de isolamento de
+  teste, encontrada em revisão**: diferente de
+  `IngredientRepositoryIntegrationTests`/outros testes de `catalog`, estas
+  duas classes **não** fazem `productRepository.deleteAll()`/
+  `categoryRepository.deleteAll()` no `@BeforeEach` — só
+  `recipeRepository.deleteAll()`. Sob a suíte completa,
+  `OrderControllerIntegrationTests` cria seus próprios `Product`s/`Order`s
+  e nunca limpa (não é um bug isolado deste ticket, é uma característica
+  pré-existente da suíte), então um `deleteAll()` cego nas tabelas
+  compartilhadas de `product`/`category` pode esbarrar num
+  `order_item` ainda referenciando o produto, dependendo da ordem de
+  execução das classes — isso surgiu como uma falha real, dependente de
+  ordem, durante a revisão deste ticket. Nenhuma asserção destas duas
+  classes depende das tabelas de produto/categoria estarem vazias (cada
+  teste cria seu próprio produto com nome único), então simplesmente não
+  tocar nessas tabelas compartilhadas resolve sem qualquer risco.
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —

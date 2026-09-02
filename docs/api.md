@@ -960,4 +960,99 @@ criação.
 - `404 Not Found` — `{id}` do ingrediente não existe,
   `code: "INGREDIENT_NOT_FOUND"`.
 
+### `POST /api/v1/recipes`
+
+Cria o cabeçalho de uma receita para um produto. (FARELO-091)
+
+Apenas o cabeçalho — a lista de ingredientes/quantidades (`RecipeItem`) é
+FARELO-092, ainda não implementado.
+
+**Request body**
+
+```json
+{
+  "productId": "8a1f2c3d-4e5f-6789-0abc-def123456789"
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `productId` | UUID | sim | Precisa referenciar um `Product` existente |
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/recipes/{id}`.
+
+```json
+{
+  "id": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "productId": "8a1f2c3d-4e5f-6789-0abc-def123456789",
+  "productName": "Pão com ovos e bacon",
+  "active": true,
+  "createdAt": "2026-09-02T13:00:00Z",
+  "updatedAt": "2026-09-02T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `productId` ausente, `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `productId` não corresponde a nenhum produto existente,
+  `code: "PRODUCT_NOT_FOUND"`.
+- `409 Conflict` — o produto já tem uma receita ativa,
+  `code: "RECIPE_ALREADY_EXISTS"`.
+
+### `GET /api/v1/recipes`
+
+Lista todas as receitas (ativas e inativas), ordenadas por `createdAt` (asc).
+(FARELO-091)
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+    "productId": "8a1f2c3d-4e5f-6789-0abc-def123456789",
+    "productName": "Pão com ovos e bacon",
+    "active": true,
+    "createdAt": "2026-09-02T13:00:00Z",
+    "updatedAt": "2026-09-02T13:00:00Z"
+  }
+]
+```
+
+Lista vazia (`[]`) quando não há receitas cadastradas.
+
+### `GET /api/v1/recipes/{id}`
+
+Busca uma receita pelo `id` técnico (UUID). (FARELO-091)
+
+**Response — `200 OK`**
+
+Mesmo formato de item de `GET /api/v1/recipes`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhuma receita existente,
+  `code: "RECIPE_NOT_FOUND"`.
+
+### `PATCH /api/v1/recipes/{id}/deactivate`
+
+Desativa uma receita (`active` → `false`). (FARELO-091)
+
+Sem corpo de requisição. Sem endpoint de reativação (fora do escopo deste
+ticket — reativar exigiria checar de novo a regra de unicidade de receita
+ativa por produto). Para trocar a composição de uma receita, o caminho é
+desativar esta e criar uma nova (`POST /api/v1/recipes`).
+
+**Response — `200 OK`**
+
+Mesmo formato de `GET /api/v1/recipes/{id}`, com `active: false`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhuma receita existente,
+  `code: "RECIPE_NOT_FOUND"`.
+
 _(demais endpoints a preencher conforme implementados)_
