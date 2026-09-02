@@ -10,7 +10,7 @@ implementar qualquer ticket.
 |---|---|---|
 | `backend-agent` | `apps/api/**`, `docs/domain-model.md`, `docs/api.md` | Spring Boot, PostgreSQL, Flyway, entidades, regras de negócio, testes backend |
 | `frontend-agent` | `apps/web/**` | Next.js — Admin, PDV, cardápio QR, KDS |
-| `infra-agent` | `infra/**`, `.github/**`, `docs/architecture.md`, `docs/decisions/**`, `README.md`, `.gitignore`, arquivos de configuração na raiz | Docker Compose, CI/CD, documentação de arquitetura, ambiente de desenvolvimento |
+| `infra-agent` | `infra/**`, `.github/**`, `apps/edge-agent/**`, `docs/architecture.md`, `docs/decisions/**`, `README.md`, `.gitignore`, arquivos de configuração na raiz | Docker Compose, CI/CD, documentação de arquitetura, ambiente de desenvolvimento, Edge Agent (prompt mestre seção 11: "apenas infraestrutura de dispositivos", sem regra de negócio de pedidos — por isso fica com infra, não com backend) |
 
 **Regra de propriedade de arquivos**: um agente só edita arquivos dentro do seu
 próprio diretório de propriedade. Se um ticket exigir mudança fora dela, o agente
@@ -24,10 +24,14 @@ deve reportar ao líder em vez de editar diretamente.
   grande demais para revisão humana).
 - Se o ticket não couber, ele deve ser dividido antes de implementar — não implementar
   parcialmente e deixar o resto "para depois" dentro do mesmo commit.
-- Trabalhar **somente** nos tickets definidos no roadmap (`docs/architecture.md` →
-  seção de milestones; lista completa de tickets é mantida pelo líder do time).
-- Cada agente trabalha em **um ticket por vez**. Não iniciar um novo ticket sem
-  reportar a conclusão do anterior ao líder.
+- Trabalhar **somente** nos tickets definidos no roadmap (lista completa e literal em
+  `docs/PROMPT_MESTRE.md`, seção 47 — fonte da verdade permanente, não depende de
+  memória de sessão; `docs/architecture.md` registra o status real de progresso).
+- Cada agente trabalha em **um ticket por vez**. Múltiplos agentes (inclusive dois na
+  mesma especialidade, ex: dois tickets de backend simultâneos) podem rodar em
+  paralelo desde que seus tickets não editem os mesmos arquivos — o líder é quem
+  decide isso ao despachar. Nunca dois agentes editando o mesmo arquivo ao mesmo
+  tempo.
 
 ## Antes de cada implementação
 
