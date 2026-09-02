@@ -53,21 +53,30 @@ crescer bastante.
 FARELO-044 adicionou o carrinho local ao cardápio: cada produto ganhou um
 "+"/"−" para adicionar/remover, com um rodapé mostrando itens, quantidade,
 subtotal por item e total (BRL) — sem persistência entre reloads (fora de
-escopo por ora) e sem enviar nada ao backend ainda (não existe
-`POST /api/v1/orders`; "Finalizar pedido" é um placeholder desabilitado —
-a lógica real é FARELO-045). **Mudança de arquitetura**: como o carrinho
-precisa de estado no cliente, a parte do cardápio que renderiza os
-produtos foi extraída para `src/app/c/[commandNumber]/menu.tsx`, um
-Client Component (`"use client"`, `useState` local — não precisa de
-Zustand/Context nesse escopo) que recebe `sections` já carregado via SSR
-como prop; `page.tsx` continua Server Component (busca da comanda e do
-cardápio, mensagens de erro/status).
+escopo por ora). **Mudança de arquitetura**: como o carrinho precisa de
+estado no cliente, a parte do cardápio que renderiza os produtos foi
+extraída para `src/app/c/[commandNumber]/menu.tsx`, um Client Component
+(`"use client"`, `useState` local — não precisa de Zustand/Context nesse
+escopo) que recebe `sections` já carregado via SSR como prop; `page.tsx`
+continua Server Component (busca da comanda e do cardápio, mensagens de
+erro/status).
+FARELO-045 fechou o fluxo do cliente: "Finalizar pedido" abre um
+formulário de nome/telefone (`react-hook-form` + `zod`, mesmo padrão do
+Admin) e envia o pedido via `createOrder`
+(`src/lib/api/orders.ts` → `POST /api/v1/orders`). **Importante**:
+nome/telefone existem só para a experiência do fluxo (prompt mestre seção 6) — não são enviados ao backend nem persistidos (`CreateOrderRequest` só
+tem `commandNumber`/`items`; não existe domínio `customer` ainda),
+documentado em `orders.ts`. Sucesso mostra uma confirmação e limpa o
+carrinho; erros de negócio (`COMMAND_CANNOT_ACCEPT_ORDERS`,
+`PRODUCT_NOT_AVAILABLE`) aparecem perto do formulário sem derrubar o
+carrinho nem os dados já digitados — mesmo tratamento genérico de
+`ApiError` usado no Admin (extraído para `apiErrorMessage` em
+`src/lib/api/client.ts`, terceira ocorrência do padrão).
 Ainda não há shadcn/ui, nem edição/exclusão de categoria (sem endpoint
 `PUT`/`DELETE` para categoria no backend ainda) nem exclusão de produto
-(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem finalização
-de pedido em `/c/{commandNumber}` (FARELO-045) nem as demais rotas de
-negócio (`/pdv`, `/kitchen`, shell completo de `/admin`) — isso é escopo
-de tickets futuros.
+(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem as demais
+rotas de negócio (`/pdv`, `/kitchen`, shell completo de `/admin`) — isso
+é escopo de tickets futuros.
 
 ## Como rodar
 
