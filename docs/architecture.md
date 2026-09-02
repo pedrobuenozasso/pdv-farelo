@@ -18,7 +18,7 @@ microserviços neste momento.
 |---|---|---|
 | `apps/web` | Next.js, TypeScript, Tailwind, shadcn/ui | Cardápio QR (`pedido.farelo.com.br`), app interna (`app.farelo.com.br`: `/pdv`, `/kitchen`, `/admin`) |
 | `apps/api` | Java 21, Spring Boot 3 | Backend modular monolith (`api.farelo.com.br`) |
-| `apps/edge-agent` | Serviço local | Impressão física via dispositivo na cafeteria |
+| `apps/edge-agent` | Node.js, TypeScript | Impressão física via dispositivo na cafeteria (esqueleto inicial — FARELO-075; ver [ADR-002](decisions/ADR-002-edge-agent-nodejs.md)) |
 
 ## Domínios do backend
 
@@ -52,7 +52,10 @@ Cloudflare, Caddy, GitHub Actions.
 `infra/README.md`) sobem a stack completa localmente com um único comando.
 São Dockerfiles/compose de **desenvolvimento**, não de produção — nenhum
 ticket do roadmap atual cobre o deploy real (VPS/Caddy/Cloudflare listados
-acima permanecem não implementados).
+acima permanecem não implementados). `apps/edge-agent` não faz parte desse
+compose: roda como processo separado (fisicamente num mini PC dedicado em
+produção), sem lógica real de rede ainda para justificar orquestração local
+junto do resto da stack (ver `apps/edge-agent/README.md`).
 
 ## Roadmap de milestones
 
