@@ -21,3 +21,10 @@ management:
     web:
       exposure:
         include: health
+
+# FARELO-061: how long a PROCESSED outbox_event row is kept before
+# OutboxRetentionCleaner deletes it. See that class's javadoc for why 7
+# days — never applies to PENDING rows, regardless of age.
+outbox:
+  retention:
+    processed-days: 7
