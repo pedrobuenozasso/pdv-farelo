@@ -11,7 +11,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `customer` | Dados do cliente coletados no fluxo de pedido (nome, WhatsApp) | Não iniciado |
 | `command` | `Command` (comanda) e seu ciclo de vida | Em andamento |
 | `ordering` | `Order`, `OrderItem`, snapshot de preço, histórico de status | Em andamento |
-| `kitchen` | KDS — visualização e transição de status de preparo | Não iniciado |
+| `kitchen` | KDS — visualização e transição de status de preparo | Não iniciado — `GET /api/v1/orders` (fila da cozinha, FARELO-059) já existe, mas ficou em `ordering` por enquanto; ver nota na seção `ordering` abaixo |
 | `printing` | `Printer`, `PrintJob`, integração com Edge Agent | Não iniciado |
 | `inventory` | `Ingredient`, `InventoryMovement` (ledger) | Não iniciado |
 | `recipe` | `Recipe`, `RecipeItem` — ficha técnica de produtos | Não iniciado |
@@ -169,3 +169,25 @@ numa direção só, ver javadoc da classe).
   sem endpoint para consultar o histórico nem as transições
   `PREPARING`/`READY` — escopo de FARELO-057/058, que vão reaproveitar
   esse mecanismo para cada transição futura.
+
+`GET /api/v1/orders` (FARELO-059) lista a fila de pedidos que ainda
+precisam de atenção da cozinha — status `CREATED`, `CONFIRMED` ou
+`PREPARING`, tudo antes de `READY` — de **todas** as comandas, ordenados
+por `createdAt` ASC (fila FIFO). Sem paginação, mesma lógica YAGNI de
+`GET /api/v1/commands/{number}/orders`. Implementado em `OrderController`
+(mesma classe do FARELO-057/058), reaproveitando
+`OrderRepository`/`OrderService` já existentes — novo método
+`OrderRepository#findByStatusInOrderByCreatedAtAsc`, com o mesmo `JOIN
+FETCH o.command` das demais queries deste repositório (evita
+`LazyInitializationException`, lição do FARELO-055 documentada acima).
+
+**Nota de domínio**: esta consulta é conceitualmente do domínio `kitchen`
+(ver tabela no topo deste documento, ainda "Não iniciado"), mas ficou em
+`ordering` por enquanto — criar um pacote `kitchen` só para um único
+endpoint de leitura seria uma abstração prematura (AGENTS.md: "não criar
+abstrações prematuras"), e reaproveitar `OrderController`/`OrderService`
+existentes evita duplicar a lógica de fetch/serialização de `Order`+
+`OrderItem` que `GET /api/v1/commands/{number}/orders` já resolveu
+(FARELO-055). Deve migrar para um domínio `kitchen` dedicado quando ele
+ganhar mais responsabilidades reais (impressão de comanda de cozinha,
+notificações à cozinha, etc) que justifiquem o pacote próprio.

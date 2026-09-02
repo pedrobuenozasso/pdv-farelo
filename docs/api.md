@@ -564,4 +564,53 @@ explicitamente, então não há essa ambiguidade a evitar.
 Ainda não há transição para `CONFIRMED`, `DELIVERED`, `CANCELLED`, nem
 endpoint para consultar o histórico — escopo de tickets futuros.
 
+### `GET /api/v1/orders`
+
+Lista a fila de pedidos da cozinha: todo pedido, de **todas** as comandas,
+que ainda precisa de atenção da cozinha — status `CREATED`, `CONFIRMED`
+ou `PREPARING` (tudo antes de `READY`) — do mais antigo para o mais novo
+(`createdAt` asc, fila FIFO). (FARELO-059)
+
+Pensado para o KDS (tela da cozinha, ticket de frontend futuro): mostra
+tudo que ainda não chegou em `READY`. Pedidos `READY`, `DELIVERED` ou
+`CANCELLED` nunca aparecem aqui — uma vez prontos/entregues/cancelados,
+saem da fila.
+
+Sem paginação — mesma lógica YAGNI já aplicada em
+`GET /api/v1/commands/{number}/orders`/`GET /api/v1/categories`: o volume
+de pedidos ativos simultaneamente é naturalmente baixo.
+
+Reaproveita `OrderResponse`/`OrderItemResponse`, mesmo formato de
+resposta de `POST /api/v1/orders`/`GET /api/v1/commands/{number}/orders`.
+Implementado na mesma classe `OrderController` do FARELO-057/058 (ver nota
+de domínio em `docs/domain-model.md`, seção `ordering`, sobre por que este
+endpoint não ganhou um pacote `kitchen` próprio ainda).
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "d4e5f6a7-8901-2bcd-ef34-567890abcdef",
+    "commandNumber": 1,
+    "status": "CREATED",
+    "items": [
+      {
+        "id": "e5f6a7b8-9012-3cde-f456-7890abcdef12",
+        "productId": "8a1b2c3d-4e5f-6789-0abc-def123456789",
+        "productName": "Café Espresso",
+        "quantity": 2,
+        "unitPrice": 7.50
+      }
+    ],
+    "createdAt": "2026-09-01T13:00:00Z"
+  }
+]
+```
+
+Lista vazia (`[]`) quando não há pedidos ativos em nenhuma comanda.
+
+Sem erros específicos — sempre `200 OK` (lista, potencialmente vazia; sem
+parâmetro de path para validar).
+
 _(demais endpoints a preencher conforme implementados)_

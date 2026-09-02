@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -29,5 +30,13 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     // uninitialized proxy.
     @Query("SELECT o FROM Order o JOIN FETCH o.command WHERE o.id = :id")
     Optional<Order> findByIdWithCommand(@Param("id") UUID id);
+
+    // Same JOIN FETCH reasoning as above, for the kitchen queue
+    // (FARELO-059, OrderService#listQueue): across every command, not
+    // scoped to one, so a plain "in" query without the fetch would still
+    // leave `command` as an uninitialized proxy once OrderResponse.from()
+    // reads order.getCommand().getNumber() after the transaction closes.
+    @Query("SELECT o FROM Order o JOIN FETCH o.command WHERE o.status IN :statuses ORDER BY o.createdAt ASC")
+    List<Order> findByStatusInOrderByCreatedAtAsc(@Param("statuses") Collection<OrderStatus> statuses);
 
 }

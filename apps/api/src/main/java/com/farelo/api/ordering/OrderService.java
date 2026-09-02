@@ -15,6 +15,15 @@ import java.util.UUID;
 @Service
 public class OrderService {
 
+    // Statuses that still need kitchen attention, for the kitchen queue
+    // (FARELO-059, listQueue below): everything before READY. CONFIRMED
+    // has no transition into or out of it yet on the roadmap (see
+    // OrderStatus/markAsPreparing's javadoc), but is included here since
+    // conceptually it's still "not yet in the kitchen's hands", same as
+    // CREATED.
+    private static final List<OrderStatus> QUEUE_STATUSES =
+            List.of(OrderStatus.CREATED, OrderStatus.CONFIRMED, OrderStatus.PREPARING);
+
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final OrderStatusHistoryRepository orderStatusHistoryRepository;
@@ -97,6 +106,27 @@ public class OrderService {
     public List<OrderWithItems> listByCommand(int commandNumber) {
         Command command = commandService.findByNumber(commandNumber);
         List<Order> orders = orderRepository.findByCommandOrderByCreatedAtAsc(command);
+
+        return orders.stream()
+                .map(order -> new OrderWithItems(order, orderItemRepository.findByOrder(order)))
+                .toList();
+    }
+
+    /**
+     * Lists every order, across every command, that still needs kitchen
+     * attention — status {@code CREATED}, {@code CONFIRMED} or
+     * {@code PREPARING} (see {@link #QUEUE_STATUSES}) — oldest first
+     * (FIFO), each with its items. For the kitchen queue (FARELO-059),
+     * consumed by the future KDS screen. No pagination — same YAGNI
+     * reasoning as {@link #listByCommand(int)}: the number of orders
+     * simultaneously active (not yet {@code READY}) is naturally small.
+     *
+     * <p>Same N+1-items and {@code @Transactional(readOnly = true)}
+     * reasoning as {@link #listByCommand(int)} — deliberately simple.
+     */
+    @Transactional(readOnly = true)
+    public List<OrderWithItems> listQueue() {
+        List<Order> orders = orderRepository.findByStatusInOrderByCreatedAtAsc(QUEUE_STATUSES);
 
         return orders.stream()
                 .map(order -> new OrderWithItems(order, orderItemRepository.findByOrder(order)))

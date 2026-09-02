@@ -32,6 +32,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -434,6 +435,57 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/orders/{id}/ready", UUID.randomUUID()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
+    }
+
+    // FARELO-059: GET /api/v1/orders (kitchen queue). Postgres is a
+    // singleton container shared by every test class in the run (see
+    // AbstractIntegrationTest) — other classes may have their own
+    // CREATED/PREPARING orders sitting in the table already, so this
+    // checks relative order/(non-)membership among *this test's own*
+    // orders rather than an absolute response size (same reasoning as
+    // OrderRepositoryIntegrationTests' equivalent query test).
+    @Test
+    void listsKitchenQueueOrderedByCreatedAtAscExcludingReadyOrders() throws Exception {
+        Product product = createActiveProduct(new BigDecimal("6.00"));
+
+        UUID createdOrderId = createOrder(product);
+
+        // Distinct, increasing createdAt for a deterministic FIFO
+        // assertion (same pattern as CommandOrdersControllerIntegrationTests).
+        Thread.sleep(10);
+        UUID preparingOrderId = createOrder(product);
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", preparingOrderId)).andExpect(status().isOk());
+
+        UUID readyOrderId = createOrder(product);
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", readyOrderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", readyOrderId)).andExpect(status().isOk());
+
+        MvcResult result = mockMvc.perform(get("/api/v1/orders"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        List<OrderResponse> queue = objectMapper.readValue(
+                result.getResponse().getContentAsString(),
+                objectMapper.getTypeFactory().constructCollectionType(List.class, OrderResponse.class));
+        List<UUID> queueIds = queue.stream().map(OrderResponse::id).toList();
+
+        // READY orders never show up in the kitchen queue.
+        assertThat(queueIds).doesNotContain(readyOrderId);
+
+        List<UUID> ourQueueIds = queueIds.stream()
+                .filter(id -> id.equals(createdOrderId) || id.equals(preparingOrderId))
+                .toList();
+        assertThat(ourQueueIds).containsExactly(createdOrderId, preparingOrderId);
+
+        OrderResponse createdResponse = queue.stream()
+                .filter(o -> o.id().equals(createdOrderId)).findFirst().orElseThrow();
+        assertThat(createdResponse.status()).isEqualTo(OrderStatus.CREATED);
+        assertThat(createdResponse.items()).hasSize(1);
+        assertThat(createdResponse.items().get(0).productName()).isEqualTo("Café Espresso");
+
+        OrderResponse preparingResponse = queue.stream()
+                .filter(o -> o.id().equals(preparingOrderId)).findFirst().orElseThrow();
+        assertThat(preparingResponse.status()).isEqualTo(OrderStatus.PREPARING);
     }
 
 }
