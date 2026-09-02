@@ -414,6 +414,87 @@ momento)."
   `spring-boot-starter-actuator`, que o projeto já usa para
   `/actuator/health`.
 
+- **Idempotência sob workers concorrentes** (FARELO-063 — o ticket real
+  desse número no roadmap, ver nota de reconciliação no topo desta seção):
+  fecha a lacuna que a nota apontava. Até aqui, `OutboxWorker.
+  processPendingEvents()` buscava **todos** os eventos `PENDING` via
+  `findByStatusOrderByCreatedAtAsc` (sem lock, sem limite), processava em
+  memória e só depois salvava tudo como `PROCESSED`. Hoje só existe uma
+  instância da aplicação rodando, então isso nunca gerou um bug real — mas
+  nada garante que isso continue verdade para sempre: se o backend algum
+  dia escalar horizontalmente (múltiplas instâncias atrás de um load
+  balancer, ou simplesmente dois schedulers concorrentes por qualquer
+  motivo), duas instâncias rodando o poll de 5s ao mesmo tempo poderiam
+  ambas selecionar os **mesmos** eventos `PENDING` antes de qualquer uma
+  comitar, processando (e logando) o mesmo evento duas vezes — exatamente o
+  tipo de "operação crítica" que o prompt mestre (seção 16) exige ser
+  idempotente.
+
+  **Solução**: nova query `OutboxEventRepository#findPendingForUpdateSkipLocked`
+  — `SELECT ... WHERE status = :status ORDER BY created_at ASC LIMIT :limit
+  FOR UPDATE SKIP LOCKED`, nativa (`@Query(nativeQuery = true)`), porque
+  JPQL não tem uma palavra-chave `SKIP LOCKED` (Hibernate tem um truque
+  não-documentado via `@Lock(PESSIMISTIC_WRITE)` + hint
+  `jakarta.persistence.lock.timeout=-2`, mas isso depende de um detalhe de
+  implementação interno do Hibernate, não de uma API estável — SQL nativo
+  explícito é mais direto e portável entre versões). Cada chamada trava
+  (`FOR UPDATE`) as linhas que seleciona pelo resto da sua transação;
+  qualquer outra transação concorrente rodando a mesma query
+  automaticamente pula (`SKIP LOCKED`) linhas já travadas em vez de
+  bloquear nelas ou selecioná-las também. Isso não impede duas instâncias
+  de fazerem *poll* ao mesmo tempo — impede que elas selecionem as
+  **mesmas** linhas, o que é exatamente a garantia necessária: sem
+  seleção compartilhada, não há processamento duplicado possível.
+  `OutboxWorker.processPendingEvents()` passou a usar essa query em vez da
+  antiga (que continua existindo no repositório, ainda coberta por
+  `OutboxEventRepositoryIntegrationTests` — não removida, só deixou de ser
+  usada pelo worker), e passou a **retornar** o lote processado (antes
+  `void`) — só para dar aos testes algo concreto para verificar; o
+  disparo real via `@Scheduled` ignora o valor de retorno.
+
+  **Limite de lote**: `outbox.worker.batch-size` (`@Value`,
+  `application.yml`, default 100) — bound de quantas linhas uma única
+  chamada pode travar/processar, para uma execução nunca segurar um
+  número ilimitado de locks (nem gastar um tempo ilimitado numa única
+  transação) não importa o tamanho da fila `PENDING`. Uma fila mais funda
+  que o batch simplesmente é drenada em mais ciclos de poll (a cada 5s),
+  cada um travando até `batchSize` linhas a mais.
+
+  **Teste de idempotência**: `OutboxEventRepositoryConcurrencyIntegrationTests`
+  prova a garantia de forma **determinística**, não por corrida de
+  wall-clock (duas threads disparadas "ao mesmo tempo" e torcer para que
+  se sobreponham seria inerentemente flaky). Em vez disso, duas
+  transações são controladas manualmente via `TransactionTemplate` e dois
+  `CountDownLatch`: a transação A seleciona (e trava) todos os eventos
+  `PENDING`, sinaliza que já travou e só então bloqueia (transação ainda
+  aberta, sem commit); só depois que A confirma que está segurando os
+  locks é que a transação B roda a mesma query — seu resultado é
+  capturado e verificado **antes** de A poder comitar, então não existe
+  janela onde A já teria liberado os locks. Resultado esperado e
+  verificado: `A` contém todos os eventos semeados pelo teste; `B` não
+  contém nenhum deles (nenhum double-select possível); depois que ambas
+  comitam, todos os eventos semeados terminam `PROCESSED` exatamente uma
+  vez. Roda contra o Postgres real do Testcontainers (`AbstractIntegrationTest`),
+  não H2/mock — lock de linha é comportamento real do motor de banco, sem
+  equivalente confiável em memória; é exatamente o tipo de bug que só
+  aparece contra o banco de verdade. `OutboxWorkerBatchSizeIntegrationTests`
+  cobre separadamente o limite de lote (contexto Spring próprio, com
+  `outbox.worker.batch-size=3` via `@TestPropertySource`, para não forçar
+  os outros testes do worker — que dependem do default de 100 — a
+  conviver com esse override).
+
+  **`outbox.worker.poll-interval-ms`** (default 5000, mesmo `@Value` do
+  `batch-size`): controla o `fixedDelayString` do `@Scheduled`, em vez do
+  literal `5000` fixo que existia antes. Motivo real, não hipotético: como
+  `OutboxWorkerBatchSizeIntegrationTests` sobe um `@SpringBootTest`
+  completo (não um slice), o `@Scheduled` de verdade continuava rodando no
+  fundo enquanto o teste semeava sua própria fixture e fazia sua chamada
+  explícita — e chegou a "roubar" um evento semeado antes da chamada
+  explícita, quebrando a contagem exata esperada pelo teste. Esse teste
+  agora sobrescreve `poll-interval-ms` para 1 hora via
+  `@TestPropertySource`, tornando essa corrida impossível em vez de só
+  improvável — os demais testes do worker continuam no default de 5s.
+
 **Direção de dependência**: domínios de negócio (ex: `ordering`) dependem
 de `outbox` para publicar eventos; `outbox` nunca depende de volta para um
 pacote de domínio — o formato de cada payload (ex: `OrderCreatedEvent`)
