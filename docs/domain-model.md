@@ -295,6 +295,47 @@ Kafka neste momento)."
   substituir o índice de `status` sozinho do V10 (que continua servindo o
   poll de `PENDING` do worker, uma query diferente).
 
+- **`OutboxMetrics`** (FARELO-062): resolve uma lacuna operacional deixada
+  pelo FARELO-060/061 — nada, de fora do processo, indicava se
+  `OutboxWorker` estava saudável; se ele parasse de rodar (crash, deploy
+  quebrado etc), eventos `PENDING` simplesmente se acumulariam em
+  silêncio, sem nenhum sinal externo. `@Component` que registra dois
+  `Gauge`s do Micrometer (`io.micrometer.core.instrument`, já disponível
+  via `spring-boot-starter-actuator`) no `MeterRegistry` injetado, ambos
+  escopados a `OutboxEventStatus.PENDING`:
+  - `outbox.events.pending`: contagem de linhas `PENDING`
+    (`OutboxEventRepository#countByStatus`, query de contagem derivada do
+    Spring Data).
+  - `outbox.events.pending.oldest.age` (segundos, `baseUnit("seconds")`):
+    idade da linha `PENDING` mais antiga — o sinal mais direto de "o
+    worker parou de drenar" (um worker saudável mantém esse valor perto do
+    seu intervalo de poll de 5s, independente da profundidade da fila; um
+    worker morto deixa esse valor crescer sem limite). Retorna `0` quando
+    a fila está vazia, em vez de um valor ausente/negativo — o gauge
+    sempre tem uma leitura bem definida. Usa
+    `OutboxEventRepository#findOldestCreatedAtByStatus`, uma query
+    `MIN(created_at)` própria — deliberadamente **não** reaproveita
+    `findByStatusOrderByCreatedAtAsc` (que já existe e serviria, lendo só
+    o primeiro elemento): esse método carrega toda a lista de eventos
+    `PENDING` (payload incluído) para descartar todos menos um, e um
+    gauge é reavaliado a cada scrape de métricas — exatamente o cenário
+    mais caro é justo o que esta métrica existe para detectar (fila
+    `PENDING` crescendo sem limite).
+
+  `Gauge`, não `Counter` — ambos os valores sobem e descem com a
+  profundidade da fila, nunca um total cumulativo.
+
+  Endpoints Micrometer/Actuator ficam desligados por padrão no Spring
+  Boot — `metrics` foi adicionado a
+  `management.endpoints.web.exposure.include` no `application.yml` (antes
+  só tinha `health`), então os gauges ficam acessíveis em
+  `/actuator/metrics/outbox.events.pending` e
+  `/actuator/metrics/outbox.events.pending.oldest.age`.
+
+  Nenhuma dependência nova — `micrometer-core` já vem transitivamente via
+  `spring-boot-starter-actuator`, que o projeto já usa para
+  `/actuator/health`.
+
 **Direção de dependência**: domínios de negócio (ex: `ordering`) dependem
 de `outbox` para publicar eventos; `outbox` nunca depende de volta para um
 pacote de domínio — o formato de cada payload (ex: `OrderCreatedEvent`)
