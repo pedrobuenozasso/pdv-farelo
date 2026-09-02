@@ -1,0 +1,53 @@
+# Compose complementar de DESENVOLVIMENTO: sobe backend + frontend além do
+# Postgres já definido em docker-compose.yml. Combine os dois com -f (ver
+# infra/README.md para o comando completo e o porquê de dois arquivos
+# separados em vez de um único docker-compose.yml).
+#
+# Não é o compose de produção — não há ticket de deploy no roadmap atual
+# (ver docs/architecture.md). Foco exclusivo: rodar o sistema completo
+# localmente com um único comando.
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/docker/api.Dockerfile
+    container_name: farelo-api
+    restart: unless-stopped
+    environment:
+      # Dentro da rede do compose o Postgres é acessado pelo nome do
+      # serviço, não por "localhost" (default em apps/api/application.yml,
+      # válido para quem roda o backend nativamente fora de container).
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+    container_name: farelo-web
+    restart: unless-stopped
+    environment:
+      # Dentro da rede do compose o backend é acessado pelo nome do
+      # serviço, não por "localhost" (default em apps/web/next.config.ts,
+      # válido para quem roda o frontend nativamente fora de container).
+      API_BASE_URL: http://backend:8080
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../apps/web:/app
+      # Volumes anônimos: preservam node_modules/.next instalados dentro da
+      # imagem (Linux) em vez de deixar o bind mount acima sobrescrevê-los
+      # com o conteúdo (potencialmente outra plataforma) do host.
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend

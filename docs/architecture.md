@@ -47,6 +47,13 @@ Detalhado em [`domain-model.md`](domain-model.md) conforme cada domínio é impl
 Docker + Docker Compose, Ubuntu LTS, Hostinger VPS (KVM2 — 2 vCPU / 8 GB RAM / 100 GB NVMe),
 Cloudflare, Caddy, GitHub Actions.
 
+**Ambiente de desenvolvimento**: `infra/docker-compose.yml` (Postgres) +
+`infra/docker-compose.dev.yml` (backend + frontend, complementar — ver
+`infra/README.md`) sobem a stack completa localmente com um único comando.
+São Dockerfiles/compose de **desenvolvimento**, não de produção — nenhum
+ticket do roadmap atual cobre o deploy real (VPS/Caddy/Cloudflare listados
+acima permanecem não implementados).
+
 ## Roadmap de milestones
 
 1. **Primeira entrega** ✅ **completa** (FARELO-059, KDS): Admin cadastra produto → aparece

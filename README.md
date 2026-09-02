@@ -31,3 +31,18 @@ e [`docs/decisions/`](docs/decisions/) para detalhes e decisões registradas.
 Este projeto é construído em tickets pequenos e incrementais (ver `docs/architecture.md`
 para o roadmap de épicos). Cada ticket tem escopo único e commits seguem
 [Conventional Commits](https://www.conventionalcommits.org/).
+
+### Rodando o projeto completo localmente
+
+```bash
+cp infra/.env.example infra/.env   # primeira vez apenas
+cd infra
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+Sobe Postgres + backend (`:8080`) + frontend (`:3000`) num único comando —
+`docker-compose.yml` sozinho sobe só o Postgres (uso mínimo, ex: rodar o
+backend nativamente fora de container). Ver [`infra/README.md`](infra/README.md)
+para detalhes (rebuild após mudança no backend, hot-reload do frontend, etc).
+Isso é ambiente de **desenvolvimento** — não é o compose de produção (sem
+ticket de deploy no roadmap atual, ver `docs/architecture.md`).
