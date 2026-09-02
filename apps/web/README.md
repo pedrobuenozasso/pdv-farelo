@@ -35,11 +35,25 @@ de "não encontrada" (número inexistente, não numérico ou fora de
 1-100). É um Server Component (`src/lib/api/commands.ts` busca direto
 via `API_BASE_URL`, sem passar pelo proxy do `next.config.ts` — ver
 comentário no próprio arquivo) em vez de client component + TanStack
-Query, já que ainda não há interatividade nesta tela.
+Query.
+FARELO-042/043 adicionaram o cardápio em si: quando a comanda está
+`AVAILABLE`/`OPEN`, `/c/[commandNumber]` mostra os produtos agrupados
+por categoria (nome, descrição, preço em BRL, imagem via `<img>` simples
+— sem `next/image` por enquanto, YAGNI). `listCategories`/`listProducts`
+(`src/lib/api/categories.ts`/`products.ts`) ficaram isomórficos: caminho
+relativo via proxy quando chamados de um client component (Admin), URL
+absoluta via `API_BASE_URL` quando chamados de um Server Component
+(cardápio), decidido em runtime por `typeof window`. Como
+`GET /api/v1/categories`/`GET /api/v1/products` ainda não têm filtro de
+`active`/`availableOnMenu`, o cardápio filtra no frontend mesmo (produto
+visível apenas se `active && availableOnMenu`; categoria visível apenas
+se tiver ao menos um produto visível) — aceitável para o volume de dados
+atual; um endpoint público filtrado é candidato natural se o catálogo
+crescer bastante.
 Ainda não há shadcn/ui, nem edição/exclusão de categoria (sem endpoint
 `PUT`/`DELETE` para categoria no backend ainda) nem exclusão de produto
-(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem cardápio
-em `/c/{commandNumber}` (FARELO-042/043) nem as demais rotas de negócio
+(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem carrinho
+em `/c/{commandNumber}` (FARELO-044) nem as demais rotas de negócio
 (`/pdv`, `/kitchen`, shell completo de `/admin`) — isso é escopo de
 tickets futuros.
 
