@@ -1,0 +1,11 @@
+# dependencies
+/node_modules
+
+# build output (tsc -p tsconfig.json)
+/dist
+
+# misc
+.DS_Store
+
+# typescript
+*.tsbuildinfo
