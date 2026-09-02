@@ -48,3 +48,17 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   });
   return parseResponse<Order>(response);
 }
+
+// GET /api/v1/commands/{number}/orders (FARELO-035, PDV) — lives here
+// rather than commands.ts since it returns Order/OrderItem data, which
+// this file already owns; the URL just happens to be nested under
+// /commands. Client-only (called from app/pdv/page.tsx), same relative-
+// path convention as createOrder above.
+export async function listCommandOrders(
+  commandNumber: number,
+): Promise<Order[]> {
+  const response = await fetch(`/api/v1/commands/${commandNumber}/orders`, {
+    cache: "no-store",
+  });
+  return parseResponse<Order[]>(response);
+}
