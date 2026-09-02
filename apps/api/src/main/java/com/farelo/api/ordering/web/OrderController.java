@@ -78,4 +78,16 @@ public class OrderController {
         return OrderResponse.from(result);
     }
 
+    @PostMapping("/{id}/deliver")
+    public OrderResponse markAsDelivered(@PathVariable UUID id) {
+        OrderWithItems result = orderService.markAsDelivered(id);
+        return OrderResponse.from(result);
+    }
+
+    @PostMapping("/{id}/cancel")
+    public OrderResponse markAsCancelled(@PathVariable UUID id) {
+        OrderWithItems result = orderService.markAsCancelled(id);
+        return OrderResponse.from(result);
+    }
+
 }

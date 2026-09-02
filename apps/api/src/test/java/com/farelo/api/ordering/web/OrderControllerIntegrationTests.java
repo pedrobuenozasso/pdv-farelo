@@ -105,6 +105,18 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         commandRepository.save(command);
     }
 
+    // Sets an order's status directly via the repository, bypassing the
+    // service's transition validation — used only to reach CONFIRMED for
+    // test setup below, since nothing in the system transitions an order
+    // into CONFIRMED yet (see OrderStatus/markAsPreparing's javadoc). Same
+    // "reach into the repository for test setup" pattern as
+    // setCommandStatus above.
+    private void setOrderStatus(UUID orderId, OrderStatus status) {
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        order.setStatus(status);
+        orderRepository.save(order);
+    }
+
     private Product createActiveProduct(BigDecimal price) {
         Category category = categoryRepository.save(new Category("Bebidas"));
         return productRepository.save(new Product("Café Espresso", price, category));
@@ -488,6 +500,180 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/orders/{id}/ready", UUID.randomUUID()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
+    }
+
+    @Test
+    void marksOrderAsDeliveredAndRecordsHistory() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(orderId.toString()))
+                .andExpect(jsonPath("$.status").value("DELIVERED"));
+
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        List<OrderStatusHistory> history = orderStatusHistoryRepository.findByOrderOrderByChangedAtAsc(order);
+
+        assertThat(history).hasSize(4);
+        assertThat(history.get(3).getFromStatus()).isEqualTo(OrderStatus.READY);
+        assertThat(history.get(3).getToStatus()).isEqualTo(OrderStatus.DELIVERED);
+    }
+
+    @Test
+    void returnsConflictWhenMarkingNonReadyOrderAsDelivered() throws Exception {
+        // still CREATED — skips PREPARING/READY entirely.
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ORDER_INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsOrderNotFoundWhenMarkingUnknownOrderAsDelivered() throws Exception {
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
+    }
+
+    @Test
+    void cancelsOrderFromCreatedAndRecordsHistory() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(orderId.toString()))
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        List<OrderStatusHistory> history = orderStatusHistoryRepository.findByOrderOrderByChangedAtAsc(order);
+
+        assertThat(history).hasSize(2);
+        assertThat(history.get(1).getFromStatus()).isEqualTo(OrderStatus.CREATED);
+        assertThat(history.get(1).getToStatus()).isEqualTo(OrderStatus.CANCELLED);
+    }
+
+    // CONFIRMED has no transition into it anywhere in the system yet (see
+    // OrderStatus/markAsPreparing's javadoc) — set directly via
+    // setOrderStatus, purely to exercise markAsCancelled's origin-status
+    // check for this otherwise-unreachable case, same as the other three
+    // origins below.
+    @Test
+    void cancelsOrderFromConfirmedAndRecordsHistory() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        setOrderStatus(orderId, OrderStatus.CONFIRMED);
+
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+
+        List<OrderStatusHistory> history = orderStatusHistoryRepository.findByOrderOrderByChangedAtAsc(order);
+        OrderStatusHistory lastEntry = history.get(history.size() - 1);
+        assertThat(lastEntry.getFromStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        assertThat(lastEntry.getToStatus()).isEqualTo(OrderStatus.CANCELLED);
+    }
+
+    @Test
+    void cancelsOrderFromPreparingAndRecordsHistory() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        List<OrderStatusHistory> history = orderStatusHistoryRepository.findByOrderOrderByChangedAtAsc(order);
+
+        assertThat(history).hasSize(3);
+        assertThat(history.get(2).getFromStatus()).isEqualTo(OrderStatus.PREPARING);
+        assertThat(history.get(2).getToStatus()).isEqualTo(OrderStatus.CANCELLED);
+    }
+
+    @Test
+    void cancelsOrderFromReadyAndRecordsHistory() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        List<OrderStatusHistory> history = orderStatusHistoryRepository.findByOrderOrderByChangedAtAsc(order);
+
+        assertThat(history).hasSize(4);
+        assertThat(history.get(3).getFromStatus()).isEqualTo(OrderStatus.READY);
+        assertThat(history.get(3).getToStatus()).isEqualTo(OrderStatus.CANCELLED);
+    }
+
+    @Test
+    void returnsConflictWhenCancellingDeliveredOrder() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId)).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ORDER_INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsConflictWhenCancellingAlreadyCancelledOrder() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ORDER_INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsOrderNotFoundWhenCancellingUnknownOrder() throws Exception {
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
+    }
+
+    // Confirms the side effect documented in docs/api.md's GET /api/v1/orders
+    // section rather than assuming it: DELIVERED/CANCELLED are terminal, so
+    // an order reaching either must disappear from the kitchen queue, same
+    // as the already-covered READY case above.
+    @Test
+    void kitchenQueueExcludesDeliveredAndCancelledOrders() throws Exception {
+        Product product = createActiveProduct(new BigDecimal("6.00"));
+
+        UUID deliveredOrderId = createOrder(product);
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", deliveredOrderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", deliveredOrderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", deliveredOrderId)).andExpect(status().isOk());
+
+        UUID cancelledOrderId = createOrder(product);
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", cancelledOrderId)).andExpect(status().isOk());
+
+        MvcResult result = mockMvc.perform(get("/api/v1/orders"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        List<OrderResponse> queue = objectMapper.readValue(
+                result.getResponse().getContentAsString(),
+                objectMapper.getTypeFactory().constructCollectionType(List.class, OrderResponse.class));
+        List<UUID> queueIds = queue.stream().map(OrderResponse::id).toList();
+
+        assertThat(queueIds).doesNotContain(deliveredOrderId, cancelledOrderId);
     }
 
     // FARELO-059: GET /api/v1/orders (kitchen queue). Postgres is a

@@ -564,8 +564,81 @@ explicitamente, então não há essa ambiguidade a evitar.
 - `409 Conflict` — o pedido existe mas não está `PREPARING`, mesmo
   formato de `ORDER_INVALID_TRANSITION` acima.
 
-Ainda não há transição para `CONFIRMED`, `DELIVERED`, `CANCELLED`, nem
-endpoint para consultar o histórico — escopo de tickets futuros.
+Ainda não há transição para `CONFIRMED`, nem endpoint para consultar o
+histórico — escopo de tickets futuros.
+
+### `POST /api/v1/orders/{id}/deliver`
+
+Marca um pedido como entregue: transição de status `READY` → `DELIVERED`.
+Fecha o ciclo de vida normal do pedido (follow-up sem número FARELO
+explícito no roadmap original — ver nota no topo da seção `ordering` em
+`docs/domain-model.md`).
+
+Mesma razão para `POST` em vez de `PATCH` dos demais endpoints de
+transição acima.
+
+**Estado de origem válido**: apenas `READY` — mesmo formato de único
+estado de origem de `/preparing`/`/ready`, reaproveitando o mesmo
+mecanismo de transição sem alteração nele.
+
+Grava uma entrada em `OrderStatusHistory` (`fromStatus: "READY"`,
+`toStatus: "DELIVERED"`).
+
+`DELIVERED` é um status terminal: nenhuma transição sai dele. Uma vez
+entregue, um pedido não pode ser marcado como entregue de novo nem
+cancelado (ver `/cancel` abaixo).
+
+**Response — `200 OK`**
+
+`OrderResponse` atualizado, com `status: "DELIVERED"`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhum pedido existente,
+  `code: "ORDER_NOT_FOUND"`.
+- `409 Conflict` — o pedido existe mas não está `READY`, mesmo formato de
+  `ORDER_INVALID_TRANSITION` de `/preparing`/`/ready` acima.
+
+### `POST /api/v1/orders/{id}/cancel`
+
+Cancela um pedido: transição de status para `CANCELLED`, a partir de
+**qualquer** status não-terminal — `CREATED`, `CONFIRMED`, `PREPARING` ou
+`READY`. Diferente de `/preparing`/`/ready`/`/deliver` (um único status de
+origem cada), cancelamento faz sentido em qualquer ponto do ciclo de vida
+até o pedido ser entregue — por isso múltiplos estados de origem são
+aceitos aqui.
+
+Mesma razão para `POST` em vez de `PATCH` dos demais endpoints de
+transição acima.
+
+**Estados de origem válidos**: `CREATED`, `CONFIRMED`, `PREPARING`,
+`READY`. `DELIVERED` (já entregue) e `CANCELLED` (já cancelado) são
+inválidos como origem — ambos são status terminais.
+
+Grava uma entrada em `OrderStatusHistory` (`fromStatus`: o status atual
+do pedido no momento do cancelamento, `toStatus: "CANCELLED"`).
+
+**Response — `200 OK`**
+
+`OrderResponse` atualizado, com `status: "CANCELLED"`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhum pedido existente,
+  `code: "ORDER_NOT_FOUND"`.
+- `409 Conflict` — o pedido existe mas já está `DELIVERED` ou `CANCELLED`,
+  mesmo formato de `ORDER_INVALID_TRANSITION` acima:
+
+  ```json
+  {
+    "code": "ORDER_INVALID_TRANSITION",
+    "message": "Order d4e5f6a7-8901-2bcd-ef34-567890abcdef cannot transition to CANCELLED (current status: DELIVERED)",
+    "correlationId": "..."
+  }
+  ```
+
+Ainda não há endpoint para consultar o histórico de transições — escopo
+de um ticket futuro.
 
 ### `GET /api/v1/orders`
 
