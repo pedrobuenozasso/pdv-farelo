@@ -242,4 +242,43 @@ substituição completa, faz sentido exigir os três explicitamente.
   ou `categoryId` não existe, `code: "CATEGORY_NOT_FOUND"` (mesmo formato do
   `POST`).
 
+### `GET /api/v1/commands/{number}`
+
+Busca uma comanda pelo `number`. (FARELO-032)
+
+Primeiro endpoint do domínio `command`. `{number}` é o identificador
+humano de negócio (1-100, ver seed FARELO-031) — **não** o `id` técnico
+(UUID); o `id` nunca é usado como identificador na URL/negócio (prompt
+mestre seção 41).
+
+**Response — `200 OK`**
+
+```json
+{
+  "id": "c1d2e3f4-5678-90ab-cdef-1234567890ab",
+  "number": 1,
+  "status": "AVAILABLE",
+  "createdAt": "2026-09-01T13:00:00Z",
+  "updatedAt": "2026-09-01T13:00:00Z"
+}
+```
+
+`status` é um dos valores de `CommandStatus`: `AVAILABLE`, `OPEN`,
+`PAYMENT_REQUESTED`, `CLOSED`, `BLOCKED`.
+
+**Erros**
+
+- `404 Not Found` — `number` não corresponde a nenhuma comanda existente:
+
+  ```json
+  {
+    "code": "COMMAND_NOT_FOUND",
+    "message": "Command not found: 999",
+    "correlationId": "..."
+  }
+  ```
+
+Ainda não há endpoints para transição de status da comanda (abrir, fechar,
+etc.) — escopo de FARELO-033/034 em diante.
+
 _(demais endpoints a preencher conforme implementados)_
