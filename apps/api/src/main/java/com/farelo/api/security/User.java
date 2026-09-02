@@ -37,7 +37,7 @@ import java.util.UUID;
  * directly (AGENTS.md).
  *
  * <p><b>{@code email}</b>: required and unique (backed by {@code
- * uk_app_user_email} in {@code V19__create_user_table.sql}) — it will be the
+ * uk_app_user_email} in {@code V20__create_user_table.sql}) — it will be the
  * login identifier once FARELO-121 exists, even though the login mechanism
  * itself doesn't exist yet.
  *

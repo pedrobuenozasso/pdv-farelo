@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Verifies that {@link User} maps correctly onto the table created by
- * {@code V19__create_user_table.sql}, against a real PostgreSQL instance —
+ * {@code V20__create_user_table.sql}, against a real PostgreSQL instance —
  * including the {@code uk_app_user_email} unique constraint, the DB-level
  * source of truth backing {@link UserService}'s email uniqueness check (see
  * that class's javadoc).

@@ -38,7 +38,7 @@ package com.farelo.api.security;
  * enforcement of any kind. This is exactly and only a labelled column.
  *
  * <p>{@code VARCHAR} + {@code CHECK} at the DB level (see
- * {@code V19__create_user_table.sql}), same convention as {@code
+ * {@code V20__create_user_table.sql}), same convention as {@code
  * IngredientUnit}/{@code ProductionStation}/{@code CommandStatus} —
  * extending this list later costs a follow-up migration to widen the
  * constraint, a trade-off already accepted project-wide for closed-set

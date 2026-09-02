@@ -31,7 +31,7 @@ public class UserService {
      * {@code email} is already taken. The uniqueness pre-check here mirrors
      * {@code RecipeService#create}'s reasoning: the real source of truth
      * under concurrency is the {@code uk_app_user_email} constraint at the
-     * DB level ({@code V19__create_user_table.sql}) — this check exists to
+     * DB level ({@code V20__create_user_table.sql}) — this check exists to
      * turn the common case into a clean {@code 409} instead of a generic
      * constraint-violation error, not to fully close the race.
      */

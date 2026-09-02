@@ -1,4 +1,4 @@
--- V19__create_user_table.sql
+-- V20__create_user_table.sql
 -- Security/Admin domain (FARELO-120): first table of the security domain —
 -- the account of a person who can operate the system (a Farelo employee).
 -- Only the account record itself. No login mechanism exists yet

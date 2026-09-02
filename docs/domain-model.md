@@ -1028,7 +1028,7 @@ Pacote: `com.farelo.api.security`.
   `Ingredient` — permite desativar um funcionário sem apagar histórico),
   `createdAt`/`updatedAt` (UTC). Tabela `app_user` (não `user` — palavra
   reservada em SQL, mesmo raciocínio já usado para `orders` vs. `order` no
-  domínio `ordering`) criada pela migration `V19__create_user_table.sql`.
+  domínio `ordering`) criada pela migration `V20__create_user_table.sql`.
 
   **Escopo deste ticket, explicitamente**: só a entidade `User` em si e seu
   CRUD básico — o cadastro de quem *pode* existir no sistema. **Nada aqui
