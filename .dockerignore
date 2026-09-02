@@ -1,0 +1,22 @@
+# Contexto de build dos Dockerfiles de dev em infra/docker/ (build context =
+# raiz do repo — ver infra/docker-compose.dev.yml). Mantém o contexto
+# enviado ao daemon Docker pequeno e evita copiar artefatos locais para
+# dentro das imagens.
+
+.git/
+.github/
+.claude/
+
+**/node_modules/
+**/.next/
+**/out/
+**/dist/
+
+apps/api/target/
+
+docs/
+*.md
+
+.env
+.env.*
+!.env.example
