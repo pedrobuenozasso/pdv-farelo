@@ -1,9 +1,18 @@
 /**
- * Cliente HTTP para `GET /api/v1/print-jobs` (FARELO-076), implementado em
- * paralelo por um backend-agent em `apps/api`. Retorna todos os `PrintJob`s
- * pendentes, do mais antigo pro mais novo (contrato exato do endpoint, ver
- * `docs/PROMPT_MESTRE.md` seção 11/12 e `docs/domain-model.md` — pacote
- * `printing`).
+ * Cliente HTTP para os endpoints de `PrintJob` consumidos pelo Edge Agent:
+ *
+ * - `GET /api/v1/print-jobs` (FARELO-076): lista `PrintJob`s pendentes.
+ * - `POST /api/v1/print-jobs/{id}/printed` e `.../failed` (FARELO-077):
+ *   reportam o desfecho de um job (sem corpo, `200 OK`).
+ *
+ * Implementados em paralelo por um backend-agent em `apps/api` (contrato
+ * exato dos três endpoints, ver `docs/PROMPT_MESTRE.md` seção 11/12 e
+ * `docs/domain-model.md` — pacote `printing`).
+ *
+ * Os três ficam neste único módulo (em vez de um arquivo novo só para
+ * `printed`/`failed`): é o mesmo contrato HTTP de `PrintJob`, pequeno o
+ * suficiente (poucas linhas cada endpoint) para não justificar fragmentar
+ * em dois módulos por causa deste ticket.
  *
  * Usa `fetch` nativo do Node (disponível desde o Node 18, estável — ver
  * ADR-002) em vez de adicionar uma lib de HTTP client: não há necessidade
@@ -182,4 +191,40 @@ export async function fetchPendingPrintJobs(
 
   const body: unknown = await response.json();
   return parsePrintJobs(body);
+}
+
+/**
+ * Reporta o desfecho de um `PrintJob` via
+ * `POST {apiBaseUrl}/api/v1/print-jobs/{jobId}/printed|failed` — sem corpo,
+ * `200 OK` esperado (contrato do backend-agent, FARELO-077). Lança em caso
+ * de erro de rede ou resposta não-2xx; quem chama decide como lidar com
+ * isso (no poller, hoje: loga e segue, sem retry — ver `poller.ts`).
+ */
+async function reportPrintJobOutcome(
+  apiBaseUrl: string,
+  jobId: string,
+  outcome: "printed" | "failed",
+): Promise<void> {
+  const path = `/api/v1/print-jobs/${jobId}/${outcome}`;
+  const response = await fetch(`${apiBaseUrl}${path}`, { method: "POST" });
+
+  if (!response.ok) {
+    throw new Error(`POST ${path} falhou com status ${response.status}`);
+  }
+}
+
+/** Reporta o `PrintJob` `jobId` como `PRINTED`. Ver `reportPrintJobOutcome`. */
+export function reportPrintJobPrinted(
+  apiBaseUrl: string,
+  jobId: string,
+): Promise<void> {
+  return reportPrintJobOutcome(apiBaseUrl, jobId, "printed");
+}
+
+/** Reporta o `PrintJob` `jobId` como `FAILED`. Ver `reportPrintJobOutcome`. */
+export function reportPrintJobFailed(
+  apiBaseUrl: string,
+  jobId: string,
+): Promise<void> {
+  return reportPrintJobOutcome(apiBaseUrl, jobId, "failed");
 }

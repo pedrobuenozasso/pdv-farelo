@@ -14,13 +14,35 @@ de dispositivos.
 
 ## Status atual
 
-**Consulta PrintJobs pendentes (FARELO-076).** O serviço conecta com a API e faz
-polling periódico de `GET /api/v1/print-jobs`, logando os `PrintJob`s pendentes
-encontrados (id, comanda, estação, itens). Ainda não imprime nada de verdade
-(FARELO-078) nem reporta status de impressão (FARELO-077) — só busca e loga. Uma
-falha de rede/API indisponível é logada e o próximo ciclo tenta de novo; o
-processo nunca cai por causa disso (fila temporária local, mencionada no prompt
-mestre seção 11, é responsabilidade futura, ainda não implementada).
+**Consulta PrintJobs pendentes + report de desfecho (FARELO-076 e FARELO-077).**
+O serviço conecta com a API e faz polling periódico de `GET /api/v1/print-jobs`,
+logando os `PrintJob`s pendentes encontrados (id, comanda, estação, itens). Para
+cada job logado, chama `POST /api/v1/print-jobs/{id}/printed` (sem corpo, `200
+OK` esperado) e loga o resultado desse report. Ainda não imprime nada de verdade
+(FARELO-078) — só busca, loga e reporta.
+
+**Nota importante sobre o que "reportar como PRINTED" significa hoje**: a
+impressão física via ESC/POS ainda não existe (FARELO-078). O único
+"processamento" real que este serviço faz hoje é buscar o job e logá-lo. A
+decisão tomada neste ticket foi: **"consegui buscar e logar o job" é tratado
+como um substituto temporário e explicitamente documentado de "consegui
+processar o job"** — por isso o Edge Agent chama sempre `/printed`, nunca
+`/failed`, para todo job que chega até o polling hoje. Isso **não é o
+comportamento final do produto**, é um estado intermediário deliberado. O
+`POST .../failed` já existe no cliente HTTP (`src/printJobsClient.ts`), pronto
+para uso — só não é chamado por nenhum caminho ainda, porque não há hoje uma
+falha real de impressão para reportar. **FARELO-078** é quem dá substância real
+a essa decisão: ao implementar a impressão ESC/POS de verdade, o
+"processamento" do loop passa a ser a tentativa de impressão em si — que aí sim
+pode falhar por um motivo real (impressora offline, sem papel, erro de driver)
+e justificar chamar `/failed`. Ver o comentário no topo de `src/poller.ts` para
+o mesmo raciocínio no código.
+
+Uma falha de rede/API indisponível — seja no polling, seja na chamada de
+report — é logada e o próximo ciclo tenta de novo; o processo nunca cai por
+causa disso, e não há lógica de retry sofisticada (fila temporária local,
+mencionada no prompt mestre seção 11, é responsabilidade futura, ainda não
+implementada — mesmo raciocínio já valia para o polling desde o FARELO-076).
 
 FARELO-075 (esqueleto mínimo — só inicializar e logar que o processo subiu) foi o
 ponto de partida deste app.
@@ -70,6 +92,15 @@ Consultando PrintJobs pendentes em http://localhost:8080/api/v1/print-jobs a cad
 Nenhum PrintJob pendente.
 ```
 
+Saída esperada com um `PrintJob` pendente (report de `PRINTED` bem-sucedido —
+ver a nota acima sobre o que isso significa hoje):
+
+```
+1 PrintJob(s) pendente(s):
+  PrintJob 3fa85f64-... — comanda 37 [BAR]: 2x Cappuccino
+  → PrintJob 3fa85f64-... reportado como PRINTED.
+```
+
 ## Testes
 
 ```bash
@@ -79,12 +110,14 @@ npm test
 Usa o test runner nativo do Node (`node:test`, via `tsx --test`) — sem lib de
 teste adicional. Cobre o parsing/formatação da resposta de
 `GET /api/v1/print-jobs` (`src/printJobsClient.test.ts`) com um fixture do
-JSON do contrato do endpoint, incluindo casos de entrada malformada. Não há
+JSON do contrato do endpoint, incluindo casos de entrada malformada, e a
+construção da chamada (URL/método) de `POST .../printed` e `.../failed`
+(FARELO-077) estubando `global.fetch` — sem subir servidor de verdade. Não há
 teste de integração contra uma API rodando de verdade: para o tamanho atual
-deste serviço (sem lógica de negócio, só consultar + logar), isso seria mais
-pesado do que o escopo pede — a validação de ponta a ponta (cliente HTTP +
-parsing contra o backend real) é feita manualmente ao rodar `npm run dev`
-apontando para uma API local, como descrito acima.
+deste serviço (sem lógica de negócio, só consultar/reportar + logar), isso
+seria mais pesado do que o escopo pede — a validação de ponta a ponta (cliente
+HTTP + parsing contra o backend real) é feita manualmente ao rodar
+`npm run dev` apontando para uma API local, como descrito acima.
 
 ### Lint / format
 
