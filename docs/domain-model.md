@@ -69,5 +69,8 @@ Pacote: `com.farelo.api.command`.
   Comandas nunca são apagadas — cada ciclo operacional (visita de um
   cliente) deixa um registro histórico; reabertura/histórico por `number`
   fica para tickets futuros. `CommandRepository` expõe `findByNumber(int)`,
-  já pensando no FARELO-032. Sem seed de 1-100 (FARELO-031) nem endpoints
-  REST (FARELO-032+) ainda.
+  já pensando no FARELO-032. Ainda sem endpoints REST (FARELO-032+).
+- **Seed 1-100** (FARELO-031): migration `V6__seed_commands_1_to_100.sql`
+  insere as 100 comandas físicas do estabelecimento (`INSERT INTO command
+  (number) SELECT generate_series(1, 100)`), todas com `status` `AVAILABLE`
+  (default da coluna, não precisa ser especificado no `INSERT`).
