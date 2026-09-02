@@ -13,8 +13,8 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `ordering` | `Order`, `OrderItem`, snapshot de preço, histórico de status | Em andamento |
 | `kitchen` | KDS — visualização e transição de status de preparo | Não iniciado — `GET /api/v1/orders` (fila da cozinha, FARELO-059) já existe, mas ficou em `ordering` por enquanto; ver nota na seção `ordering` abaixo |
 | `printing` | `Printer`, `PrintJob`, integração com Edge Agent | Em andamento |
-| `inventory` | `Ingredient`, `InventoryMovement` (ledger) | Em andamento |
-| `recipe` | `Recipe`, `RecipeItem` — ficha técnica de produtos | Não iniciado |
+| `inventory` | `Ingredient`, `Recipe`, `RecipeItem` (ficha técnica), `InventoryMovement` (ledger) | Em andamento |
+| `recipe` | Ficha técnica de produtos — **implementada dentro do pacote `inventory`** (`Recipe`/`RecipeItem`, FARELO-091/092), não como pacote próprio; linha mantida por rastreabilidade com o roadmap original | Em andamento (ver `inventory`) |
 | `notification` | `Notification`, adapter WhatsApp Cloud API | Não iniciado |
 | `payment` | `Payment`, múltiplos pagamentos por comanda | Não iniciado |
 | `fiscal` | `FiscalProfile`, `FiscalDocument`, NFC-e (futuro) | Não iniciado |
@@ -1014,6 +1014,127 @@ Pacote: `com.farelo.api.inventory`.
   classes depende das tabelas de produto/categoria estarem vazias (cada
   teste cria seu próprio produto com nome único), então simplesmente não
   tocar nessas tabelas compartilhadas resolve sem qualquer risco.
+
+- **`RecipeItem`** (FARELO-092): entidade JPA — uma linha da composição de
+  uma `Recipe` (prompt mestre seção 15): um `Ingredient` e a quantidade dele
+  consumida por unidade vendida do produto da receita — ex: "pão com ovos e
+  bacon" tem um `RecipeItem` por ingrediente: 3 UN ovos, 1 UN pão, 80 G
+  bacon, 10 G manteiga. `id` (UUID, mesma estratégia dos demais domínios),
+  `recipe` (`@ManyToOne` obrigatório para `Recipe`), `ingredient`
+  (`@ManyToOne` obrigatório para `Ingredient`), `quantity` (`BigDecimal`,
+  coluna `NUMERIC(12,3)` — nunca `double`/`float`, ver AGENTS.md; mesma
+  escolha já usada pra dinheiro no projeto, apropriada aqui também porque
+  quantidades fracionárias são legítimas, ex: `0.5` L de leite),
+  `createdAt`/`updatedAt` (UTC). Tabela criada pela migration
+  `V19__create_recipe_item_table.sql`.
+
+  **Escopo deste ticket é só a entidade `RecipeItem` em si e o CRUD dela.**
+  Nenhuma baixa de estoque ao criar pedido (FARELO-096, "vender 10 unidades
+  desconta os ingredientes proporcionalmente") foi antecipada aqui — mesma
+  abordagem incremental já usada em `Ingredient`/`Recipe`: este ticket só
+  registra a composição da receita, não age sobre ela.
+
+  **`quantity` está sempre na unidade base de `Ingredient.unit`, sem
+  conversão de unidade de compra**: mesma regra "internamente preferir
+  unidade base" já aplicada a `IngredientUnit` (prompt mestre seção 14) —
+  ex: 80 G de bacon é armazenado como `80` contra um ingrediente cuja
+  unidade é `GRAM`, nunca em alguma outra unidade de exibição/compra.
+  Converter para uma unidade de exibição (ex: mostrar o bacon em KG num
+  relatório) é responsabilidade de UI/relatório de um ticket futuro, não
+  deste.
+
+  **Sem coleção `@OneToMany` de `RecipeItem` em `Recipe`, e `Recipe.java`
+  intencionalmente não foi tocado por este ticket.** A relação é um
+  `@ManyToOne` unidirecional de `RecipeItem` para `Recipe`, não uma
+  associação bidirecional. Razões: (1) nada em "listar os itens de uma
+  receita" precisa de uma coleção gerenciada viva do lado dono —
+  `RecipeItemRepository#findByRecipeId` é uma consulta explícita simples que
+  faz o mesmo trabalho sem nenhuma das armadilhas usuais de uma associação
+  bidirecional (manter os dois lados sincronizados em add/remove, risco de
+  N+1 se a coleção for EAGER, ou risco de `LazyInitializationException` se
+  for LAZY e lida fora de uma transação — este projeto roda com
+  `open-in-view=false`, então esse risco é real, ver
+  `PrintJobRepository`/`RecipeRepository` pro precedente de `JOIN FETCH` que
+  o repository deste ticket também segue); (2) `Recipe.java` foi mergeado
+  muito recentemente como um ticket isolado (FARELO-091) — mexer nele aqui
+  por uma conveniência que não é necessária adicionaria superfície de
+  revisão e uma chance pequena de colidir com trabalho concorrente de outro
+  agente no mesmo arquivo, sem ganho de comportamento. Se um ticket futuro
+  precisar de "apagar em cascata os itens de uma receita quando a própria
+  receita for apagada", esse é o ponto pra reconsiderar isso — hoje `Recipe`
+  nunca é apagada de verdade (só desativada), então esse cascade também não
+  é necessário ainda.
+
+  **Restrição de duplicidade**: o mesmo `Ingredient` não pode aparecer duas
+  vezes na mesma `Recipe` — duas linhas pro mesmo ingrediente na mesma
+  receita é erro de cadastro, não um caso de uso real (o caminho certo pra
+  mudar a quantidade é atualizar a linha existente, não duplicá-la).
+  Aplicado via `UNIQUE(recipe_id, ingredient_id)` na migration — a fonte de
+  verdade real da regra, pelo mesmo motivo de corrida entre duas requisições
+  concorrentes já documentado na decisão do índice único parcial de
+  `Recipe` — e traduzido em `RecipeItemAlreadyExistsException`
+  (`409`/`RECIPE_ITEM_ALREADY_EXISTS`) na camada de serviço
+  (`RecipeItemService#create`, que também checa isso primeiro via
+  `RecipeItemRepository#existsByRecipeIdAndIngredientId`, falhando rápido
+  sem depender só da constraint do banco).
+
+  `RecipeItemRepository` (Spring Data JPA): `findByRecipeId(UUID recipeId)`
+  — a consulta que a listagem/composição de uma receita precisa, com `JOIN
+  FETCH ri.ingredient` (mesmo raciocínio de
+  `PrintJobRepository#findByIdWithOrder`/`RecipeRepository#findByIdWithProduct`:
+  `open-in-view` é `false`, e `RecipeItemResponse#from` lê
+  `item.getIngredient().getName()`/`getUnit()` no controller, depois que a
+  transação do repository já fechou). Sem `JOIN FETCH ri.recipe` — a
+  resposta só lê `recipe.getId()` (o valor da FK, já presente no proxy lazy
+  sem precisar inicializá-lo), nunca dados reais da entidade `Recipe`.
+  Também `existsByRecipeIdAndIngredientId` (duplicidade) e
+  `findByIdAndRecipeId` (usado por `delete` — confirma que o item existe *e*
+  pertence à receita informada, tratando um par recipeId/itemId
+  incompatível como 404, não como um delete cross-recipe silencioso).
+
+  CRUD REST (`/api/v1/recipes/{recipeId}/items`): `POST` (adiciona um item,
+  recebendo `ingredientId` + `quantity`; 404 `RECIPE_NOT_FOUND` se a receita
+  não existir, 404 `INGREDIENT_NOT_FOUND` se o ingrediente não existir, 409
+  `RECIPE_ITEM_ALREADY_EXISTS` se o ingrediente já estiver na receita),
+  `GET` (lista os itens da receita — também 404 `RECIPE_NOT_FOUND` se a
+  receita não existir, pra distinguir "receita sem itens" de "receita
+  inexistente", que de outro modo retornariam a mesma lista vazia), e
+  `DELETE /{itemId}` (remove um item — física, não desativação; ver seção
+  seguinte pra justificativa). Ver `docs/api.md` para os endpoints.
+
+  **`DELETE` físico, não uma flag `active`/desativação**: diferente do
+  padrão do próprio `Recipe` (que nunca apaga de verdade, só desativa — ver
+  javadoc de `Recipe`), e é uma divergência deliberada, não um descuido. A
+  desativação de `Recipe` existe pra preservar um rastro histórico da
+  *composição de um produto ao longo do tempo* (benefício real, se
+  secundário, já citado no javadoc de `Recipe` — relevante quando
+  `InventoryMovement` referenciar uma receita específica no consumo). Um
+  `RecipeItem` isolado não carrega esse mesmo valor de auditoria
+  independente: é uma linha de composição, não um fato que alguém precisa
+  reconstruir isoladamente do resto da receita. Remover um ingrediente de
+  uma receita já ativa é presumivelmente uma correção administrativa direta
+  (ex: "não usamos mais manteiga nessa receita"), não uma operação que
+  precise preservar histórico linha-a-linha — do mesmo jeito que
+  `PUT /api/v1/ingredients/{id}` reescreve os campos de um ingrediente livre
+  no lugar, sem conceito de soft-delete pros valores anteriores. Se um
+  ticket futuro precisar saber exatamente qual era a composição de uma
+  receita num ponto específico do passado (além de "essa versão inteira da
+  receita estava ativa/inativa"), o ajuste é versionar `Recipe` de forma
+  mais granular, não preservar linhas de `RecipeItem` apagadas.
+
+  **Testes**: `RecipeItemRepositoryIntegrationTests` (mapeamento JPA contra
+  Postgres real, incluindo a constraint `UNIQUE(recipe_id, ingredient_id)`
+  rejeitando ingrediente duplicado na mesma receita, e o `JOIN FETCH` de
+  `findByRecipeId` não lançando `LazyInitializationException` ao ler
+  `ingredient` fora da transação) e `RecipeItemControllerIntegrationTests`
+  (HTTP real via `MockMvc`, cobrindo sucesso, 404 (receita/ingrediente/item
+  inexistente, inclusive delete cross-recipe), 409 e validação). **Mesmo
+  cuidado de isolamento de teste já documentado acima pra `Recipe`**: nenhum
+  `@BeforeEach` limpa `product`/`category`/`recipe`/`ingredient` — cada
+  teste cria seu próprio produto/categoria/ingrediente/receita com nome
+  único, e como toda consulta deste domínio é sempre filtrada por um
+  `recipeId` específico, nenhuma asserção depende dessas tabelas
+  compartilhadas estarem vazias.
 
 ## Outbox (infraestrutura cross-cutting)
 

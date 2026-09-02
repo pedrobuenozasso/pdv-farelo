@@ -1019,8 +1019,9 @@ criação.
 
 Cria o cabeçalho de uma receita para um produto. (FARELO-091)
 
-Apenas o cabeçalho — a lista de ingredientes/quantidades (`RecipeItem`) é
-FARELO-092, ainda não implementado.
+Apenas o cabeçalho — a lista de ingredientes/quantidades (`RecipeItem`,
+FARELO-092) é gerenciada separadamente por
+`POST`/`GET /api/v1/recipes/{recipeId}/items` (ver adiante nesta seção).
 
 **Request body**
 
@@ -1109,5 +1110,102 @@ Mesmo formato de `GET /api/v1/recipes/{id}`, com `active: false`.
 
 - `404 Not Found` — `{id}` não corresponde a nenhuma receita existente,
   `code: "RECIPE_NOT_FOUND"`.
+
+### `POST /api/v1/recipes/{recipeId}/items`
+
+Adiciona um item (ingrediente + quantidade) à composição de uma receita.
+(FARELO-092)
+
+**Request body**
+
+```json
+{
+  "ingredientId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "quantity": 80
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `ingredientId` | UUID | sim | Precisa referenciar um `Ingredient` existente |
+| `quantity` | number | sim | Estritamente positivo (`@Positive`). Sempre na unidade base do `Ingredient` referenciado (ver `Ingredient.unit`) — sem conversão de unidade de compra |
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/recipes/{recipeId}/items/{id}`.
+
+```json
+{
+  "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+  "recipeId": "8a1f2c3d-4e5f-6789-0abc-def123456789",
+  "ingredientId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "ingredientName": "Bacon",
+  "ingredientUnit": "GRAM",
+  "quantity": 80,
+  "createdAt": "2026-09-02T13:00:00Z",
+  "updatedAt": "2026-09-02T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `ingredientId` ausente ou `quantity` ausente/não
+  positivo, `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `{recipeId}` não corresponde a nenhuma receita existente,
+  `code: "RECIPE_NOT_FOUND"`.
+- `404 Not Found` — `ingredientId` não corresponde a nenhum ingrediente
+  existente, `code: "INGREDIENT_NOT_FOUND"`.
+- `409 Conflict` — a receita já tem um item para esse ingrediente,
+  `code: "RECIPE_ITEM_ALREADY_EXISTS"`.
+
+### `GET /api/v1/recipes/{recipeId}/items`
+
+Lista os itens (ingredientes + quantidades) de uma receita, ordenados por
+`createdAt` (asc). (FARELO-092)
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+    "recipeId": "8a1f2c3d-4e5f-6789-0abc-def123456789",
+    "ingredientId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+    "ingredientName": "Bacon",
+    "ingredientUnit": "GRAM",
+    "quantity": 80,
+    "createdAt": "2026-09-02T13:00:00Z",
+    "updatedAt": "2026-09-02T13:00:00Z"
+  }
+]
+```
+
+Lista vazia (`[]`) quando a receita existe mas ainda não tem itens.
+
+**Erros**
+
+- `404 Not Found` — `{recipeId}` não corresponde a nenhuma receita
+  existente, `code: "RECIPE_NOT_FOUND"` (distingue "receita sem itens" de
+  "receita inexistente" — ambas retornariam a mesma lista vazia sem essa
+  checagem).
+
+### `DELETE /api/v1/recipes/{recipeId}/items/{itemId}`
+
+Remove um item da composição de uma receita. (FARELO-092)
+
+Remoção física (não uma flag de desativação como em `Recipe`) — ver
+`docs/domain-model.md`, seção `inventory`/`RecipeItem`, para a justificativa
+completa dessa divergência do padrão de `Recipe`. Sem corpo de requisição.
+
+**Response — `204 No Content`**
+
+**Erros**
+
+- `404 Not Found` — `{recipeId}` não corresponde a nenhuma receita
+  existente, `code: "RECIPE_NOT_FOUND"`.
+- `404 Not Found` — `{itemId}` não corresponde a nenhum item existente
+  *dessa* receita (inclusive se `{itemId}` existir, mas pertencer a outra
+  receita — um delete cross-recipe é tratado como 404, não executado),
+  `code: "RECIPE_ITEM_NOT_FOUND"`.
 
 _(demais endpoints a preencher conforme implementados)_

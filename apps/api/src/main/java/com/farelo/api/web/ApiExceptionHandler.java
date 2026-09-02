@@ -9,6 +9,8 @@ import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
 import com.farelo.api.inventory.IngredientNotFoundException;
 import com.farelo.api.inventory.RecipeAlreadyExistsException;
+import com.farelo.api.inventory.RecipeItemAlreadyExistsException;
+import com.farelo.api.inventory.RecipeItemNotFoundException;
 import com.farelo.api.inventory.RecipeNotFoundException;
 import com.farelo.api.ordering.OrderInvalidTransitionException;
 import com.farelo.api.ordering.OrderNotFoundException;
@@ -163,6 +165,20 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleRecipeAlreadyExists(RecipeAlreadyExistsException ex) {
         return new ErrorResponse("RECIPE_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(RecipeItemNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleRecipeItemNotFound(RecipeItemNotFoundException ex) {
+        return new ErrorResponse("RECIPE_ITEM_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: the recipe already has a line for this ingredient — see
+    // RecipeItemAlreadyExistsException's javadoc.
+    @ExceptionHandler(RecipeItemAlreadyExistsException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleRecipeItemAlreadyExists(RecipeItemAlreadyExistsException ex) {
+        return new ErrorResponse("RECIPE_ITEM_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {
