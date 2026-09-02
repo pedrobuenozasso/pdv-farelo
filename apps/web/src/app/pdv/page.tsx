@@ -28,7 +28,13 @@ import {
   openCommand,
   type CommandStatus,
 } from "@/lib/api/commands";
-import { listCommandOrders, type Order } from "@/lib/api/orders";
+import {
+  listCommandOrders,
+  markOrderCancelled,
+  markOrderDelivered,
+  type Order,
+  type OrderStatus,
+} from "@/lib/api/orders";
 
 const COMMAND_NUMBERS = Array.from({ length: 100 }, (_, i) => i + 1);
 
@@ -41,6 +47,18 @@ const STATUS_LABEL: Record<CommandStatus, string> = {
   PAYMENT_REQUESTED: "Aguardando pagamento",
   CLOSED: "Fechada",
   BLOCKED: "Bloqueada",
+};
+
+// Mesmo padrão do STATUS_LABEL de CommandStatus acima — rótulo amigável em
+// português para o status cru do pedido, que antes aparecia sem tradução
+// (`order.status`) no OrderCard.
+const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
+  CREATED: "Criado",
+  CONFIRMED: "Confirmado",
+  PREPARING: "Em preparo",
+  READY: "Pronto",
+  DELIVERED: "Entregue",
+  CANCELLED: "Cancelado",
 };
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -224,14 +242,64 @@ function CommandDetail({
           </p>
         ) : null}
         {ordersQuery.data?.map((order) => (
-          <OrderCard key={order.id} order={order} />
+          <OrderCard key={order.id} order={order} commandNumber={number} />
         ))}
       </div>
     </section>
   );
 }
 
-function OrderCard({ order }: { order: Order }) {
+function OrderCard({
+  order,
+  commandNumber,
+}: {
+  order: Order;
+  commandNumber: number;
+}) {
+  const queryClient = useQueryClient();
+  // Confirmação inline de duas etapas para cancelar — cancelamento é
+  // irreversível (CANCELLED é terminal, ver docs/domain-model.md), então um
+  // único clique acidental não deve disparar a mutation. Evita
+  // `window.confirm` (fora do padrão visual do resto da tela); em vez
+  // disso troca o botão "Cancelar pedido" por uma pergunta inline com
+  // "Confirmar"/"Voltar", mesma ideia de estado local que o resto do
+  // arquivo já usa para UI (ex: `selectedNumber`).
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+
+  const ordersQueryKey = ["pdv", "command", commandNumber, "orders"];
+
+  const deliverMutation = useMutation({
+    mutationFn: () => markOrderDelivered(order.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ordersQueryKey });
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () => markOrderCancelled(order.id),
+    onSuccess: () => {
+      setConfirmingCancel(false);
+      queryClient.invalidateQueries({ queryKey: ordersQueryKey });
+    },
+  });
+
+  const canDeliver = order.status === "READY";
+  // Qualquer status não-terminal aceita cancelamento — mesmo conjunto de
+  // origens válidas do backend (CREATED/CONFIRMED/PREPARING/READY),
+  // expresso aqui como "tudo que não é DELIVERED/CANCELLED" para não ter
+  // que manter as duas listas em sincronia manualmente.
+  const canCancel =
+    order.status !== "DELIVERED" && order.status !== "CANCELLED";
+
+  const deliverErrorMessage = apiErrorMessage(
+    deliverMutation.error,
+    "Não foi possível marcar o pedido como entregue.",
+  );
+  const cancelErrorMessage = apiErrorMessage(
+    cancelMutation.error,
+    "Não foi possível cancelar o pedido.",
+  );
+
   const subtotal = order.items.reduce(
     (sum, item) => sum + item.unitPrice * item.quantity,
     0,
@@ -240,7 +308,7 @@ function OrderCard({ order }: { order: Order }) {
   return (
     <div className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
       <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-        <span>{order.status}</span>
+        <span>{ORDER_STATUS_LABEL[order.status]}</span>
         <span>{dateTimeFormatter.format(new Date(order.createdAt))}</span>
       </div>
       <ul className="mt-1 flex flex-col gap-0.5">
@@ -262,6 +330,67 @@ function OrderCard({ order }: { order: Order }) {
         <span>Subtotal</span>
         <span>{currencyFormatter.format(subtotal)}</span>
       </div>
+
+      {canDeliver || canCancel ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-2 dark:border-zinc-800">
+          {canDeliver ? (
+            <button
+              type="button"
+              disabled={deliverMutation.isPending}
+              onClick={() => deliverMutation.mutate()}
+              className="rounded bg-black px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-white dark:text-black"
+            >
+              {deliverMutation.isPending
+                ? "Marcando..."
+                : "Marcar como entregue"}
+            </button>
+          ) : null}
+
+          {canCancel ? (
+            confirmingCancel ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-zinc-600 dark:text-zinc-300">
+                  Cancelar este pedido?
+                </span>
+                <button
+                  type="button"
+                  disabled={cancelMutation.isPending}
+                  onClick={() => cancelMutation.mutate()}
+                  className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                >
+                  {cancelMutation.isPending ? "Cancelando..." : "Confirmar"}
+                </button>
+                <button
+                  type="button"
+                  disabled={cancelMutation.isPending}
+                  onClick={() => setConfirmingCancel(false)}
+                  className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-black disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-50"
+                >
+                  Voltar
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmingCancel(true)}
+                className="rounded border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 dark:border-red-900 dark:text-red-400"
+              >
+                Cancelar pedido
+              </button>
+            )
+          ) : null}
+        </div>
+      ) : null}
+      {deliverErrorMessage ? (
+        <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+          {deliverErrorMessage}
+        </p>
+      ) : null}
+      {cancelErrorMessage ? (
+        <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+          {cancelErrorMessage}
+        </p>
+      ) : null}
     </div>
   );
 }
