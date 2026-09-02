@@ -6,7 +6,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 // @EnableScheduling: required by com.farelo.api.outbox.OutboxWorker's
 // @Scheduled polling loop (FARELO-060) — the first scheduled task in the
-// app, hence the first place this annotation is needed.
+// app, hence the first place this annotation is needed. Also now backs
+// com.farelo.api.outbox.OutboxRetentionCleaner's hourly cleanup
+// (FARELO-061).
 @EnableScheduling
 @SpringBootApplication
 public class FareloApiApplication {

@@ -252,6 +252,48 @@ Kafka neste momento)."
   (YAGNI, não há um segundo consumidor ainda para desenhar contra).
   Requer `@EnableScheduling` em `FareloApiApplication` (primeiro uso de
   `@Scheduled` no projeto).
+- **`OutboxRetentionCleaner`** (FARELO-061): resolve uma lacuna
+  operacional deixada pelo FARELO-060 — `OutboxWorker` marca eventos como
+  `PROCESSED`, mas nunca os remove, então `outbox_event` cresceria sem
+  limite para sempre, mesmo depois de cada linha já ter cumprido seu
+  papel. `@Component` próprio, separado de `OutboxWorker` — decisão
+  deliberada, documentada no javadoc da classe: a responsabilidade do
+  worker é "notar trabalho novo e fazê-lo" (poll de `PENDING` +
+  dispatch); a do cleaner é limpeza não relacionada de linhas que o
+  worker já terminou, sem estado ou fluxo de controle compartilhado com
+  ele, e com uma cadência natural bem mais espaçada (a cada hora — a
+  correção da retenção não depende de rodar tão frequentemente quanto o
+  poll de 5s do worker, que existe para manter baixa a latência de
+  dispatch quando um consumidor real existir). Um segundo método
+  `@Scheduled` dentro de `OutboxWorker` funcionaria também, mas faria
+  aquela classe fazer duas coisas não relacionadas sem benefício real.
+
+  Deleta, via `OutboxEventRepository.deleteByStatusAndProcessedAtBefore`
+  (`@Modifying @Query` com `DELETE` JPQL em bulk — não um método derivado
+  de delete do Spring Data, que carregaria e removeria cada entidade
+  individualmente, o que não escala bem para um job de limpeza cujo
+  propósito inteiro é reclamar linhas que podem ter se acumulado), toda
+  linha `PROCESSED` cujo `processedAt` seja mais antigo que o período de
+  retenção configurado — **nunca** uma linha `PENDING`, não importa a
+  idade: deletar uma seria perda de dado real (é exatamente o dado que o
+  outbox existe para proteger até um consumidor processá-la).
+
+  Período de retenção configurável via `outbox.retention.processed-days`
+  (`@Value`, `application.yml`), **default 7 dias** — tempo suficiente
+  para investigação operacional de um evento processado recentemente
+  (ex: "esse evento do pedido X realmente foi drenado, e quando?"), curto
+  o bastante para a tabela não acumular um histórico efetivamente sem
+  limite de linhas que ninguém mais lê. Nenhum consumidor/relatório
+  depende hoje de histórico de outbox além dessa janela — se algum
+  aparecer no futuro, deve ler de um lugar próprio para isso (ex: futuro
+  domínio `audit`, já listado na tabela de domínios no topo deste
+  documento), não depender desta tabela como log de longo prazo.
+
+  Migration `V11__add_outbox_event_processed_at_index.sql` adiciona um
+  índice composto `(status, processed_at)` — suporta o filtro `status =
+  'PROCESSED' AND processed_at < :cutoff` da query de limpeza, sem
+  substituir o índice de `status` sozinho do V10 (que continua servindo o
+  poll de `PENDING` do worker, uma query diferente).
 
 **Direção de dependência**: domínios de negócio (ex: `ordering`) dependem
 de `outbox` para publicar eventos; `outbox` nunca depende de volta para um
