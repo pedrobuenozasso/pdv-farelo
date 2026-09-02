@@ -273,10 +273,25 @@ follow-up não ticketado que já aconteceu com FARELO-019).
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —
 propositalmente ausente da tabela de domínios no topo deste documento. É a
-fundação do Transactional Outbox (FARELO-060), o princípio arquitetural já
-registrado em `docs/architecture.md`: "Eventos internos de domínio via
-Transactional Outbox + Worker, antes de introduzir um broker externo (sem
-Kafka neste momento)."
+fundação do Transactional Outbox, o princípio arquitetural já registrado em
+`docs/architecture.md`: "Eventos internos de domínio via Transactional
+Outbox + Worker, antes de introduzir um broker externo (sem Kafka neste
+momento)."
+
+> **Nota de reconciliação de numeração** (ver `docs/PROMPT_MESTRE.md`,
+> Epic 5): o roadmap original define FARELO-060 (`OutboxEvent`), FARELO-061
+> (publicar `ORDER_CREATED` na mesma transação), FARELO-062 (worker básico)
+> e FARELO-063 (processar eventos com idempotência) como quatro tickets
+> separados. Por uma perda de contexto de sessão, esses três primeiros
+> foram implementados juntos num único ticket abaixo rotulado "FARELO-060"
+> — cobre o escopo real de FARELO-060/061/062. As referências a
+> "FARELO-061" (retenção/limpeza) e "FARELO-062" (métricas) abaixo NÃO são
+> os tickets reais de mesmo número no roadmap — são follow-ups sem número
+> oficial que o líder priorizou (mesma categoria dos follow-ups de
+> DELIVERED/CANCELLED e de nome/telefone do cliente, documentados em
+> `docs/api.md`). O FARELO-063 real (idempotência) ainda não tinha sido
+> feito até esta nota; ver entrada correspondente abaixo assim que
+> implementado.
 
 - **`OutboxEvent`** (FARELO-060): entidade JPA — `id` (UUID, mesma
   estratégia das demais entidades), `aggregateType` (`varchar`, ex:
