@@ -6,13 +6,12 @@
 // categories.ts/products.ts. Adapt the same way those two did if a
 // server-side caller shows up later.
 //
-// IMPORTANT: the request body only carries `commandNumber` and `items`.
-// The checkout form also collects the customer's name/phone (FARELO-045,
-// prompt mestre seção 6), but those fields are NOT sent here — the
-// backend's CreateOrderRequest has no customer fields at all (no
-// `customer` domain exists yet, see docs/api.md's note on
-// POST /api/v1/orders). Don't add them to CreateOrderInput without first
-// checking whether the backend has grown a place to put them.
+// The checkout form collects the customer's name/phone (FARELO-045,
+// prompt mestre seção 6) and sends them here as `customerName`/
+// `customerPhone` — the backend persists them as a simple snapshot on
+// `Order` (no `customer` domain, see docs/domain-model.md's `ordering`
+// section and docs/api.md's note on POST /api/v1/orders). Both are
+// optional on the wire and nullable on the response.
 
 import { parseResponse } from "./client";
 
@@ -32,12 +31,16 @@ export type Order = {
   commandNumber: number;
   status: OrderStatus;
   items: OrderItem[];
+  customerName: string | null;
+  customerPhone: string | null;
   createdAt: string;
 };
 
 export type CreateOrderInput = {
   commandNumber: number;
   items: { productId: string; quantity: number }[];
+  customerName?: string;
+  customerPhone?: string;
 };
 
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
