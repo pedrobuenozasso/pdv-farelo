@@ -2,6 +2,7 @@ package com.farelo.api.web;
 
 import com.farelo.api.catalog.CategoryNotFoundException;
 import com.farelo.api.catalog.ProductNotFoundException;
+import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
@@ -64,6 +65,14 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ErrorResponse handleCommandNotFound(CommandNotFoundException ex) {
         return new ErrorResponse("COMMAND_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: the request is well-formed, but the command's current
+    // state conflicts with the requested state transition.
+    @ExceptionHandler(CommandNotAvailableException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleCommandNotAvailable(CommandNotAvailableException ex) {
+        return new ErrorResponse("COMMAND_NOT_AVAILABLE", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {
