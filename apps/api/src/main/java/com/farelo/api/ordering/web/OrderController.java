@@ -1,8 +1,8 @@
 package com.farelo.api.ordering.web;
 
 import com.farelo.api.ordering.NewOrderItem;
-import com.farelo.api.ordering.OrderCreationResult;
 import com.farelo.api.ordering.OrderService;
+import com.farelo.api.ordering.OrderWithItems;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,7 +32,7 @@ public class OrderController {
                 .map(item -> new NewOrderItem(item.productId(), item.quantity()))
                 .toList();
 
-        OrderCreationResult result = orderService.create(request.commandNumber(), items);
+        OrderWithItems result = orderService.create(request.commandNumber(), items);
 
         // No GET /api/v1/orders/{id} yet (future ticket) — the Location
         // header still names the resource's URI, which is correct even

@@ -1,8 +1,8 @@
 package com.farelo.api.ordering.web;
 
 import com.farelo.api.ordering.Order;
-import com.farelo.api.ordering.OrderCreationResult;
 import com.farelo.api.ordering.OrderStatus;
+import com.farelo.api.ordering.OrderWithItems;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -21,7 +21,7 @@ public record OrderResponse(
         List<OrderItemResponse> items,
         OffsetDateTime createdAt) {
 
-    public static OrderResponse from(OrderCreationResult result) {
+    public static OrderResponse from(OrderWithItems result) {
         Order order = result.order();
         List<OrderItemResponse> items = result.items().stream()
                 .map(OrderItemResponse::from)

@@ -40,7 +40,7 @@ public class OrderService {
      * snapshot). No outbox/events yet (Epic 5, FARELO-060+).
      */
     @Transactional
-    public OrderCreationResult create(int commandNumber, List<NewOrderItem> newItems) {
+    public OrderWithItems create(int commandNumber, List<NewOrderItem> newItems) {
         Command command = commandService.openForOrdering(commandNumber);
 
         Order order = orderRepository.save(new Order(command));
@@ -61,7 +61,38 @@ public class OrderService {
             items.add(orderItemRepository.save(item));
         }
 
-        return new OrderCreationResult(order, items);
+        return new OrderWithItems(order, items);
+    }
+
+    /**
+     * Lists every order placed on a command, oldest first, each with its
+     * items (FARELO-055). No pagination — same YAGNI reasoning already
+     * applied to {@code GET /api/v1/categories}/{@code /products}: the
+     * number of orders on a single command is naturally small.
+     *
+     * <p>One query per order to fetch its items (N+1) rather than a bulk
+     * fetch — deliberately simple, consistent with the same "naturally
+     * small" reasoning above; revisit if a command ever accumulates enough
+     * orders for this to matter.
+     *
+     * <p>{@code @Transactional(readOnly = true)}: without it, each
+     * repository call below runs in its own short transaction, and the
+     * response is built later in the controller — after every one of them
+     * has already closed. The {@code JOIN FETCH} in
+     * {@code OrderRepository}/{@code OrderItemRepository} is what actually
+     * prevents {@code LazyInitializationException} there (association
+     * proxies would otherwise need a live session to resolve); this
+     * annotation is about treating the multi-query read as one logical
+     * unit, not a substitute for that fetch strategy.
+     */
+    @Transactional(readOnly = true)
+    public List<OrderWithItems> listByCommand(int commandNumber) {
+        Command command = commandService.findByNumber(commandNumber);
+        List<Order> orders = orderRepository.findByCommandOrderByCreatedAtAsc(command);
+
+        return orders.stream()
+                .map(order -> new OrderWithItems(order, orderItemRepository.findByOrder(order)))
+                .toList();
     }
 
 }
