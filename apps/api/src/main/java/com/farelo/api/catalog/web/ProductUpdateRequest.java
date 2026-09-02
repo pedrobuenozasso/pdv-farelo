@@ -1,5 +1,6 @@
 package com.farelo.api.catalog.web;
 
+import com.farelo.api.catalog.ProductionStation;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -21,6 +22,16 @@ import java.util.UUID;
  * silently creating inactive products whenever a client omits it. A
  * dedicated {@code active} of type {@code Boolean} (wrapper, {@code
  * @NotNull}) here avoids both problems.
+ *
+ * <p>{@code productionStation} (FARELO-073) stays optional here too, unlike
+ * {@code active}/{@code availableOnMenu}/{@code availableOnPos} — those are
+ * {@code @NotNull} precisely because they have one unambiguous correct
+ * default ({@code true}) that an omitted field must not silently apply
+ * instead. {@code productionStation} has no such default: {@code null} is
+ * itself a legitimate, intentional value ("no station assigned"), and a
+ * full-replace {@code PUT} must be able to send it to explicitly clear a
+ * previously-assigned station — forcing {@code @NotNull} here would make
+ * "unassign the station" impossible to express.
  */
 public record ProductUpdateRequest(
         @NotBlank String name,
@@ -30,5 +41,6 @@ public record ProductUpdateRequest(
         String imageUrl,
         @NotNull Boolean active,
         @NotNull Boolean availableOnMenu,
-        @NotNull Boolean availableOnPos) {
+        @NotNull Boolean availableOnPos,
+        ProductionStation productionStation) {
 }

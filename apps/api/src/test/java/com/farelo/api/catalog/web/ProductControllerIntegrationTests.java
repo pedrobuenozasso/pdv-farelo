@@ -5,6 +5,7 @@ import com.farelo.api.catalog.Category;
 import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductRepository;
+import com.farelo.api.catalog.ProductionStation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -84,6 +86,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.availableOnMenu").value(true))
                 .andExpect(jsonPath("$.availableOnPos").value(true))
                 .andExpect(jsonPath("$.categoryId").value(category.getId().toString()))
+                .andExpect(jsonPath("$.productionStation").value(nullValue()))
                 .andExpect(jsonPath("$.createdAt").exists())
                 .andExpect(jsonPath("$.updatedAt").exists())
                 .andReturn();
@@ -102,6 +105,37 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
         // -> default true (FARELO-017).
         assertThat(persisted.get().isAvailableOnMenu()).isTrue();
         assertThat(persisted.get().isAvailableOnPos()).isTrue();
+        // productionStation omitted from the request body above -> stays
+        // null (FARELO-073, "not yet assigned" — no default is applied).
+        assertThat(persisted.get().getProductionStation()).isNull();
+    }
+
+    @Test
+    void createsProductWithExplicitProductionStation() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+
+        String body = """
+                {
+                  "name": "Cappuccino",
+                  "price": 12.00,
+                  "categoryId": "%s",
+                  "productionStation": "BAR"
+                }
+                """.formatted(category.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.productionStation").value("BAR"))
+                .andReturn();
+
+        ProductResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), ProductResponse.class);
+
+        Optional<Product> persisted = productRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getProductionStation()).isEqualTo(ProductionStation.BAR);
     }
 
     @Test
@@ -292,6 +326,68 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(persisted).isPresent();
         assertThat(persisted.get().isAvailableOnMenu()).isTrue();
         assertThat(persisted.get().isAvailableOnPos()).isFalse();
+    }
+
+    @Test
+    void updatesProductSettingProductionStation() throws Exception {
+        Category category = categoryRepository.save(new Category("Comidas"));
+        Product product = productRepository.save(new Product("Croissant", new BigDecimal("14.00"), category));
+        assertThat(product.getProductionStation()).isNull();
+
+        String body = """
+                {
+                  "name": "Croissant",
+                  "price": 14.00,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true,
+                  "productionStation": "KITCHEN"
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.productionStation").value("KITCHEN"));
+
+        Optional<Product> persisted = productRepository.findById(product.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getProductionStation()).isEqualTo(ProductionStation.KITCHEN);
+    }
+
+    @Test
+    void updatesProductClearingProductionStation() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = new Product("Cappuccino", new BigDecimal("12.00"), category);
+        product.setProductionStation(ProductionStation.BAR);
+        product = productRepository.save(product);
+        assertThat(product.getProductionStation()).isEqualTo(ProductionStation.BAR);
+
+        // productionStation omitted here -> deserializes to null on
+        // ProductUpdateRequest, and a full-replace PUT applies that null
+        // (see ProductService.update's javadoc-style comment).
+        String body = """
+                {
+                  "name": "Cappuccino",
+                  "price": 12.00,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.productionStation").value(nullValue()));
+
+        Optional<Product> persisted = productRepository.findById(product.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getProductionStation()).isNull();
     }
 
     @Test

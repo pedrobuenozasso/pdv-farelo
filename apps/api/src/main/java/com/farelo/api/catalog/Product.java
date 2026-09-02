@@ -2,6 +2,8 @@ package com.farelo.api.catalog;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -22,10 +24,9 @@ import java.util.UUID;
  * docs/domain-model.md).
  *
  * <p>Scope note (FARELO-011): no recipe, inventory or advanced fiscal
- * fields yet. {@code productionStation} (FARELO-073) and
- * {@code fiscalProfileId} (FARELO-151) are deliberately left out for later
- * tickets. {@code availableOnMenu}/{@code availableOnPos} were added in
- * FARELO-017.
+ * fields yet. {@code fiscalProfileId} (FARELO-151) is deliberately left out
+ * for a later ticket. {@code availableOnMenu}/{@code availableOnPos} were
+ * added in FARELO-017; {@code productionStation} was added in FARELO-073.
  *
  * <p>Id generation follows the same strategy as {@link Category} — see its
  * javadoc for why {@code RANDOM} (UUIDv4) is used instead of UUIDv7.
@@ -66,6 +67,28 @@ public class Product {
      */
     @Column(name = "available_on_pos", nullable = false)
     private boolean availableOnPos = true;
+
+    /**
+     * Which physical station (e.g. {@code BAR}, {@code KITCHEN}) prepares
+     * this product — used to route printed tickets per station once
+     * FARELO-074 splits {@code PrintJob}s by it (see
+     * {@link ProductionStation}'s javadoc for the full picture).
+     *
+     * <p><b>Nullable, unlike {@link #availableOnMenu}/{@link
+     * #availableOnPos}</b>: those two booleans have one unambiguous safe
+     * default ({@code true} — a new product should be visible everywhere
+     * until told otherwise). A production station has no such default —
+     * fabricating one (e.g. always {@code KITCHEN}) would be silently wrong
+     * for a lot of products (a soda is neither obviously {@code BAR} nor
+     * {@code KITCHEN} by some universal rule) and, once FARELO-074 starts
+     * routing tickets by this field, a wrong default would misroute a
+     * printed ticket without anyone having chosen that. {@code null} means
+     * "not yet assigned" — staff sets it explicitly per product, same as
+     * how {@code category} was already mandatory but this field is not.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "production_station")
+    private ProductionStation productionStation;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "category_id", nullable = false)
@@ -152,6 +175,14 @@ public class Product {
 
     public void setAvailableOnPos(boolean availableOnPos) {
         this.availableOnPos = availableOnPos;
+    }
+
+    public ProductionStation getProductionStation() {
+        return productionStation;
+    }
+
+    public void setProductionStation(ProductionStation productionStation) {
+        this.productionStation = productionStation;
     }
 
     public Category getCategory() {
