@@ -32,10 +32,11 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
 // persistence across reloads yet; see README).
 type CartState = Record<string, number>;
 
-// Nome/telefone existem só para a experiência do fluxo no frontend
-// (prompt mestre seção 6) — NÃO são enviados ao backend. Ver o comentário
-// em src/lib/api/orders.ts: POST /api/v1/orders não tem campos de
-// cliente (não existe domínio `customer` ainda).
+// Nome/telefone coletados aqui (prompt mestre seção 6) são enviados ao
+// backend em createOrderMutation.mutate abaixo (customerName/
+// customerPhone) — persistidos como snapshot simples em Order. Ver
+// comentário em src/lib/api/orders.ts e docs/domain-model.md (seção
+// `ordering`).
 const checkoutFormSchema = z.object({
   name: z.string().trim().min(1, "Nome é obrigatório"),
   phone: z.string().trim().min(1, "Telefone/WhatsApp é obrigatório"),
@@ -131,6 +132,8 @@ export function Menu({
         productId: item.product.id,
         quantity: item.quantity,
       })),
+      customerName: values.name,
+      customerPhone: values.phone,
     });
   });
 
