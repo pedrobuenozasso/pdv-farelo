@@ -1,4 +1,9 @@
 // Thin client for the /api/v1/products endpoints (see docs/api.md).
+//
+// Isomorphic (FARELO-042/043) — same reasoning as categories.ts: works
+// from the Admin's client components (relative path, via the
+// next.config.ts rewrite) and from the customer menu page's Server
+// Component (absolute backend URL during SSR).
 
 import { parseResponse } from "./client";
 
@@ -37,10 +42,18 @@ export type UpdateProductInput = {
   availableOnPos: boolean;
 };
 
-const PRODUCTS_URL = "/api/v1/products";
+const API_BASE_URL =
+  typeof window === "undefined"
+    ? (process.env.API_BASE_URL ?? "http://localhost:8080")
+    : "";
+
+const PRODUCTS_URL = `${API_BASE_URL}/api/v1/products`;
 
 export async function listProducts(): Promise<Product[]> {
-  const response = await fetch(PRODUCTS_URL);
+  // Menu-visible data (active/availableOnMenu) changes via the Admin at
+  // any time — never serve a stale cached response for this (matters most
+  // for the SSR call).
+  const response = await fetch(PRODUCTS_URL, { cache: "no-store" });
   return parseResponse<Product[]>(response);
 }
 
