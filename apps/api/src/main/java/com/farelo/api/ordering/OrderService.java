@@ -16,16 +16,19 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
+    private final OrderStatusHistoryRepository orderStatusHistoryRepository;
     private final CommandService commandService;
     private final ProductService productService;
 
     public OrderService(
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
+            OrderStatusHistoryRepository orderStatusHistoryRepository,
             CommandService commandService,
             ProductService productService) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
+        this.orderStatusHistoryRepository = orderStatusHistoryRepository;
         this.commandService = commandService;
         this.productService = productService;
     }
@@ -37,13 +40,17 @@ public class OrderService {
      * {@link CommandService#openForOrdering(int)}), validates every
      * product exists and is active, and freezes each item's price at the
      * product's current price ({@code unitPrice} — FARELO-052's price
-     * snapshot). No outbox/events yet (Epic 5, FARELO-060+).
+     * snapshot). Also writes the order's first {@link OrderStatusHistory}
+     * entry ({@code fromStatus = null}, {@code toStatus = CREATED}) —
+     * FARELO-056; future status transitions (FARELO-057/058) append their
+     * own entries the same way. No outbox/events yet (Epic 5, FARELO-060+).
      */
     @Transactional
     public OrderWithItems create(int commandNumber, List<NewOrderItem> newItems) {
         Command command = commandService.openForOrdering(commandNumber);
 
         Order order = orderRepository.save(new Order(command));
+        orderStatusHistoryRepository.save(new OrderStatusHistory(order, null, OrderStatus.CREATED));
 
         List<OrderItem> items = new ArrayList<>();
         for (NewOrderItem newItem : newItems) {
