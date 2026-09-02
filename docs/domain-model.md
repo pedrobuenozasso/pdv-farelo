@@ -191,3 +191,69 @@ existentes evita duplicar a lógica de fetch/serialização de `Order`+
 (FARELO-055). Deve migrar para um domínio `kitchen` dedicado quando ele
 ganhar mais responsabilidades reais (impressão de comanda de cozinha,
 notificações à cozinha, etc) que justifiquem o pacote próprio.
+
+- **`OrderCreatedEvent`** (FARELO-060): record de payload do evento de
+  outbox `OrderCreated` (`orderId`, `commandNumber`, `items` — cada um com
+  `productId`/`quantity`/`unitPrice`, o mesmo snapshot de preço do
+  `OrderItem`). Fica em `ordering`, não no pacote `outbox` (ver seção
+  "Outbox" abaixo) — o formato do payload de um evento pertence ao domínio
+  que o produz, não à infraestrutura genérica que só sabe transportá-lo.
+  `OrderService.create(...)` publica esse evento via `OutboxPublisher` na
+  mesma transação da criação do pedido — primeira integração real do
+  mecanismo de outbox, provando-o ponta a ponta contra um caso de uso já
+  existente. Payload deliberadamente simples: ainda não há nenhum
+  consumidor real (impressão/notificação/estoque são epics futuros, não
+  iniciados), então isto só prova o mecanismo de publicação, não é um
+  contrato de evento fechado para consumidores futuros.
+
+## Outbox (infraestrutura cross-cutting)
+
+Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —
+propositalmente ausente da tabela de domínios no topo deste documento. É a
+fundação do Transactional Outbox (FARELO-060), o princípio arquitetural já
+registrado em `docs/architecture.md`: "Eventos internos de domínio via
+Transactional Outbox + Worker, antes de introduzir um broker externo (sem
+Kafka neste momento)."
+
+- **`OutboxEvent`** (FARELO-060): entidade JPA — `id` (UUID, mesma
+  estratégia das demais entidades), `aggregateType` (`varchar`, ex:
+  `"Order"`), `aggregateId` (UUID), `eventType` (`varchar`, ex:
+  `"OrderCreated"`), `payload` (mapeado como `String` com
+  `@JdbcTypeCode(SqlTypes.JSON)` — suporte nativo do Hibernate 6 a JSON,
+  sem biblioteca extra — escrito como JSON já serializado pelo
+  `OutboxPublisher`, coluna `jsonb`), `status` (enum `OutboxEventStatus`:
+  `PENDING`/`PROCESSED`, `@Enumerated(EnumType.STRING)`, default
+  `PENDING`), `createdAt` (UTC), `processedAt` (nullable, UTC, setado por
+  `markProcessed()`). Tabela `outbox_event` criada pela migration
+  `V10__create_outbox_event_table.sql`, `status` na mesma convenção
+  `VARCHAR` + `CHECK` de `command.status`/`orders.status`, com índice em
+  `status` (o worker faz polling por `PENDING`).
+- **`OutboxPublisher`**: serviço com um método
+  `publish(aggregateType, aggregateId, eventType, payload)` que serializa
+  `payload` via Jackson (`ObjectMapper`, já disponível via
+  `spring-boot-starter-web`) e grava um `OutboxEvent` `PENDING`.
+  **Precisa ser chamado dentro da mesma transação da escrita de domínio
+  que está registrando** — é isso que torna o outbox "transacional": ou
+  tudo comita junto, ou nada comita. Essa exigência é reforçada em tempo de
+  execução, não só documentada: `publish` usa
+  `@Transactional(propagation = Propagation.MANDATORY)`, então chamá-lo
+  fora de uma transação já ativa falha imediatamente
+  (`IllegalTransactionStateException`) em vez de persistir uma linha sem
+  garantia nenhuma de atomicidade.
+- **`OutboxWorker`**: `@Component` com um método `@Scheduled` (a cada 5s)
+  que busca eventos `PENDING` (`OutboxEventRepository.
+  findByStatusOrderByCreatedAtAsc`, FIFO) e, por enquanto, apenas loga e
+  marca cada um como `PROCESSED` — **stub deliberado**: não existe nenhum
+  consumidor real ainda (impressão/notificação/estoque são epics futuros,
+  ainda não iniciados). Ponto de extensão futuro documentado no javadoc da
+  classe: quando um consumidor real aparecer, ele se pluga em torno desse
+  loop, provavelmente via um handler registrado por `event_type` —
+  mecanismo de dispatch deliberadamente não decidido/construído agora
+  (YAGNI, não há um segundo consumidor ainda para desenhar contra).
+  Requer `@EnableScheduling` em `FareloApiApplication` (primeiro uso de
+  `@Scheduled` no projeto).
+
+**Direção de dependência**: domínios de negócio (ex: `ordering`) dependem
+de `outbox` para publicar eventos; `outbox` nunca depende de volta para um
+pacote de domínio — o formato de cada payload (ex: `OrderCreatedEvent`)
+vive no domínio que o produz, não aqui.
