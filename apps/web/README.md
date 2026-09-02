@@ -27,11 +27,21 @@ seleção de categoria) no mesmo padrão, e extraiu o parsing de erro
 inline de produto (`PUT /api/v1/products/{id}`, incluindo `active`,
 `availableOnMenu` e `availableOnPos`), assim que esse endpoint
 (FARELO-016/FARELO-017) foi mergeado no backend.
+FARELO-040/041 adicionaram a primeira rota do cardápio QR
+(`pedido.farelo.com.br`, interface do **cliente** — separada do Admin,
+tom sem jargão de staff): `/c/[commandNumber]` busca a comanda pelo
+número da URL e mostra uma confirmação simples ou uma mensagem amigável
+de "não encontrada" (número inexistente, não numérico ou fora de
+1-100). É um Server Component (`src/lib/api/commands.ts` busca direto
+via `API_BASE_URL`, sem passar pelo proxy do `next.config.ts` — ver
+comentário no próprio arquivo) em vez de client component + TanStack
+Query, já que ainda não há interatividade nesta tela.
 Ainda não há shadcn/ui, nem edição/exclusão de categoria (sem endpoint
 `PUT`/`DELETE` para categoria no backend ainda) nem exclusão de produto
-(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem as demais
-rotas de negócio (`/pdv`, `/kitchen`, `/c/{commandNumber}`, shell completo
-de `/admin`) — isso é escopo de tickets futuros.
+(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem cardápio
+em `/c/{commandNumber}` (FARELO-042/043) nem as demais rotas de negócio
+(`/pdv`, `/kitchen`, shell completo de `/admin`) — isso é escopo de
+tickets futuros.
 
 ## Como rodar
 
@@ -54,8 +64,9 @@ faz o proxy de `/api/*` para o backend via `rewrites()`, usando a env var
 produção esse proxy não é necessário — o Caddy assume esse papel (ver
 `infra/README.md`) — mas ele também funciona com `next start` standalone.
 
-Para testar as telas `/admin/categories` e `/admin/products` de ponta a
-ponta, suba o Postgres e o backend antes do frontend:
+Para testar as telas `/admin/categories`, `/admin/products` ou
+`/c/[commandNumber]` de ponta a ponta, suba o Postgres e o backend antes
+do frontend:
 
 ```bash
 cp infra/.env.example infra/.env
@@ -64,10 +75,12 @@ cd apps/api && ./mvnw spring-boot:run
 ```
 
 Depois, com o frontend rodando (`npm run dev`), acesse
-[http://localhost:3000/admin/categories](http://localhost:3000/admin/categories)
-ou
+[http://localhost:3000/admin/categories](http://localhost:3000/admin/categories),
 [http://localhost:3000/admin/products](http://localhost:3000/admin/products)
-(crie ao menos uma categoria antes de cadastrar produtos).
+(crie ao menos uma categoria antes de cadastrar produtos) ou
+[http://localhost:3000/c/1](http://localhost:3000/c/1) (comandas 1-100
+já vêm no seed — qualquer número fora desse intervalo mostra a mensagem
+de "não encontrada").
 
 ## Build
 
