@@ -23,13 +23,15 @@ próximos tickets de UI reaproveitam.
 FARELO-019 adicionou `/admin/products` (lista + criação de produtos, com
 seleção de categoria) no mesmo padrão, e extraiu o parsing de erro
 (`ApiError`/`parseResponse`) compartilhado entre os dois domínios para
-`src/lib/api/client.ts`.
-Ainda não há shadcn/ui, nem edição/exclusão de categoria ou produto (sem
-endpoint `PUT`/`DELETE` para nenhum dos dois no backend ainda — para
-produto está explicitamente marcado como escopo de FARELO-016+ em
-`docs/api.md`), nem as demais rotas de negócio (`/pdv`, `/kitchen`,
-`/c/{commandNumber}`, shell completo de `/admin`) — isso é escopo de
-tickets futuros.
+`src/lib/api/client.ts`. Um follow-up do FARELO-019 adicionou edição
+inline de produto (`PUT /api/v1/products/{id}`, incluindo `active`,
+`availableOnMenu` e `availableOnPos`), assim que esse endpoint
+(FARELO-016/FARELO-017) foi mergeado no backend.
+Ainda não há shadcn/ui, nem edição/exclusão de categoria (sem endpoint
+`PUT`/`DELETE` para categoria no backend ainda) nem exclusão de produto
+(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem as demais
+rotas de negócio (`/pdv`, `/kitchen`, `/c/{commandNumber}`, shell completo
+de `/admin`) — isso é escopo de tickets futuros.
 
 ## Como rodar
 
