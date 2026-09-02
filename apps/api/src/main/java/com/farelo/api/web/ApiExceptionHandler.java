@@ -1,7 +1,9 @@
 package com.farelo.api.web;
 
 import com.farelo.api.catalog.CategoryNotFoundException;
+import com.farelo.api.catalog.ProductNotAvailableException;
 import com.farelo.api.catalog.ProductNotFoundException;
+import com.farelo.api.command.CommandCannotAcceptOrdersException;
 import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
@@ -81,6 +83,21 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleCommandCannotBeClosed(CommandCannotBeClosedException ex) {
         return new ErrorResponse("COMMAND_CANNOT_BE_CLOSED", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict, same reasoning as the other command state-conflict
+    // exceptions above.
+    @ExceptionHandler(CommandCannotAcceptOrdersException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleCommandCannotAcceptOrders(CommandCannotAcceptOrdersException ex) {
+        return new ErrorResponse("COMMAND_CANNOT_ACCEPT_ORDERS", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: the product exists but is currently not sellable.
+    @ExceptionHandler(ProductNotAvailableException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleProductNotAvailable(ProductNotAvailableException ex) {
+        return new ErrorResponse("PRODUCT_NOT_AVAILABLE", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

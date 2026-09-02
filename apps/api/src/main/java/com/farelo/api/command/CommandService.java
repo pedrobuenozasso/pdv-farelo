@@ -57,4 +57,30 @@ public class CommandService {
         return commandRepository.save(command);
     }
 
+    /**
+     * Fetches the command ready to accept a new order (FARELO-052/053).
+     *
+     * <p>Business decision: {@code AVAILABLE} and {@code OPEN} both accept
+     * new orders. There is no explicit "open the command" step in the
+     * customer-facing QR menu flow before ordering (prompt mestre seção 6)
+     * — a customer scans the comanda and orders directly — so a command
+     * still {@code AVAILABLE} transitions to {@code OPEN} as a side effect
+     * of its first order, reusing {@link #open(int)}. A command already
+     * {@code OPEN} (e.g. a second order in the same visit) is returned
+     * as-is. {@code PAYMENT_REQUESTED}, {@code CLOSED} and {@code BLOCKED}
+     * reject with {@link CommandCannotAcceptOrdersException} — none of
+     * those make sense for placing a new order.
+     */
+    @Transactional
+    public Command openForOrdering(int number) {
+        Command command = findByNumber(number);
+
+        return switch (command.getStatus()) {
+            case AVAILABLE -> open(number);
+            case OPEN -> command;
+            case PAYMENT_REQUESTED, CLOSED, BLOCKED ->
+                    throw new CommandCannotAcceptOrdersException(number, command.getStatus());
+        };
+    }
+
 }

@@ -45,12 +45,18 @@ public class ProductService {
         return productRepository.findAll(Sort.by(Sort.Direction.ASC, "name"));
     }
 
+    // Reused by both update() below and com.farelo.api.ordering.OrderService
+    // (order creation needs to fetch a product by id, same 404 semantics).
+    public Product getById(UUID id) {
+        return productRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+    }
+
     @Transactional
     public Product update(
             UUID id, String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
             boolean active, boolean availableOnMenu, boolean availableOnPos) {
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new ProductNotFoundException(id));
+        Product product = getById(id);
 
         Category category = categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new CategoryNotFoundException(categoryId));
