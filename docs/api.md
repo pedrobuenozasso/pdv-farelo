@@ -842,4 +842,122 @@ for necessário no futuro, é escopo de outro ticket. Sem transição de volta
 - `409 Conflict` — o job existe mas não está `PENDING`, mesmo formato de
   `PRINT_JOB_INVALID_TRANSITION` acima.
 
+### `POST /api/v1/ingredients`
+
+Cria um ingrediente. (FARELO-090)
+
+Primeiro endpoint do domínio `inventory`. Sem `active` no corpo — um
+ingrediente novo sempre começa `true`, mesmo padrão de `Category`/`Product`.
+
+**Request body**
+
+```json
+{
+  "name": "Leite",
+  "unit": "MILLILITER"
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
+| `unit` | string | sim | Um de `GRAM`/`MILLILITER`/`UNIT` |
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/ingredients/{id}`.
+
+```json
+{
+  "id": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "name": "Leite",
+  "unit": "MILLILITER",
+  "active": true,
+  "createdAt": "2026-09-02T13:00:00Z",
+  "updatedAt": "2026-09-02T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `name` ausente/em branco ou `unit` ausente/inválido,
+  no formato de erro padrão, com `code: "VALIDATION_ERROR"`.
+
+### `GET /api/v1/ingredients`
+
+Lista todos os ingredientes (ativos e inativos), ordenados por `name` (asc).
+(FARELO-090)
+
+Sem paginação/filtro `active`-only por enquanto (YAGNI, mesmo padrão de
+`GET /api/v1/categories`/`GET /api/v1/products` — mantido para um ticket
+futuro se o Admin precisar).
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+    "name": "Leite",
+    "unit": "MILLILITER",
+    "active": true,
+    "createdAt": "2026-09-02T13:00:00Z",
+    "updatedAt": "2026-09-02T13:00:00Z"
+  }
+]
+```
+
+Lista vazia (`[]`) quando não há ingredientes cadastrados.
+
+### `GET /api/v1/ingredients/{id}`
+
+Busca um ingrediente pelo `id` técnico (UUID). (FARELO-090)
+
+**Response — `200 OK`**
+
+Mesmo formato de item de `GET /api/v1/ingredients`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhum ingrediente existente,
+  `code: "INGREDIENT_NOT_FOUND"`.
+
+### `PUT /api/v1/ingredients/{id}`
+
+Atualiza (substituição completa) um ingrediente existente. (FARELO-090)
+
+Fecha o CRUD básico de `Ingredient` — sem `DELETE` por enquanto (fora do
+roadmap atual). Mesmo raciocínio de `PUT /api/v1/products/{id}`: usa um DTO
+próprio (`IngredientUpdateRequest`) em vez de reaproveitar o request de
+criação, para poder exigir `active` explicitamente sem torná-lo opcional na
+criação.
+
+**Request body**
+
+```json
+{
+  "name": "Leite integral",
+  "unit": "MILLILITER",
+  "active": true
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
+| `unit` | string | sim | Um de `GRAM`/`MILLILITER`/`UNIT` |
+| `active` | boolean | sim | |
+
+**Response — `200 OK`**
+
+`IngredientResponse` com os campos atualizados (mesmo formato de
+`POST /api/v1/ingredients`).
+
+**Erros**
+
+- `400 Bad Request` — mesmas validações do `POST`, mais `active` ausente,
+  `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `{id}` do ingrediente não existe,
+  `code: "INGREDIENT_NOT_FOUND"`.
+
 _(demais endpoints a preencher conforme implementados)_
