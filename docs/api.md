@@ -1110,4 +1110,170 @@ Mesmo formato de `GET /api/v1/recipes/{id}`, com `active: false`.
 - `404 Not Found` — `{id}` não corresponde a nenhuma receita existente,
   `code: "RECIPE_NOT_FOUND"`.
 
+### `POST /api/v1/users`
+
+Cria um usuário (uma conta de quem pode operar o sistema — funcionário do
+Farelo). (FARELO-120)
+
+Primeiro endpoint do domínio `security`. `password` viaja em texto plano
+neste request (sobre HTTPS, prompt mestre seção 26) exatamente uma vez — o
+serviço hasheia (BCrypt) antes de persistir, e nunca é logada. Sem `active`
+no corpo — um usuário novo sempre começa `true`, mesmo padrão de
+`Category`/`Ingredient`.
+
+**Request body**
+
+```json
+{
+  "name": "Ana Souza",
+  "email": "ana@farelo.dev",
+  "password": "uma-senha-forte",
+  "role": "MANAGER"
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
+| `email` | string | sim | Formato de email válido (`@Email`), único no sistema |
+| `password` | string | sim | 8 a 72 caracteres — teto casado com o limite de entrada do BCrypt |
+| `role` | string | sim | Um de `ADMIN`/`MANAGER`/`CASHIER`/`KITCHEN`/`ATTENDANT` |
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/users/{id}`. **Nunca inclui `passwordHash`** — em
+nenhuma resposta deste controller, sem exceção.
+
+```json
+{
+  "id": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "name": "Ana Souza",
+  "email": "ana@farelo.dev",
+  "role": "MANAGER",
+  "active": true,
+  "createdAt": "2026-09-02T13:00:00Z",
+  "updatedAt": "2026-09-02T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `name`/`email`/`password`/`role` ausentes/inválidos
+  (email mal formado, senha fora de 8-72 caracteres, role fora da lista),
+  `code: "VALIDATION_ERROR"`.
+- `409 Conflict` — já existe um usuário com esse `email`,
+  `code: "USER_EMAIL_ALREADY_EXISTS"`.
+
+### `GET /api/v1/users`
+
+Lista todos os usuários (ativos e inativos), ordenados por `name` (asc).
+(FARELO-120)
+
+Sem paginação/filtro `active`-only por enquanto (YAGNI, mesmo padrão de
+`GET /api/v1/ingredients`).
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+    "name": "Ana Souza",
+    "email": "ana@farelo.dev",
+    "role": "MANAGER",
+    "active": true,
+    "createdAt": "2026-09-02T13:00:00Z",
+    "updatedAt": "2026-09-02T13:00:00Z"
+  }
+]
+```
+
+Lista vazia (`[]`) quando não há usuários cadastrados.
+
+### `GET /api/v1/users/{id}`
+
+Busca um usuário pelo `id` técnico (UUID). (FARELO-120)
+
+**Response — `200 OK`**
+
+Mesmo formato de item de `GET /api/v1/users`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhum usuário existente,
+  `code: "USER_NOT_FOUND"`.
+
+### `PUT /api/v1/users/{id}`
+
+Atualiza (substituição completa) o perfil de um usuário existente —
+`name`/`email`/`role`/`active`. Não altera a senha (ver
+`PATCH /api/v1/users/{id}/password` abaixo). (FARELO-120)
+
+Mesmo raciocínio de `PUT /api/v1/ingredients/{id}`: DTO próprio
+(`UserUpdateRequest`) em vez de reaproveitar o request de criação, para
+poder exigir `active` explicitamente sem torná-lo opcional na criação.
+
+**Request body**
+
+```json
+{
+  "name": "Ana Souza",
+  "email": "ana@farelo.dev",
+  "role": "ADMIN",
+  "active": true
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
+| `email` | string | sim | Formato de email válido; único (ignorando o próprio usuário) |
+| `role` | string | sim | Um de `ADMIN`/`MANAGER`/`CASHIER`/`KITCHEN`/`ATTENDANT` |
+| `active` | boolean | sim | |
+
+**Response — `200 OK`**
+
+`UserResponse` com os campos atualizados (mesmo formato de
+`POST /api/v1/users`).
+
+**Erros**
+
+- `400 Bad Request` — mesmas validações do `POST` (exceto senha), mais
+  `active` ausente, `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `{id}` do usuário não existe, `code: "USER_NOT_FOUND"`.
+- `409 Conflict` — `email` já pertence a outro usuário,
+  `code: "USER_EMAIL_ALREADY_EXISTS"`.
+
+### `PATCH /api/v1/users/{id}/password`
+
+Troca a senha de um usuário. (FARELO-120)
+
+Endpoint separado do `PUT` geral acima — deliberado, ver
+`docs/domain-model.md` (seção `security`) para a justificativa completa.
+**Sem exigir a senha atual**: não existe ainda mecanismo de
+login/autenticação (FARELO-121) contra o qual validar uma "senha atual" de
+um chamador autenticado.
+
+**Request body**
+
+```json
+{
+  "newPassword": "uma-senha-nova"
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `newPassword` | string | sim | 8 a 72 caracteres, mesma regra de `POST /api/v1/users` |
+
+**Response — `200 OK`**
+
+`UserResponse` do usuário (sem `passwordHash`, como sempre).
+
+**Erros**
+
+- `400 Bad Request` — `newPassword` ausente ou fora de 8-72 caracteres,
+  `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `{id}` do usuário não existe, `code: "USER_NOT_FOUND"`.
+
 _(demais endpoints a preencher conforme implementados)_
