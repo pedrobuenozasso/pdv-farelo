@@ -278,7 +278,41 @@ mestre seção 41).
   }
   ```
 
-Ainda não há endpoints para transição de status da comanda (abrir, fechar,
-etc.) — escopo de FARELO-033/034 em diante.
+### `POST /api/v1/commands/{number}/open`
+
+Abre uma comanda: transição de status `AVAILABLE` → `OPEN`, quando um
+cliente começa a usá-la. (FARELO-033)
+
+**Por que `POST`, não `PATCH`**: `/open` é uma ação ("abra esta comanda"),
+não uma atualização parcial da representação do recurso — convenção comum
+em APIs REST pragmáticas para endpoints de transição de estado (sufixo
+verbo + `POST`). `PATCH` normalmente implica um corpo descrevendo a mudança
+parcial (ex: JSON Patch/Merge Patch), que este endpoint não tem — não
+recebe corpo algum.
+
+**Response — `200 OK`**
+
+`CommandResponse` atualizado, com `status: "OPEN"`.
+
+**Erros**
+
+- `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
+  `code: "COMMAND_NOT_FOUND"` (mesmo formato do `GET`).
+- `409 Conflict` — a comanda existe mas não está `AVAILABLE` (já está
+  `OPEN`, `PAYMENT_REQUESTED`, `CLOSED` ou `BLOCKED`):
+
+  ```json
+  {
+    "code": "COMMAND_NOT_AVAILABLE",
+    "message": "Command 3 is not available (current status: OPEN)",
+    "correlationId": "..."
+  }
+  ```
+
+  `COMMAND_NOT_AVAILABLE` é o `code` de exemplo usado na seção "Convenções
+  previstas" deste documento para o formato de erro padrão.
+
+Ainda não há endpoints para as demais transições de status da comanda
+(pagamento, fechamento, bloqueio) — escopo de tickets futuros.
 
 _(demais endpoints a preencher conforme implementados)_
