@@ -26,7 +26,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -43,14 +42,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * the documented failure behavior (whole-batch rollback, see {@code
  * OutboxWorker}'s "Failure handling" javadoc).
  *
- * <p>Own {@code @SpringBootTest} context, {@code outbox.worker.poll-
- * interval-ms} pushed far out — same reasoning as {@code
- * OutboxWorkerBatchSizeIntegrationTests}: without this, a real {@code
- * @Scheduled} worker from another cached context could race this test's
+ * <p>Relies on {@link AbstractIntegrationTest} disabling {@code
+ * OutboxWorker}'s real {@code @Scheduled} trigger suite-wide — without
+ * that, a worker from another cached context could race this test's
  * explicit {@link OutboxWorker#processPendingEvents()} calls over the same
  * rows (including the deliberately-broken event seeded below), making both
  * the "found exactly one PrintJob" and "the event stayed PENDING after a
- * failure" assertions nondeterministic.
+ * failure" assertions nondeterministic. This test class is exactly what
+ * surfaced that (see that class's javadoc for the full story).
  *
  * <p>Uses dedicated seeded command number 18 — distinct from every number
  * already spoken for elsewhere (see {@code
@@ -71,7 +70,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * what happened while writing this test.
  */
 @SpringBootTest
-@TestPropertySource(properties = "outbox.worker.poll-interval-ms=3600000")
 class OutboxWorkerPrintJobIntegrationTests extends AbstractIntegrationTest {
 
     private static final int COMMAND_NUMBER = 18;

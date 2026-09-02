@@ -501,12 +501,11 @@ Pacote: `com.farelo.api.printing`.
   itens, número da comanda) — mais um segundo teste que prova o
   comportamento de falha documentado no `OutboxWorker` (evento com
   `aggregateId` que não corresponde a nenhum pedido: a exceção propaga,
-  o lote inteiro reverte, o evento permanece `PENDING`). Contexto Spring
-  próprio (`outbox.worker.poll-interval-ms` bem alto via
-  `@TestPropertySource`), mesma razão de
-  `OutboxWorkerBatchSizeIntegrationTests`: sem isso, o `@Scheduled` real
-  de um contexto já em cache poderia disputar as mesmas linhas com as
-  chamadas explícitas deste teste.
+  o lote inteiro reverte, o evento permanece `PENDING`). Foi este teste
+  (junto com `OutboxWorkerBatchSizeIntegrationTests`) que expôs uma
+  fragilidade estrutural da suíte — corrigida na raiz em
+  `AbstractIntegrationTest`, não aqui: ver a seção "Idempotência sob
+  workers concorrentes" abaixo.
 
 ## Outbox (infraestrutura cross-cutting)
 
@@ -771,15 +770,29 @@ momento)."
 
   **`outbox.worker.poll-interval-ms`** (default 5000, mesmo `@Value` do
   `batch-size`): controla o `fixedDelayString` do `@Scheduled`, em vez do
-  literal `5000` fixo que existia antes. Motivo real, não hipotético: como
-  `OutboxWorkerBatchSizeIntegrationTests` sobe um `@SpringBootTest`
-  completo (não um slice), o `@Scheduled` de verdade continuava rodando no
-  fundo enquanto o teste semeava sua própria fixture e fazia sua chamada
-  explícita — e chegou a "roubar" um evento semeado antes da chamada
-  explícita, quebrando a contagem exata esperada pelo teste. Esse teste
-  agora sobrescreve `poll-interval-ms` para 1 hora via
-  `@TestPropertySource`, tornando essa corrida impossível em vez de só
-  improvável — os demais testes do worker continuam no default de 5s.
+  literal `5000` fixo que existia antes.
+
+  **Desabilitado globalmente em teste** (FARELO-072, `AbstractIntegrationTest`):
+  motivo real, não hipotético. A primeira tentativa de corrigir isso foi
+  local — `OutboxWorkerBatchSizeIntegrationTests` sobrescrevendo
+  `poll-interval-ms` para 1h só no seu próprio `@TestPropertySource` — mas
+  isso não bastava: Spring Test cacheia `ApplicationContext`s entre classes
+  de teste pra suíte inteira, então o `@Scheduled` de verdade de QUALQUER
+  OUTRO contexto já em cache (a maioria das classes de teste não
+  sobrescreve nada, ficando no default de 5s) continua rodando em segundo
+  plano contra o mesmo Postgres singleton pelo resto da execução da JVM de
+  teste — e conseguiu "roubar" linhas semeadas por dois testes diferentes
+  (o de batch-size, e depois `OutboxWorkerPrintJobIntegrationTests`,
+  FARELO-072) antes das chamadas explícitas de cada um, quebrando as
+  asserções. Como nenhum teste da suíte depende do disparo automático de
+  verdade (todos chamam `processPendingEvents()` diretamente — a forma
+  padrão de testar um `@Scheduled` sem depender de tempo real), a correção
+  definitiva foi desabilitar o intervalo globalmente: `AbstractIntegrationTest`
+  registra `outbox.worker.poll-interval-ms=3600000` via
+  `@DynamicPropertySource` para TODO contexto de teste que estende essa
+  classe — que tem precedência MAIOR que `@TestPropertySource` no Spring
+  Test (o oposto do que se esperaria), então nenhuma classe de teste
+  individual precisa (nem consegue) sobrescrever isso de volta hoje.
 
 **Direção de dependência (publicação)**: domínios de negócio (ex:
 `ordering`) dependem de `outbox` para publicar eventos — o formato de cada

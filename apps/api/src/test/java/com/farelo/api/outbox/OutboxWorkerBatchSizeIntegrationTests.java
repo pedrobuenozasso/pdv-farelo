@@ -32,33 +32,25 @@ import static org.assertj.core.api.Assertions.assertThat;
  * An earlier version seeded 5 events and asserted the first call returns
  * exactly 3 and the second exactly 2. That's flakier than it looks: Spring
  * Test caches {@code ApplicationContext}s across test classes for the whole
- * suite, and most other outbox test classes use the production defaults
- * (batch-size 100, poll-interval 5000ms) with no property override — their
- * cached context's real {@code @Scheduled} worker keeps running in the
- * background for the life of the test JVM, independent of what property
- * values *this* test's own context was given. Pushing out {@code
- * poll-interval-ms} here only silences *this* context's own trigger; it
- * can't stop an already-running worker from a different, already-cached
- * context from polling the same shared {@code outbox_event} table
- * (singleton Postgres, see {@link AbstractIntegrationTest}) and grabbing
- * some of this test's seeded rows between its two explicit calls — this
- * happened for real, not hypothetically.
+ * suite, and (before {@link AbstractIntegrationTest} disabled it globally)
+ * a different, already-cached context's real {@code @Scheduled} worker
+ * could keep running in the background and grab some of this test's seeded
+ * rows between its two explicit calls — this happened for real, not
+ * hypothetically. The scheduler is now silenced suite-wide (see that
+ * class's javadoc), but this test still doesn't assert an exact split: the
+ * invariant below is the one that actually matters and is worth proving
+ * directly, independent of however many other contexts happen to be alive.
  *
- * <p>So instead of asserting an exact split, this test asserts the
- * invariant that actually matters and holds regardless of who else touches
- * the table concurrently: <strong>no single {@link
- * OutboxWorker#processPendingEvents()} call, from any context, ever
- * returns more than {@code batchSize} events</strong> (checked on every
- * call this test makes), and <strong>every event this test seeds
- * eventually reaches {@code PROCESSED}</strong> — whether this test's own
- * calls drained it or a concurrent worker elsewhere did doesn't matter for
- * what this test is proving.
+ * <p>So instead of asserting an exact split, this test asserts:
+ * <strong>no single {@link OutboxWorker#processPendingEvents()} call, from
+ * any context, ever returns more than {@code batchSize} events</strong>
+ * (checked on every call this test makes), and <strong>every event this
+ * test seeds eventually reaches {@code PROCESSED}</strong> — whether this
+ * test's own calls drained it or a concurrent worker elsewhere did doesn't
+ * matter for what this test is proving.
  */
 @SpringBootTest
-@TestPropertySource(properties = {
-        "outbox.worker.batch-size=3",
-        "outbox.worker.poll-interval-ms=3600000"
-})
+@TestPropertySource(properties = "outbox.worker.batch-size=3")
 class OutboxWorkerBatchSizeIntegrationTests extends AbstractIntegrationTest {
 
     private static final int BATCH_SIZE = 3;
