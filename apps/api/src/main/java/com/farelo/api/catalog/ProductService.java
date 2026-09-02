@@ -21,7 +21,7 @@ public class ProductService {
 
     public Product create(
             String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
-            Boolean availableOnMenu, Boolean availableOnPos) {
+            Boolean availableOnMenu, Boolean availableOnPos, ProductionStation productionStation) {
         Category category = categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new CategoryNotFoundException(categoryId));
 
@@ -37,6 +37,10 @@ public class ProductService {
         if (availableOnPos != null) {
             product.setAvailableOnPos(availableOnPos);
         }
+        // productionStation has no default to apply when absent (unlike the
+        // two booleans above) — null is itself the correct "not assigned"
+        // value (see Product's field javadoc), so it's set unconditionally.
+        product.setProductionStation(productionStation);
 
         return productRepository.save(product);
     }
@@ -55,7 +59,7 @@ public class ProductService {
     @Transactional
     public Product update(
             UUID id, String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
-            boolean active, boolean availableOnMenu, boolean availableOnPos) {
+            boolean active, boolean availableOnMenu, boolean availableOnPos, ProductionStation productionStation) {
         Product product = getById(id);
 
         Category category = categoryRepository.findById(categoryId)
@@ -69,6 +73,10 @@ public class ProductService {
         product.setActive(active);
         product.setAvailableOnMenu(availableOnMenu);
         product.setAvailableOnPos(availableOnPos);
+        // Unconditional, same as create(): a PUT is a full replace, and null
+        // here is a legitimate, intentional value (clear a previously
+        // assigned station) — not a "field omitted" placeholder to guard.
+        product.setProductionStation(productionStation);
 
         return productRepository.save(product);
     }

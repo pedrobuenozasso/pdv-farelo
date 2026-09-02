@@ -100,7 +100,8 @@ Cria um produto vendável do cardápio. (FARELO-014)
   "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
   "imageUrl": "https://example.com/espresso.png",
   "availableOnMenu": true,
-  "availableOnPos": true
+  "availableOnPos": true,
+  "productionStation": "BAR"
 }
 ```
 
@@ -113,10 +114,17 @@ Cria um produto vendável do cardápio. (FARELO-014)
 | `imageUrl` | string | não | |
 | `availableOnMenu` | boolean | não | Default `true` se ausente (FARELO-017) |
 | `availableOnPos` | boolean | não | Default `true` se ausente (FARELO-017) |
+| `productionStation` | string | não | Um de `BAR`/`KITCHEN` (FARELO-073). Sem default — ausente/`null` significa "sem estação atribuída" |
 
 `availableOnMenu` controla se o produto aparece no cardápio QR
 (cliente-facing); `availableOnPos` controla se aparece no PDV
 (staff-facing) — independentes um do outro.
+
+`productionStation` indica qual estação de produção prepara o produto (ex:
+`BAR` para bebidas, `KITCHEN` para comida) — usado para rotear tickets de
+impressão por setor (FARELO-074, fora do escopo deste endpoint). Diferente
+de `availableOnMenu`/`availableOnPos`, não tem um default seguro: um produto
+sem estação óbvia fica `null` até ser atribuído explicitamente.
 
 **Response — `201 Created`**
 
@@ -133,10 +141,14 @@ Header `Location: /api/v1/products/{id}`.
   "availableOnPos": true,
   "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
   "imageUrl": "https://example.com/espresso.png",
+  "productionStation": "BAR",
   "createdAt": "2026-09-01T13:00:00Z",
   "updatedAt": "2026-09-01T13:00:00Z"
 }
 ```
+
+`productionStation` é `null` na resposta quando o produto ainda não tem
+estação atribuída.
 
 **Erros**
 
@@ -178,6 +190,7 @@ consumidor existir.
     "availableOnPos": true,
     "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
     "imageUrl": "https://example.com/espresso.png",
+    "productionStation": "BAR",
     "createdAt": "2026-09-01T13:00:00Z",
     "updatedAt": "2026-09-01T13:00:00Z"
   }
@@ -206,6 +219,12 @@ ausente para `false` em records, um client que esquecesse de enviá-los na
 criação desativaria/esconderia o produto silenciosamente. No `PUT`, que é
 substituição completa, faz sentido exigir os três explicitamente.
 
+`productionStation` continua **opcional** aqui, diferente dos três campos
+booleanos acima: `null` é um valor legítimo e intencional ("sem estação
+atribuída"), não um placeholder de "campo esquecido" — omiti-lo no `PUT`
+explicitamente limpa a estação já atribuída, o que faz sentido para uma
+substituição completa.
+
 ```json
 {
   "name": "Café Espresso Duplo",
@@ -215,7 +234,8 @@ substituição completa, faz sentido exigir os três explicitamente.
   "imageUrl": "https://example.com/espresso-duplo.png",
   "active": false,
   "availableOnMenu": false,
-  "availableOnPos": true
+  "availableOnPos": true,
+  "productionStation": "BAR"
 }
 ```
 
@@ -229,6 +249,7 @@ substituição completa, faz sentido exigir os três explicitamente.
 | `active` | boolean | sim | |
 | `availableOnMenu` | boolean | sim | Independente de `availableOnPos` |
 | `availableOnPos` | boolean | sim | Independente de `availableOnMenu` |
+| `productionStation` | string | não | Um de `BAR`/`KITCHEN` (FARELO-073). Omitido/`null` limpa a estação atribuída |
 
 **Response — `200 OK`**
 
