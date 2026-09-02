@@ -102,6 +102,27 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         return productRepository.save(new Product("Café Espresso", price, category));
     }
 
+    // Creates a real order (status CREATED) through the actual creation
+    // endpoint, so its first OrderStatusHistory entry (FARELO-056) is
+    // written the normal way — used as setup for the FARELO-057/058
+    // transition tests below.
+    private UUID createOrder(Product product) throws Exception {
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}]
+                }
+                """.formatted(COMMAND_AVAILABLE, product.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        return objectMapper.readValue(result.getResponse().getContentAsString(), OrderResponse.class).id();
+    }
+
     @Test
     void createsOrderWithItemsAndTransitionsAvailableCommandToOpen() throws Exception {
         Product espresso = createActiveProduct(new BigDecimal("7.50"));
@@ -337,6 +358,82 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(history.get(0).getFromStatus()).isNull();
         assertThat(history.get(0).getToStatus()).isEqualTo(OrderStatus.CREATED);
         assertThat(history.get(0).getChangedAt()).isNotNull();
+    }
+
+    @Test
+    void marksOrderAsPreparingAndRecordsHistory() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(orderId.toString()))
+                .andExpect(jsonPath("$.status").value("PREPARING"));
+
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        List<OrderStatusHistory> history = orderStatusHistoryRepository.findByOrderOrderByChangedAtAsc(order);
+
+        assertThat(history).hasSize(2);
+        assertThat(history.get(0).getFromStatus()).isNull();
+        assertThat(history.get(0).getToStatus()).isEqualTo(OrderStatus.CREATED);
+        assertThat(history.get(1).getFromStatus()).isEqualTo(OrderStatus.CREATED);
+        assertThat(history.get(1).getToStatus()).isEqualTo(OrderStatus.PREPARING);
+    }
+
+    @Test
+    void returnsConflictWhenMarkingNonCreatedOrderAsPreparing() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
+
+        // already PREPARING — marking it as preparing again is invalid.
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ORDER_INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsOrderNotFoundWhenMarkingUnknownOrderAsPreparing() throws Exception {
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
+    }
+
+    @Test
+    void marksOrderAsReadyAndRecordsHistory() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(orderId.toString()))
+                .andExpect(jsonPath("$.status").value("READY"));
+
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        List<OrderStatusHistory> history = orderStatusHistoryRepository.findByOrderOrderByChangedAtAsc(order);
+
+        assertThat(history).hasSize(3);
+        assertThat(history.get(2).getFromStatus()).isEqualTo(OrderStatus.PREPARING);
+        assertThat(history.get(2).getToStatus()).isEqualTo(OrderStatus.READY);
+    }
+
+    @Test
+    void returnsConflictWhenMarkingCreatedOrderAsReadyDirectly() throws Exception {
+        // skips PREPARING entirely — still CREATED.
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ORDER_INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsOrderNotFoundWhenMarkingUnknownOrderAsReady() throws Exception {
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
     }
 
 }
