@@ -455,4 +455,45 @@ assim).
   }
   ```
 
+### `GET /api/v1/commands/{number}/orders`
+
+Lista todos os pedidos de uma comanda, cada um com seus itens, do mais
+antigo para o mais novo (`createdAt` asc). (FARELO-055)
+
+Sem paginação — mesma lógica YAGNI já aplicada em
+`GET /api/v1/categories`/`GET /api/v1/products`: o número de pedidos por
+comanda é naturalmente pequeno.
+
+Reaproveita `OrderResponse`/`OrderItemResponse` de `POST /api/v1/orders` —
+mesmo formato de resposta.
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "d4e5f6a7-8901-2bcd-ef34-567890abcdef",
+    "commandNumber": 1,
+    "status": "CREATED",
+    "items": [
+      {
+        "id": "e5f6a7b8-9012-3cde-f456-7890abcdef12",
+        "productId": "8a1b2c3d-4e5f-6789-0abc-def123456789",
+        "productName": "Café Espresso",
+        "quantity": 2,
+        "unitPrice": 7.50
+      }
+    ],
+    "createdAt": "2026-09-01T13:00:00Z"
+  }
+]
+```
+
+Lista vazia (`[]`) quando a comanda ainda não tem pedidos.
+
+**Erros**
+
+- `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
+  `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
+
 _(demais endpoints a preencher conforme implementados)_
