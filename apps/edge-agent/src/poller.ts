@@ -1,75 +1,130 @@
 /**
- * Polling periódico de `GET /api/v1/print-jobs` (FARELO-076) + report de
- * desfecho (FARELO-077). Não imprime nada de verdade ainda (FARELO-078) e
- * não mantém fila local (responsabilidade futura mencionada em
- * `docs/PROMPT_MESTRE.md` seção 11, ainda não implementada).
+ * Polling periódico de `GET /api/v1/print-jobs` (FARELO-076) + impressão
+ * ESC/POS real via TCP (FARELO-078) + report de desfecho (FARELO-077).
  *
- * Requisito central deste ticket: uma falha de rede/API indisponível nunca
- * pode derrubar o processo — por isso todo erro de qualquer chamada de rede
- * (polling ou report) é capturado e logado, e o próximo ciclo tenta de novo
- * normalmente, sem lógica de retry sofisticada.
+ * **Fluxo atual (FARELO-078)**: para cada `PrintJob` pendente encontrado,
+ * o Edge Agent (a) resolve o endereço da impressora pela
+ * `productionStation` do job (`resolvePrinterAddress`, `config.ts`), (b)
+ * monta os bytes ESC/POS do ticket a partir de `job.content`
+ * (`buildEscPosTicket`, `escpos.ts`), (c) tenta enviar via TCP
+ * (`printOverTcp`, `printerTransport.ts`). Sucesso em todas as três etapas
+ * → `reportPrintJobPrinted`. Qualquer falha — sem endereço configurado
+ * (nem específico da estação, nem fallback default), impressora
+ * offline/recusando conexão, timeout de rede — é capturada, logada com o
+ * motivo, e reportada como `reportPrintJobFailed`. **Não** existe mais
+ * nenhum "logar = processado com sucesso": isso era um stand-in temporário
+ * do FARELO-077, substituído por este ticket pela tentativa de impressão
+ * real (ver histórico em `docs/domain-model.md`/README.md se precisar do
+ * raciocínio anterior).
  *
- * ────────────────────────────────────────────────────────────────────────
- * DECISÃO IMPORTANTE (FARELO-077) — leia antes de mexer aqui:
+ * Requisito central deste arquivo, inalterado desde o FARELO-076: uma
+ * falha de rede/impressão/API nunca pode derrubar o processo — todo erro é
+ * capturado e logado, e o próximo ciclo (ou próximo job, dentro do mesmo
+ * ciclo) segue normalmente, sem lógica de retry sofisticada (fila local
+ * mencionada no prompt mestre seção 11 continua responsabilidade futura,
+ * ainda não implementada).
  *
- * Hoje o Edge Agent NÃO imprime nada de verdade — a impressão física via
- * ESC/POS é o escopo do FARELO-078, ainda não implementado. O único
- * "processamento" que existe agora é buscar o job e logá-lo (FARELO-076).
- *
- * Ainda assim, este ticket exige chamar `POST .../printed` ou `.../failed`
- * para cada job. A decisão tomada aqui é: **conseguir buscar e logar o job
- * é tratado como um substituto temporário e explicitamente documentado de
- * "consegui processar o job"** — por isso `reportPrinted` abaixo chama
- * sempre `/printed`, nunca `/failed`, para todo job que chega até aqui.
- *
- * Isso NÃO é o comportamento final do produto. É um estado intermediário
- * deliberado, só até o FARELO-078 existir: quando a impressão ESC/POS real
- * for implementada, o "processamento" deste loop passa a ser a tentativa de
- * impressão de verdade — que aí sim pode falhar por um motivo real
- * (impressora offline, sem papel, erro de driver, etc) e justificar chamar
- * `.../failed`. `reportPrintJobFailed` já existe em `printJobsClient.ts`
- * hoje, pronto para ser usado por aquele ticket — só não é chamado por
- * nenhum caminho deste arquivo ainda, porque não há uma falha real de
- * impressão para reportar.
- * ────────────────────────────────────────────────────────────────────────
+ * **Injeção de dependências (`PollerDeps`)**: `pollOnce`/`startPolling`
+ * recebem as funções de rede/impressão como parâmetro, com as
+ * implementações reais como default. Existe só para permitir testar a
+ * orquestração deste arquivo (sucesso → printed, falha → failed) sem subir
+ * rede/socket de verdade e sem precisar de uma lib de mock — o mesmo
+ * espírito de não adicionar dependência sem necessidade já seguido no
+ * resto do projeto (ver `poller.test.ts`).
  */
 
 import {
-  fetchPendingPrintJobs,
+  fetchPendingPrintJobs as fetchPendingPrintJobsImpl,
+  reportPrintJobPrinted as reportPrintJobPrintedImpl,
+  reportPrintJobFailed as reportPrintJobFailedImpl,
   formatPrintJobLog,
-  reportPrintJobPrinted,
   type PrintJob,
 } from "./printJobsClient.js";
+import { resolvePrinterAddress as resolvePrinterAddressImpl } from "./config.js";
+import { buildEscPosTicket as buildEscPosTicketImpl } from "./escpos.js";
+import { printOverTcp as printOverTcpImpl } from "./printerTransport.js";
 
 export type PollerOptions = {
   apiBaseUrl: string;
   pollIntervalMs: number;
 };
 
+export type PollerDeps = {
+  fetchPendingPrintJobs: typeof fetchPendingPrintJobsImpl;
+  reportPrintJobPrinted: typeof reportPrintJobPrintedImpl;
+  reportPrintJobFailed: typeof reportPrintJobFailedImpl;
+  resolvePrinterAddress: typeof resolvePrinterAddressImpl;
+  buildEscPosTicket: typeof buildEscPosTicketImpl;
+  printOverTcp: typeof printOverTcpImpl;
+};
+
+const defaultDeps: PollerDeps = {
+  fetchPendingPrintJobs: fetchPendingPrintJobsImpl,
+  reportPrintJobPrinted: reportPrintJobPrintedImpl,
+  reportPrintJobFailed: reportPrintJobFailedImpl,
+  resolvePrinterAddress: resolvePrinterAddressImpl,
+  buildEscPosTicket: buildEscPosTicketImpl,
+  printOverTcp: printOverTcpImpl,
+};
+
 /**
- * Reporta `job` como `PRINTED` (ver decisão documentada no topo do arquivo).
- * Resiliente do mesmo jeito que o polling: falha ao chamar o endpoint de
- * report (rede indisponível, API fora do ar, etc) é logada e o loop segue
- * — sem lógica de retry (mesma fila local ainda inexistente, mesmo
- * raciocínio do README). Isolado em try/catch próprio para que a falha de
- * reportar um job não impeça o log/report dos jobs seguintes no mesmo ciclo.
+ * Tenta imprimir `job` (resolver endereço → montar ticket → enviar via
+ * TCP) e reporta o desfecho para a API. Isolado em try/catch próprio para
+ * que a falha de um job não impeça o processamento dos jobs seguintes no
+ * mesmo ciclo — mesmo raciocínio já documentado desde o FARELO-077.
+ *
+ * A falha ao *reportar* o desfecho (rede/API indisponível na chamada de
+ * `printed`/`failed` em si) é, por sua vez, capturada e logada
+ * separadamente: o próximo ciclo tenta de novo (o job continua `PENDING`
+ * no backend até algum report suceder), sem lógica de retry sofisticada.
  */
-async function reportPrinted(apiBaseUrl: string, job: PrintJob): Promise<void> {
+async function printJob(
+  apiBaseUrl: string,
+  job: PrintJob,
+  deps: PollerDeps,
+): Promise<void> {
   try {
-    await reportPrintJobPrinted(apiBaseUrl, job.id);
-    console.log(`  → PrintJob ${job.id} reportado como PRINTED.`);
-  } catch (error) {
-    console.error(
-      `  → Falha ao reportar PrintJob ${job.id} como PRINTED ` +
-        `(tentando de novo no próximo ciclo):`,
-      error instanceof Error ? error.message : error,
+    const address = deps.resolvePrinterAddress(job.content.productionStation);
+    if (!address) {
+      throw new Error(
+        `Nenhum endereço de impressora configurado para a estação ` +
+          `"${job.content.productionStation ?? "sem estação"}" (nem fallback ` +
+          `FARELO_PRINTER_DEFAULT_HOST/FARELO_PRINTER_DEFAULT_PORT).`,
+      );
+    }
+
+    const ticket = deps.buildEscPosTicket(job.content);
+    await deps.printOverTcp(address.host, address.port, ticket);
+
+    await deps.reportPrintJobPrinted(apiBaseUrl, job.id);
+    console.log(
+      `  → PrintJob ${job.id} impresso em ${address.host}:${address.port} ` +
+        `e reportado como PRINTED.`,
     );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`  → Falha ao imprimir PrintJob ${job.id}: ${reason}`);
+
+    try {
+      await deps.reportPrintJobFailed(apiBaseUrl, job.id);
+      console.log(`  → PrintJob ${job.id} reportado como FAILED.`);
+    } catch (reportError) {
+      console.error(
+        `  → Falha ao reportar PrintJob ${job.id} como FAILED ` +
+          `(tentando de novo no próximo ciclo):`,
+        reportError instanceof Error ? reportError.message : reportError,
+      );
+    }
   }
 }
 
-async function pollOnce(apiBaseUrl: string): Promise<void> {
+/** Um ciclo de polling: busca jobs pendentes e tenta imprimir/reportar cada um. Exportado para teste (ver `poller.test.ts`). */
+export async function pollOnce(
+  apiBaseUrl: string,
+  deps: PollerDeps = defaultDeps,
+): Promise<void> {
   try {
-    const jobs = await fetchPendingPrintJobs(apiBaseUrl);
+    const jobs = await deps.fetchPendingPrintJobs(apiBaseUrl);
 
     if (jobs.length === 0) {
       console.log("Nenhum PrintJob pendente.");
@@ -79,7 +134,7 @@ async function pollOnce(apiBaseUrl: string): Promise<void> {
     console.log(`${jobs.length} PrintJob(s) pendente(s):`);
     for (const job of jobs) {
       console.log(`  ${formatPrintJobLog(job)}`);
-      await reportPrinted(apiBaseUrl, job);
+      await printJob(apiBaseUrl, job, deps);
     }
   } catch (error) {
     // Rede indisponível, API fora do ar ou resposta malformada: loga e
@@ -97,10 +152,13 @@ async function pollOnce(apiBaseUrl: string): Promise<void> {
  * em testes/shutdown gracioso, se necessário no futuro) — hoje o processo
  * do Edge Agent roda indefinidamente e nunca chama isso.
  */
-export function startPolling(options: PollerOptions): () => void {
-  void pollOnce(options.apiBaseUrl);
+export function startPolling(
+  options: PollerOptions,
+  deps: PollerDeps = defaultDeps,
+): () => void {
+  void pollOnce(options.apiBaseUrl, deps);
   const timer = setInterval(
-    () => void pollOnce(options.apiBaseUrl),
+    () => void pollOnce(options.apiBaseUrl, deps),
     options.pollIntervalMs,
   );
   return () => clearInterval(timer);
