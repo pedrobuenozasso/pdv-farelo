@@ -64,4 +64,15 @@ public class PrintJobController {
         return PrintJobResponse.from(job, objectMapper);
     }
 
+    // Reports a manual retry request for a FAILED job (FARELO-079):
+    // FAILED -> PENDING, so it reappears in GET /api/v1/print-jobs for the
+    // Edge Agent's next poll. Same POST-as-action reasoning as markPrinted/
+    // markFailed above. No request body — see PrintJobService#retry's
+    // javadoc for the full design rationale (manual endpoint, retry limit).
+    @PostMapping("/{id}/retry")
+    public PrintJobResponse retry(@PathVariable UUID id) {
+        PrintJob job = printJobService.retry(id);
+        return PrintJobResponse.from(job, objectMapper);
+    }
+
 }

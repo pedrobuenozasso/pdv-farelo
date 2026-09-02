@@ -98,6 +98,18 @@ import java.util.UUID;
  * <p>Id generation follows the same strategy as {@link
  * com.farelo.api.catalog.Category} — see its javadoc for why {@code
  * RANDOM} (UUIDv4) is used instead of UUIDv7.
+ *
+ * <h2>Design decision 4 — retry ({@code FAILED} → {@code PENDING},
+ * FARELO-079)</h2>
+ *
+ * {@link #retry()} moves a {@code FAILED} job back to {@code PENDING} so it
+ * reappears in {@code GET /api/v1/print-jobs} for the Edge Agent to attempt
+ * again — the "permitindo retry" half of the prompt mestre's seção 10 flow,
+ * left undesigned since FARELO-071/077 (see the note previously on {@link
+ * PrintJobStatus}, now resolved here). See {@code
+ * PrintJobService#retry(UUID)} for the full design rationale: why this is a
+ * manual endpoint rather than an automatic scheduled retry, and why {@code
+ * retryCount} exists with a maximum.
  */
 @Entity
 @Table(name = "print_job")
@@ -121,6 +133,13 @@ public class PrintJob {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private PrintJobStatus status = PrintJobStatus.PENDING;
+
+    // How many times this job has been moved back from FAILED to PENDING
+    // via retry() — see "Design decision 4" above and
+    // PrintJobService#retry(UUID) for the cap enforced against this value.
+    // Starts at 0 (never retried), incremented only by retry() below.
+    @Column(name = "retry_count", nullable = false)
+    private int retryCount = 0;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -174,6 +193,20 @@ public class PrintJob {
         this.status = PrintJobStatus.FAILED;
     }
 
+    /**
+     * Moves this job back from {@code FAILED} to {@code PENDING} and bumps
+     * {@code retryCount} by one, so it reappears in the Edge Agent's poll
+     * for pending work (FARELO-079). Same "no validation here" split as
+     * {@link #markPrinted()}/{@link #markFailed()}: whether the current
+     * status is actually {@code FAILED} and whether {@code retryCount} is
+     * still under the allowed maximum are both checked by the caller,
+     * {@link PrintJobService#retry(UUID)}, not here.
+     */
+    public void retry() {
+        this.status = PrintJobStatus.PENDING;
+        this.retryCount++;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -188,6 +221,10 @@ public class PrintJob {
 
     public PrintJobStatus getStatus() {
         return status;
+    }
+
+    public int getRetryCount() {
+        return retryCount;
     }
 
     public OffsetDateTime getCreatedAt() {
