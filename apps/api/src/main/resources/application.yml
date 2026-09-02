@@ -20,7 +20,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        # FARELO-062: `metrics` added so outbox.events.pending / .oldest.age
+        # (OutboxMetrics) are reachable at /actuator/metrics — off by
+        # default in Spring Boot, only `health` was previously opted in.
+        include: health, metrics
 
 # FARELO-061: how long a PROCESSED outbox_event row is kept before
 # OutboxRetentionCleaner deletes it. See that class's javadoc for why 7

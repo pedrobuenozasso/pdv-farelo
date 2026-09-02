@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> {
@@ -14,6 +15,23 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> 
     // Backs OutboxWorker#processPendingEvents' polling loop — oldest
     // first, same FIFO reasoning as OrderRepository's queue query.
     List<OutboxEvent> findByStatusOrderByCreatedAtAsc(OutboxEventStatus status);
+
+    // Backs OutboxMetrics' "outbox.events.pending" gauge (FARELO-062).
+    // Standard Spring Data derived count query — cheap, and this is polled
+    // on every metrics scrape.
+    long countByStatus(OutboxEventStatus status);
+
+    // Backs OutboxMetrics' "outbox.events.pending.oldest.age" gauge
+    // (FARELO-062). Deliberately its own aggregate query rather than
+    // reusing findByStatusOrderByCreatedAtAsc(...) and reading the first
+    // element: that method loads every matching OutboxEvent (payload
+    // included) just to discard all but one. A gauge is re-evaluated on
+    // every metrics scrape, and the exact failure mode this metric exists
+    // to catch is the PENDING queue growing unbounded — the one situation
+    // where loading the whole list would be most expensive. A single
+    // MIN(created_at) aggregate avoids that entirely.
+    @Query("SELECT MIN(e.createdAt) FROM OutboxEvent e WHERE e.status = :status")
+    Optional<OffsetDateTime> findOldestCreatedAtByStatus(@Param("status") OutboxEventStatus status);
 
     // Backs OutboxRetentionCleaner#deleteProcessedEventsOlderThanRetentionPeriod
     // (FARELO-061). A bulk JPQL DELETE via @Modifying, not a derived
