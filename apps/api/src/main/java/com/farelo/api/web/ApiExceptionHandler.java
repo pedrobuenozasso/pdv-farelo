@@ -7,6 +7,7 @@ import com.farelo.api.command.CommandCannotAcceptOrdersException;
 import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
+import com.farelo.api.inventory.IngredientNotFoundException;
 import com.farelo.api.ordering.OrderInvalidTransitionException;
 import com.farelo.api.ordering.OrderNotFoundException;
 import com.farelo.api.printing.PrintJobInvalidTransitionException;
@@ -130,6 +131,12 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handlePrintJobInvalidTransition(PrintJobInvalidTransitionException ex) {
         return new ErrorResponse("PRINT_JOB_INVALID_TRANSITION", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(IngredientNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleIngredientNotFound(IngredientNotFoundException ex) {
+        return new ErrorResponse("INGREDIENT_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

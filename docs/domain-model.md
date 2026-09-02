@@ -13,7 +13,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `ordering` | `Order`, `OrderItem`, snapshot de preço, histórico de status | Em andamento |
 | `kitchen` | KDS — visualização e transição de status de preparo | Não iniciado — `GET /api/v1/orders` (fila da cozinha, FARELO-059) já existe, mas ficou em `ordering` por enquanto; ver nota na seção `ordering` abaixo |
 | `printing` | `Printer`, `PrintJob`, integração com Edge Agent | Em andamento |
-| `inventory` | `Ingredient`, `InventoryMovement` (ledger) | Não iniciado |
+| `inventory` | `Ingredient`, `InventoryMovement` (ledger) | Em andamento |
 | `recipe` | `Recipe`, `RecipeItem` — ficha técnica de produtos | Não iniciado |
 | `notification` | `Notification`, adapter WhatsApp Cloud API | Não iniciado |
 | `payment` | `Payment`, múltiplos pagamentos por comanda | Não iniciado |
@@ -747,6 +747,87 @@ Pacote: `com.farelo.api.printing`.
   (usado para preparar jobs `PRINTED`/`FAILED` sem passar pelos novos
   endpoints, ex. para o teste de exclusão da listagem do FARELO-076)
   continua reaproveitado como setup desses novos testes.
+
+## inventory
+
+Pacote: `com.farelo.api.inventory`.
+
+- **`Ingredient`** (FARELO-090): entidade JPA — `id` (UUID, mesma estratégia
+  de `Category`/`Product`/`Printer`), `name` (ex: "Leite", "Café em grão",
+  "Copo 300ml"), `unit` (enum `IngredientUnit` —
+  `@Enumerated(EnumType.STRING)`, mesma convenção de `ProductionStation`),
+  `active` (default `true`, mesmo padrão de `Category`/`Product`/`Printer`),
+  `createdAt`/`updatedAt` (`OffsetDateTime` em UTC, mesmo padrão dos demais
+  domínios). Tabela criada pela migration
+  `V16__create_ingredient_table.sql`. Primeira peça do Epic 7 (Estoque, ver
+  `docs/PROMPT_MESTRE.md` seções 13-18) — a fundação para `Recipe`/
+  `RecipeItem` (FARELO-091/092) e o ledger de estoque, `InventoryMovement`
+  (FARELO-093).
+
+  **Escopo deste ticket é só a entidade `Ingredient` em si.** Nenhum outro
+  ticket do Epic 7 foi antecipado aqui — sem `Recipe`/`RecipeItem`
+  (FARELO-091/092), sem `InventoryMovement`/ledger (FARELO-093+), sem
+  `currentStock`/`minimumStock`/`criticalStock` (FARELO-095/099) e sem custo
+  unitário do ingrediente (nenhum ticket até este pede preço/custo de
+  ingrediente) — mesmo raciocínio YAGNI já aplicado a `Printer`
+  (FARELO-070): adicionar campos apenas quando um ticket concreto precisar
+  deles, não especulativamente (AGENTS.md: não criar abstrações
+  prematuras).
+
+  **`IngredientUnit`: só `GRAM`/`MILLILITER`/`UNIT`, não a lista completa do
+  prompt mestre**: a seção 14 do prompt mestre lista `UN`, `G`, `KG`, `ML`,
+  `L` como unidades de ingrediente, mais conversão de unidade de compra (ex:
+  "1 bandeja de ovo = 30 UN") sobre uma unidade base interna. Nada disso é
+  necessário ainda — este ticket não tem nenhum consumidor real de
+  `Ingredient` (`Recipe`/`InventoryMovement` são tickets futuros), então
+  modelar a lista completa de unidades e um mecanismo de conversão agora
+  seria adivinhar um desenho para um consumidor que ainda não existe. O
+  enum cobre apenas as três unidades que já são, elas mesmas, unidades
+  *base* de medida: `GRAM` e `MILLILITER` (grandezas contínuas, massa e
+  volume) e `UNIT` (itens discretos, como copos ou embalagens). `KG`/`L` do
+  prompt mestre são unidades de *compra/exibição*, não unidades base — o
+  mesmo peso é apenas `GRAM` em outra escala (1 KG = 1000 G), exatamente a
+  "conversão de unidade de compra" que o próprio prompt mestre já pede para
+  manter separada da unidade de estoque ("não misturar unidade de estoque
+  com descrição de embalagem — internamente preferir unidade base").
+  Modelar `KG`/`L` como unidade de estoque própria hoje forçaria toda
+  entrada futura do ledger (`InventoryMovement`, FARELO-093) a converter
+  entre unidades misturadas antes de somar um saldo; uma única unidade base
+  por ingrediente evita isso por completo. Extensível depois (ex: um
+  conceito dedicado de unidade de compra/conversão) se um ticket real
+  precisar — ver javadoc de `IngredientUnit` para a nota completa.
+
+  Coluna `unit` na migration usa a mesma convenção `VARCHAR` + `CHECK` de
+  `product.production_station`/`command.status`/`orders.status`, espelhando
+  os valores do enum também no nível do banco.
+
+  `IngredientRepository` (Spring Data JPA), sem métodos de consulta
+  próprios além do CRUD padrão do `JpaRepository` — mesmo formato de
+  `CategoryRepository`/`ProductRepository`/`PrinterRepository`. `GET
+  /api/v1/ingredients` lista **todos** os ingredientes (não só os ativos),
+  mesmo padrão já usado por `GET /api/v1/categories`/`GET
+  /api/v1/products` — nenhum filtro `active`-only foi pedido ainda; um
+  `findByActiveTrue` fica para quando um consumidor real (Admin) precisar
+  disso.
+
+  CRUD REST completo do lado do backend: `POST`/`GET`
+  (lista)/`GET /{id}`/`PUT /{id}` — mesmo padrão de forma de `Product`
+  (`POST`/`GET`/`PUT`, FARELO-014/015/016), incluindo a divisão entre
+  `IngredientRequest` (criação, sem `active` — sempre começa `true`) e
+  `IngredientUpdateRequest` (`PUT`, substituição completa, com `active`
+  como `Boolean` obrigatório — mesmo motivo primitivo-vs-wrapper já
+  documentado em `ProductUpdateRequest`: um `boolean` primitivo ausente no
+  JSON viraria silenciosamente `false` via Jackson). Sem `DELETE` (fora do
+  roadmap atual). `IngredientNotFoundException`
+  (`404`/`INGREDIENT_NOT_FOUND`) registrada em `ApiExceptionHandler`, mesmo
+  formato de `CategoryNotFoundException`/`ProductNotFoundException`. Ver
+  `docs/api.md` para os endpoints.
+
+  **Testes**: `IngredientRepositoryIntegrationTests` (mapeamento JPA contra
+  Postgres real, mesmo formato de `CategoryRepositoryIntegrationTests`) e
+  `IngredientControllerIntegrationTests` (HTTP real via `MockMvc`, cobrindo
+  os quatro endpoints — sucesso, validação e `404` — mesmo formato de
+  `ProductControllerIntegrationTests`).
 
 ## Outbox (infraestrutura cross-cutting)
 
