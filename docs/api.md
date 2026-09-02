@@ -363,9 +363,13 @@ lado do backend por enquanto.
 Cria um pedido, com snapshot de preço, dentro de uma comanda.
 (FARELO-052/053)
 
-**Sem nome/telefone do cliente** — esses campos ficam só no frontend por
-enquanto (FARELO-045); persistir dados de cliente é escopo de um domínio
-`customer` que ainda não existe.
+**Nome/telefone do cliente**: aceita `customerName`/`customerPhone`
+opcionais no corpo, persistidos como snapshot simples no próprio pedido
+(mesmo espírito do snapshot de preço de `unitPrice`, ver
+`docs/domain-model.md` seção `ordering`) — não é um domínio `customer`
+próprio ainda. O formulário de checkout do cardápio QR (`apps/web`,
+FARELO-045) já coletava esses dados; até agora eles nunca eram enviados ao
+backend.
 
 **Request body**
 
@@ -374,7 +378,9 @@ enquanto (FARELO-045); persistir dados de cliente é escopo de um domínio
   "commandNumber": 1,
   "items": [
     { "productId": "8a1b2c3d-4e5f-6789-0abc-def123456789", "quantity": 2 }
-  ]
+  ],
+  "customerName": "Maria",
+  "customerPhone": "+55 11 91234-5678"
 }
 ```
 
@@ -384,6 +390,8 @@ enquanto (FARELO-045); persistir dados de cliente é escopo de um domínio
 | `items` | array | sim | Não pode ser vazio (`@NotEmpty`) |
 | `items[].productId` | UUID | sim | Precisa apontar para um `Product` existente e `active` |
 | `items[].quantity` | int | sim | `> 0` (`@Positive`) |
+| `customerName` | string | não | Sem validação de formato — dado de contato para o atendente, não verificação de identidade |
+| `customerPhone` | string | não | Sem validação de formato (YAGNI) |
 
 **Comanda precisa aceitar novos pedidos**: apenas `AVAILABLE` e `OPEN` são
 válidos. Se a comanda estiver `AVAILABLE`, o próprio ato de criar o
@@ -425,9 +433,14 @@ assim).
       "unitPrice": 7.50
     }
   ],
+  "customerName": "Maria",
+  "customerPhone": "+55 11 91234-5678",
   "createdAt": "2026-09-01T13:00:00Z"
 }
 ```
+
+`customerName`/`customerPhone` são `null` na resposta quando o pedido foi
+criado sem esses campos.
 
 **Erros**
 
@@ -487,6 +500,8 @@ mesmo formato de resposta.
         "unitPrice": 7.50
       }
     ],
+    "customerName": "Maria",
+    "customerPhone": "+55 11 91234-5678",
     "createdAt": "2026-09-01T13:00:00Z"
   }
 ]
@@ -679,6 +694,8 @@ endpoint não ganhou um pacote `kitchen` próprio ainda).
         "unitPrice": 7.50
       }
     ],
+    "customerName": "Maria",
+    "customerPhone": "+55 11 91234-5678",
     "createdAt": "2026-09-01T13:00:00Z"
   }
 ]

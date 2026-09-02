@@ -8,7 +8,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 |---|---|---|
 | `auth` | Autenticação e RBAC de usuários internos | Não iniciado |
 | `catalog` | `Product`, `Category` — fonte única de verdade do cardápio | Em andamento |
-| `customer` | Dados do cliente coletados no fluxo de pedido (nome, WhatsApp) | Não iniciado |
+| `customer` | Dados do cliente coletados no fluxo de pedido (nome, WhatsApp) | Snapshot simples em `orders` (ver seção `ordering`) — domínio próprio ainda **não iniciado** |
 | `command` | `Command` (comanda) e seu ciclo de vida | Em andamento |
 | `ordering` | `Order`, `OrderItem`, snapshot de preço, histórico de status | Em andamento |
 | `kitchen` | KDS — visualização e transição de status de preparo | Não iniciado — `GET /api/v1/orders` (fila da cozinha, FARELO-059) já existe, mas ficou em `ordering` por enquanto; ver nota na seção `ordering` abaixo |
@@ -89,9 +89,10 @@ Pacote: `com.farelo.api.ordering`.
   demais domínios), `command` (`@ManyToOne` obrigatório para `Command` —
   todo pedido pertence a uma comanda), `status` (enum `OrderStatus`:
   `CREATED`, `CONFIRMED`, `PREPARING`, `READY`, `DELIVERED`, `CANCELLED` —
-  `@Enumerated(EnumType.STRING)`, default `CREATED`),
-  `createdAt`/`updatedAt` (UTC, mesmo padrão dos demais domínios). Tabela
-  criada pela migration `V7__create_order_table.sql`, com FK para
+  `@Enumerated(EnumType.STRING)`, default `CREATED`), `customerName`/
+  `customerPhone` (ambos `String`, opcionais — ver nota dedicada logo
+  abaixo), `createdAt`/`updatedAt` (UTC, mesmo padrão dos demais domínios).
+  Tabela criada pela migration `V7__create_order_table.sql`, com FK para
   `command(id)`.
 
   **Nota de nomeação**: a tabela é `orders` (plural), não `order` —
@@ -105,6 +106,39 @@ Pacote: `com.farelo.api.ordering`.
 
   Escopo restrito propositalmente: sem `OrderItem` (FARELO-051), sem
   snapshot de preço (FARELO-052), sem endpoints REST (FARELO-053+).
+
+  **`customerName`/`customerPhone`**: follow-up sem número FARELO explícito
+  no roadmap original (mesmo padrão dos follow-ups não ticketados que já
+  aconteceram com FARELO-019 e com o fechamento do ciclo de vida do pedido,
+  ambos documentados nesta seção) — o formulário de checkout do cardápio QR
+  (`apps/web`, FARELO-045) já coletava nome e telefone do cliente, mas esses
+  dados nunca eram enviados ao backend nem persistidos em lugar nenhum
+  (ver nota antiga em `docs/api.md`, agora removida). Ambos os campos são
+  `String` nullable, adicionados pela migration
+  `V12__add_order_customer_columns.sql` (`customer_name VARCHAR(120)`,
+  `customer_phone VARCHAR(30)`).
+
+  **Deliberadamente um snapshot simples em `Order`, não um domínio
+  `customer` próprio** (ver linha `customer` na tabela de domínios no topo
+  deste documento): não existe conta de cliente, histórico por telefone, ou
+  fidelidade hoje — construir um domínio inteiro (entidade própria,
+  repositório, consulta por telefone) para isso agora seria uma abstração
+  prematura (AGENTS.md). Mesmo espírito do snapshot de preço em
+  `OrderItem.unitPrice`: o valor é capturado uma vez, no momento da criação
+  do pedido, e nunca mais muda. Diferente de `unitPrice`, porém, a entidade
+  não expõe setters para esses dois campos — só getters, o mesmo padrão de
+  imutabilidade pós-criação de `createdAt` — já que, ao contrário de
+  `OrderItem` (FARELO-051, que ganhou setters só por nenhum endpoint editar
+  ainda), aqui já se sabe de início que não há nenhum caso de uso de edição
+  cogitado.
+
+  **Quando isso deveria virar um domínio `customer` de verdade**: se o
+  produto ganhar conta de cliente (login/cadastro), histórico de pedidos
+  por cliente, ou programa de fidelidade — qualquer coisa que precise
+  consultar/agregar por identidade do cliente ao longo de múltiplos
+  pedidos/comandas, não só exibir o nome/telefone de um pedido específico
+  para quem está atendendo.
+
 - **`OrderItem`** (FARELO-051): entidade JPA — `id` (UUID, mesma estratégia
   dos demais domínios), `order` (`@ManyToOne` obrigatório para `Order`),
   `product` (`@ManyToOne` obrigatório para `Product`), `quantity` (int;

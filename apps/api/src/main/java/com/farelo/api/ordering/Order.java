@@ -36,6 +36,19 @@ import java.util.UUID;
  * <p>Id generation follows the same strategy as {@link
  * com.farelo.api.catalog.Category} — see its javadoc for why {@code RANDOM}
  * (UUIDv4) is used instead of UUIDv7.
+ *
+ * <p><strong>{@code customerName}/{@code customerPhone}</strong>: a plain
+ * snapshot of the customer contact info collected by the QR checkout form
+ * (apps/web, FARELO-045) — captured once at order-creation time, same
+ * spirit as {@link OrderItem#getUnitPrice()}'s price snapshot. This is
+ * deliberately <em>not</em> a {@code customer} domain/entity (see
+ * docs/domain-model.md) — there's no customer account, loyalty, or
+ * lookup-by-phone use case yet to justify one; both fields are nullable
+ * because not every order-creation flow necessarily has this data (e.g. a
+ * future POS-direct order flow that skips the QR checkout form). No
+ * setters, only getters — like {@code createdAt}, this is written once at
+ * construction and never changed afterward (no endpoint edits an order's
+ * customer info after creation).
  */
 @Entity
 @Table(name = "orders")
@@ -54,6 +67,12 @@ public class Order {
     @Column(name = "status", nullable = false)
     private OrderStatus status = OrderStatus.CREATED;
 
+    @Column(name = "customer_name")
+    private String customerName;
+
+    @Column(name = "customer_phone")
+    private String customerPhone;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -65,7 +84,13 @@ public class Order {
     }
 
     public Order(Command command) {
+        this(command, null, null);
+    }
+
+    public Order(Command command, String customerName, String customerPhone) {
         this.command = command;
+        this.customerName = customerName;
+        this.customerPhone = customerPhone;
     }
 
     @PrePersist
@@ -98,6 +123,14 @@ public class Order {
 
     public void setStatus(OrderStatus status) {
         this.status = status;
+    }
+
+    public String getCustomerName() {
+        return customerName;
+    }
+
+    public String getCustomerPhone() {
+        return customerPhone;
     }
 
     public OffsetDateTime getCreatedAt() {

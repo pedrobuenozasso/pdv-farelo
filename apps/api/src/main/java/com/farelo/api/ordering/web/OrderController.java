@@ -35,7 +35,8 @@ public class OrderController {
                 .map(item -> new NewOrderItem(item.productId(), item.quantity()))
                 .toList();
 
-        OrderWithItems result = orderService.create(request.commandNumber(), items);
+        OrderWithItems result = orderService.create(
+                request.commandNumber(), items, request.customerName(), request.customerPhone());
 
         // No GET /api/v1/orders/{id} yet (future ticket) — the Location
         // header still names the resource's URI, which is correct even

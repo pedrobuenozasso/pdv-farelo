@@ -73,12 +73,17 @@ public class OrderService {
      * — FARELO-060, the first real Transactional Outbox integration — in
      * this same transaction, so it commits or rolls back together with
      * everything above.
+     *
+     * <p>{@code customerName}/{@code customerPhone} are optional
+     * (nullable) — a plain snapshot on the order itself, not a
+     * {@code customer} domain lookup; see {@link Order}'s javadoc.
      */
     @Transactional
-    public OrderWithItems create(int commandNumber, List<NewOrderItem> newItems) {
+    public OrderWithItems create(
+            int commandNumber, List<NewOrderItem> newItems, String customerName, String customerPhone) {
         Command command = commandService.openForOrdering(commandNumber);
 
-        Order order = orderRepository.save(new Order(command));
+        Order order = orderRepository.save(new Order(command, customerName, customerPhone));
         orderStatusHistoryRepository.save(new OrderStatusHistory(order, null, OrderStatus.CREATED));
 
         List<OrderItem> items = new ArrayList<>();
