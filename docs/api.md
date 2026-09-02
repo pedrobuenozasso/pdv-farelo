@@ -727,4 +727,56 @@ Lista vazia (`[]`) quando não há pedidos ativos em nenhuma comanda.
 Sem erros específicos — sempre `200 OK` (lista, potencialmente vazia; sem
 parâmetro de path para validar).
 
+### `GET /api/v1/print-jobs`
+
+Lista os `PrintJob`s pendentes de impressão — status `PENDING`, do mais
+antigo para o mais novo (`createdAt` asc, fila FIFO). (FARELO-076)
+
+Primeiro endpoint REST do domínio `printing` — antes deste ticket não
+existia nenhum, nem para `PrintJob` nem para `Printer`. Consumido pelo
+Farelo Edge Agent (FARELO-075, `apps/edge-agent`) para saber o que ainda
+precisa ser impresso: `Order criado → PrintJob PENDING → Edge Agent →
+impressora → PRINTED` (prompt mestre seção 10).
+
+Sem query param de status: mesma lógica de `GET /api/v1/orders` (a fila da
+cozinha) — o propósito inteiro deste endpoint já é "o que está pendente",
+então filtrar por outro status não faz sentido aqui. Sem paginação — mesma
+lógica YAGNI já aplicada aos demais endpoints de fila deste projeto: volume
+baixo.
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "f1a2b3c4-5678-90ab-cdef-1234567890ab",
+    "orderId": "d4e5f6a7-8901-2bcd-ef34-567890abcdef",
+    "content": {
+      "commandNumber": 37,
+      "productionStation": "BAR",
+      "items": [
+        { "productName": "Cappuccino", "quantity": 2 }
+      ]
+    },
+    "status": "PENDING",
+    "createdAt": "2026-09-01T13:00:00Z"
+  }
+]
+```
+
+`content` é o objeto estruturado já desserializado — não uma string com
+JSON escapado — mesmo formato de `PrintJobContent` (`com.farelo.api.printing`,
+FARELO-072/074): `commandNumber`, `productionStation` (`BAR`/`KITCHEN`,
+`null` quando nenhum item do job tem estação atribuída — ver
+`docs/domain-model.md`, seção `printing`, FARELO-074) e `items` (nome e
+quantidade de cada produto). `PrintJob.content` é persistido como uma string
+JSON (snapshot serializado); o DTO de resposta desserializa de volta para
+esse objeto antes de servir, para o Edge Agent não precisar fazer
+double-parsing.
+
+Lista vazia (`[]`) quando não há `PrintJob`s pendentes.
+
+Sem erros específicos — sempre `200 OK` (lista, potencialmente vazia; sem
+parâmetro de path para validar), mesmo formato de `GET /api/v1/orders`.
+
 _(demais endpoints a preencher conforme implementados)_
