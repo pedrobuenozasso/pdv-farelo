@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface PrintJobRepository extends JpaRepository<PrintJob, UUID> {
@@ -28,5 +29,13 @@ public interface PrintJobRepository extends JpaRepository<PrintJob, UUID> {
     // FARELO-055 lesson, documented on OrderRepository).
     @Query("SELECT p FROM PrintJob p JOIN FETCH p.order WHERE p.status = :status ORDER BY p.createdAt ASC")
     List<PrintJob> findByStatusOrderByCreatedAtAsc(@Param("status") PrintJobStatus status);
+
+    // Backs PrintJobService#getById (FARELO-077, used by markPrinted/
+    // markFailed) — same JOIN FETCH reasoning as findByStatusOrderByCreatedAtAsc
+    // above and as OrderRepository#findByIdWithCommand: PrintJobResponse
+    // reads job.getOrder().getId() in the controller, after this method's
+    // own (short) transaction has already closed.
+    @Query("SELECT p FROM PrintJob p JOIN FETCH p.order WHERE p.id = :id")
+    Optional<PrintJob> findByIdWithOrder(@Param("id") UUID id);
 
 }

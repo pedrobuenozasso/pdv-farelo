@@ -9,6 +9,8 @@ import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
 import com.farelo.api.ordering.OrderInvalidTransitionException;
 import com.farelo.api.ordering.OrderNotFoundException;
+import com.farelo.api.printing.PrintJobInvalidTransitionException;
+import com.farelo.api.printing.PrintJobNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -114,6 +116,20 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleOrderInvalidTransition(OrderInvalidTransitionException ex) {
         return new ErrorResponse("ORDER_INVALID_TRANSITION", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(PrintJobNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handlePrintJobNotFound(PrintJobNotFoundException ex) {
+        return new ErrorResponse("PRINT_JOB_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict, same state-conflict reasoning as OrderInvalidTransitionException
+    // above (FARELO-077).
+    @ExceptionHandler(PrintJobInvalidTransitionException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handlePrintJobInvalidTransition(PrintJobInvalidTransitionException ex) {
+        return new ErrorResponse("PRINT_JOB_INVALID_TRANSITION", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {
