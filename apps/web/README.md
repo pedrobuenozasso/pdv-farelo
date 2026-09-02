@@ -50,12 +50,24 @@ visível apenas se `active && availableOnMenu`; categoria visível apenas
 se tiver ao menos um produto visível) — aceitável para o volume de dados
 atual; um endpoint público filtrado é candidato natural se o catálogo
 crescer bastante.
+FARELO-044 adicionou o carrinho local ao cardápio: cada produto ganhou um
+"+"/"−" para adicionar/remover, com um rodapé mostrando itens, quantidade,
+subtotal por item e total (BRL) — sem persistência entre reloads (fora de
+escopo por ora) e sem enviar nada ao backend ainda (não existe
+`POST /api/v1/orders`; "Finalizar pedido" é um placeholder desabilitado —
+a lógica real é FARELO-045). **Mudança de arquitetura**: como o carrinho
+precisa de estado no cliente, a parte do cardápio que renderiza os
+produtos foi extraída para `src/app/c/[commandNumber]/menu.tsx`, um
+Client Component (`"use client"`, `useState` local — não precisa de
+Zustand/Context nesse escopo) que recebe `sections` já carregado via SSR
+como prop; `page.tsx` continua Server Component (busca da comanda e do
+cardápio, mensagens de erro/status).
 Ainda não há shadcn/ui, nem edição/exclusão de categoria (sem endpoint
 `PUT`/`DELETE` para categoria no backend ainda) nem exclusão de produto
-(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem carrinho
-em `/c/{commandNumber}` (FARELO-044) nem as demais rotas de negócio
-(`/pdv`, `/kitchen`, shell completo de `/admin`) — isso é escopo de
-tickets futuros.
+(sem `DELETE`, fora do roadmap atual — ver `docs/api.md`), nem finalização
+de pedido em `/c/{commandNumber}` (FARELO-045) nem as demais rotas de
+negócio (`/pdv`, `/kitchen`, shell completo de `/admin`) — isso é escopo
+de tickets futuros.
 
 ## Como rodar
 

@@ -1,17 +1,23 @@
 import { ApiError } from "@/lib/api/client";
-import { listCategories, type Category } from "@/lib/api/categories";
+import { listCategories } from "@/lib/api/categories";
 import {
   getCommand,
   type Command,
   type CommandStatus,
 } from "@/lib/api/commands";
-import { listProducts, type Product } from "@/lib/api/products";
+import { listProducts } from "@/lib/api/products";
 
-// Server Component: this page has no cart/mutation yet (FARELO-044) — só
-// busca a comanda (e o cardápio, quando aplicável) e exibe o resultado,
-// então um fetch direto durante o SSR é mais simples que "use client" +
-// TanStack Query aqui. Reavaliar quando o carrinho trouxer interatividade
-// real para esta rota.
+import { Menu, type MenuSection } from "./menu";
+
+// Server Component: fetches the comanda e o cardápio durante o SSR — mais
+// simples que "use client" + TanStack Query aqui, já que a página em si
+// não precisa reagir a nada além do resultado dessas buscas. FARELO-044
+// adicionou o carrinho, que *precisa* de estado no cliente (quantidade por
+// item, total); em vez de converter a página inteira, só a parte
+// interativa foi extraída para um Client Component (`Menu`, em
+// ./menu.tsx), que recebe `sections` já carregado via SSR como prop — o
+// restante (busca da comanda, mensagens de erro/status) continua Server
+// Component.
 
 const MIN_COMMAND_NUMBER = 1;
 const MAX_COMMAND_NUMBER = 100;
@@ -30,11 +36,6 @@ const STATUS_LABEL: Record<CommandStatus, string> = {
 // nos demais (fechando a conta, encerrada, bloqueada) mostramos só o
 // STATUS_LABEL acima, sem produtos.
 const MENU_VISIBLE_STATUSES = new Set<CommandStatus>(["AVAILABLE", "OPEN"]);
-
-const currencyFormatter = new Intl.NumberFormat("pt-BR", {
-  style: "currency",
-  currency: "BRL",
-});
 
 type CommandLookupResult =
   | { outcome: "found"; command: Command }
@@ -57,8 +58,6 @@ async function lookupCommand(number: number): Promise<CommandLookupResult> {
     return { outcome: "error" };
   }
 }
-
-type MenuSection = { category: Category; products: Product[] };
 
 type MenuLookupResult =
   { outcome: "loaded"; sections: MenuSection[] } | { outcome: "error" };
@@ -160,51 +159,6 @@ function EmptyMenuMessage() {
   );
 }
 
-function MenuSections({ sections }: { sections: MenuSection[] }) {
-  return (
-    <div className="flex flex-col gap-8">
-      {sections.map(({ category, products }) => (
-        <section key={category.id} className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold text-black dark:text-zinc-50">
-            {category.name}
-          </h2>
-          <ul className="flex flex-col gap-4">
-            {products.map((product) => (
-              <li key={product.id} className="flex gap-3">
-                {product.imageUrl ? (
-                  // Sem otimização do next/image por enquanto (YAGNI) —
-                  // ver README.
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={product.imageUrl}
-                    alt={product.name}
-                    className="h-16 w-16 flex-shrink-0 rounded object-cover"
-                  />
-                ) : null}
-                <div className="flex flex-1 flex-col gap-0.5">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-sm font-medium text-black dark:text-zinc-50">
-                      {product.name}
-                    </span>
-                    <span className="text-sm font-medium whitespace-nowrap text-black dark:text-zinc-50">
-                      {currencyFormatter.format(product.price)}
-                    </span>
-                  </div>
-                  {product.description ? (
-                    <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                      {product.description}
-                    </p>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
-
 // Comanda encontrada e num status "utilizável" — mostra o cardápio.
 function CommandWithMenu({
   command,
@@ -221,7 +175,7 @@ function CommandWithMenu({
       ) : menu.sections.length === 0 ? (
         <EmptyMenuMessage />
       ) : (
-        <MenuSections sections={menu.sections} />
+        <Menu sections={menu.sections} />
       )}
     </main>
   );
