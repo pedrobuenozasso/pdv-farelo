@@ -108,18 +108,16 @@ Pacote: `com.farelo.api.ordering`.
 - **`OrderItem`** (FARELO-051): entidade JPA — `id` (UUID, mesma estratégia
   dos demais domínios), `order` (`@ManyToOne` obrigatório para `Order`),
   `product` (`@ManyToOne` obrigatório para `Product`), `quantity` (int;
-  validação de positivo fica para a camada de DTO/service quando o
-  endpoint existir, FARELO-053 — não há `CHECK` no banco para isso),
-  `unitPrice` (`BigDecimal`, `NUMERIC(10,2)`), `createdAt` (UTC).
+  validação de positivo na camada de DTO/service — `@Positive` em
+  `OrderItemRequest`, sem `CHECK` no banco), `unitPrice` (`BigDecimal`,
+  `NUMERIC(10,2)`), `createdAt` (UTC).
 
   **`unitPrice` é snapshot congelado, não referência ao preço atual do
   produto** (convenção de snapshot de preço do AGENTS.md): o valor é
-  capturado no momento da venda e nunca deriva de `product.getPrice()`,
-  nem se atualiza se o preço do produto mudar depois. Este ticket
-  (FARELO-051) só adiciona a coluna e a entidade — a lógica que de fato
-  captura o preço atual do produto automaticamente ao criar um item (e
-  qualquer validação relacionada) ainda não existe, é escopo de
-  FARELO-052/053, quando o endpoint for criado.
+  capturado do preço atual do produto no momento da criação do pedido
+  (`OrderService.create`, FARELO-052) e nunca deriva de
+  `product.getPrice()` depois disso — se o preço do produto mudar, o
+  pedido já criado mantém o preço antigo.
 
   **Sem `updatedAt`** — decisão deliberada, diferente de toda outra
   entidade do projeto até aqui: neste MVP um item de pedido é imutável
@@ -131,3 +129,12 @@ Pacote: `com.farelo.api.ordering`.
   Tabela `order_item` criada pela migration `V8__create_order_item_table.sql`,
   com FK `NOT NULL` para `orders(id)` e para `product(id)`, mais índices
   nas duas FKs.
+
+`POST /api/v1/orders` (FARELO-052/053) cria um `Order` com seus
+`OrderItem`s numa única transação, com o snapshot de preço descrito acima.
+Reaproveita `CommandNotFoundException`/`ProductNotFoundException` dos
+domínios `command`/`catalog`; adiciona `CommandCannotAcceptOrdersException`
+(`command`, comanda em estado que não aceita pedidos) e
+`ProductNotAvailableException` (`catalog`, produto inativo). Ver
+`docs/api.md` para o endpoint completo, incluindo a decisão de negócio
+sobre `AVAILABLE`→`OPEN` automático ao criar o primeiro pedido.

@@ -358,4 +358,101 @@ Ainda não há endpoint para transição a `PAYMENT_REQUESTED` nem para
 `BLOCKED` — escopo de tickets futuros. Isso fecha o Epic 2 (Comandas) do
 lado do backend por enquanto.
 
+### `POST /api/v1/orders`
+
+Cria um pedido, com snapshot de preço, dentro de uma comanda.
+(FARELO-052/053)
+
+**Sem nome/telefone do cliente** — esses campos ficam só no frontend por
+enquanto (FARELO-045); persistir dados de cliente é escopo de um domínio
+`customer` que ainda não existe.
+
+**Request body**
+
+```json
+{
+  "commandNumber": 1,
+  "items": [
+    { "productId": "8a1b2c3d-4e5f-6789-0abc-def123456789", "quantity": 2 }
+  ]
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `commandNumber` | int | sim | Precisa apontar para uma `Command` existente |
+| `items` | array | sim | Não pode ser vazio (`@NotEmpty`) |
+| `items[].productId` | UUID | sim | Precisa apontar para um `Product` existente e `active` |
+| `items[].quantity` | int | sim | `> 0` (`@Positive`) |
+
+**Comanda precisa aceitar novos pedidos**: apenas `AVAILABLE` e `OPEN` são
+válidos. Se a comanda estiver `AVAILABLE`, o próprio ato de criar o
+pedido a transiciona para `OPEN` automaticamente — não existe um passo
+explícito de "abrir" no fluxo do cliente antes de pedir pelo cardápio QR
+(prompt mestre seção 6). Uma comanda já `OPEN` aceita o pedido sem mudar
+de estado (ex: um segundo pedido na mesma visita). `PAYMENT_REQUESTED`,
+`CLOSED` e `BLOCKED` rejeitam com erro de negócio.
+
+**Snapshot de preço**: para cada item, `unitPrice` é capturado do preço
+atual do produto **no momento da criação** — nunca uma referência viva.
+Se o preço do produto mudar depois, o pedido já criado mantém o preço
+antigo (AGENTS.md, convenção de snapshot de preço).
+
+Toda a operação (validar comanda, validar produtos, criar o pedido e seus
+itens, e a transição `AVAILABLE`→`OPEN` quando aplicável) roda em uma
+única transação — sem outbox/eventos ainda (Epic 5, FARELO-060+).
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/orders/{id}` (ainda não há `GET` para resolvê-lo
+— ticket futuro; o header já nomeia a URI do recurso corretamente mesmo
+assim).
+
+```json
+{
+  "id": "d4e5f6a7-8901-2bcd-ef34-567890abcdef",
+  "commandNumber": 1,
+  "status": "CREATED",
+  "items": [
+    {
+      "id": "e5f6a7b8-9012-3cde-f456-7890abcdef12",
+      "productId": "8a1b2c3d-4e5f-6789-0abc-def123456789",
+      "productName": "Café Espresso",
+      "quantity": 2,
+      "unitPrice": 7.50
+    }
+  ],
+  "createdAt": "2026-09-01T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `commandNumber`/`items` ausente, `items` vazio, ou
+  algum item com `productId` ausente ou `quantity` não positiva, no
+  formato padrão com `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `commandNumber` não corresponde a nenhuma comanda
+  existente (`code: "COMMAND_NOT_FOUND"`), ou algum `productId` não
+  corresponde a nenhum produto existente (`code: "PRODUCT_NOT_FOUND"`).
+- `409 Conflict` — a comanda existe mas não aceita novos pedidos no estado
+  atual:
+
+  ```json
+  {
+    "code": "COMMAND_CANNOT_ACCEPT_ORDERS",
+    "message": "Command 1 cannot accept orders (current status: CLOSED)",
+    "correlationId": "..."
+  }
+  ```
+
+  — ou algum produto existe mas está inativo:
+
+  ```json
+  {
+    "code": "PRODUCT_NOT_AVAILABLE",
+    "message": "Product not available: 8a1b2c3d-4e5f-6789-0abc-def123456789",
+    "correlationId": "..."
+  }
+  ```
+
 _(demais endpoints a preencher conforme implementados)_
