@@ -12,25 +12,32 @@ import org.testcontainers.containers.PostgreSQLContainer;
  *
  * <p>Requires Docker to be available locally.
  *
- * <p><strong>{@code OutboxWorker}'s real {@code @Scheduled} trigger is
- * disabled for every test context by default</strong> (see {@code
- * outbox.worker.poll-interval-ms} below). Spring Test caches {@code
+ * <p><strong>{@code OutboxWorker}'s and {@code NotificationWorker}'s real
+ * {@code @Scheduled} triggers are disabled for every test context by
+ * default</strong> (see {@code outbox.worker.poll-interval-ms}/{@code
+ * notification.worker.poll-interval-ms} below). Spring Test caches {@code
  * ApplicationContext}s across test classes for the whole suite run, so a
  * context created early (e.g. by some other {@code @SpringBootTest} class
- * with no property overrides) keeps its {@code OutboxWorker} bean — and
- * its background scheduled thread — alive for as long as the test JVM
- * lives, polling the same shared singleton Postgres container every test
- * class after it uses. Without this, that background worker can race any
- * test that seeds {@code outbox_event} rows and expects to control
- * exactly when/how they get processed (two real, distinct test failures
- * this caused: {@code OutboxWorkerBatchSizeIntegrationTests}'s exact-count
- * assertions, and {@code OutboxWorkerPrintJobIntegrationTests}'s
- * dispatch-failure assertion — both only reproduced when the *full* suite
- * ran, never in isolation). No test in this suite relies on the trigger
- * firing on its own — every test calls {@code processPendingEvents()}
- * directly, the standard way to test a {@code @Scheduled} method without
- * depending on wall-clock timing — so disabling it here has no coverage
- * cost.
+ * with no property overrides) keeps its worker beans — and their
+ * background scheduled threads — alive for as long as the test JVM lives,
+ * polling the same shared singleton Postgres container every test class
+ * after it uses. Without this, a background worker can race any test that
+ * seeds {@code outbox_event}/{@code notification} rows and expects to
+ * control exactly when/how they get processed (two real, distinct test
+ * failures this caused for {@code OutboxWorker}: {@code
+ * OutboxWorkerBatchSizeIntegrationTests}'s exact-count assertions, and
+ * {@code OutboxWorkerPrintJobIntegrationTests}'s dispatch-failure assertion
+ * — both only reproduced when the *full* suite ran, never in isolation;
+ * {@code NotificationWorker}'s poll-interval override, FARELO-112,
+ * preempts the same class of failure for {@code
+ * NotificationSenderIntegrationTests} and friends, which seed {@code
+ * PENDING} notifications directly and would otherwise race a live
+ * background sender against a real, unconfigured WhatsApp endpoint). No
+ * test in this suite relies on either trigger firing on its own — every
+ * test calls {@code processPendingEvents()}/{@code
+ * processPendingNotifications()} directly, the standard way to test a
+ * {@code @Scheduled} method without depending on wall-clock timing — so
+ * disabling both here has no coverage cost.
  *
  * <p>Note this can't currently be overridden back down per test class:
  * Spring Test gives {@code @DynamicPropertySource} values higher
@@ -59,6 +66,8 @@ public abstract class AbstractIntegrationTest {
         // need a conditional wrapper around it in FareloApiApplication
         // just for this, more machinery than a property override needs).
         registry.add("outbox.worker.poll-interval-ms", () -> "3600000");
+        // FARELO-112: same reasoning, for NotificationWorker.
+        registry.add("notification.worker.poll-interval-ms", () -> "3600000");
     }
 
 }

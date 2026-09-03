@@ -64,3 +64,10 @@ whatsapp:
     access-token: ${WHATSAPP_ACCESS_TOKEN:}
     connect-timeout-ms: ${WHATSAPP_API_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${WHATSAPP_API_READ_TIMEOUT_MS:10000}
+
+# FARELO-112: how often NotificationWorker's @Scheduled trigger fires, in
+# ms — same configurable-rather-than-literal reasoning as
+# outbox.worker.poll-interval-ms above. See NotificationWorker's javadoc.
+notification:
+  worker:
+    poll-interval-ms: 5000

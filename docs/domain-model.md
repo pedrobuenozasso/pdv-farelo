@@ -2275,6 +2275,141 @@ Pacote: `com.farelo.api.notification`.
   conforme a resposta do stub, `404`/`NOTIFICATION_NOT_FOUND` para id
   inexistente).
 
+- **FARELO-112 — "Disparar WhatsApp em ORDER_READY"** (o gatilho real,
+  finalmente): fecha a lacuna deixada em aberto desde FARELO-110/111 — até
+  aqui nada criava uma `Notification` de verdade nem decidia quando enviar
+  uma. Implementa literalmente o fluxo do prompt mestre (seção 19):
+  `ORDER_READY → Notification Worker → WhatsApp`.
+
+  **Mecanismo escolhido — reaproveitar o Transactional Outbox existente, não
+  inventar um novo**: `OrderService#markAsReady` (`ordering`, transição
+  `PREPARING` → `READY`, FARELO-058) passou a publicar um evento de outbox
+  `OrderReady` (payload `OrderReadyEvent`, um record simples com `orderId` +
+  `commandNumber` — mesmo formato minimalista de `OrderCreatedEvent`) via
+  `OutboxPublisher`, na mesma transação da transição — segunda integração
+  real do outbox depois de `OrderCreated` (FARELO-060). Publicado *depois*
+  que a transição em si já validou com sucesso (não antes) — publicar antes
+  registraria um evento para uma transição que ainda podia falhar sua
+  própria validação (ex: pedido não estava em `PREPARING`); ambas as
+  escritas continuam commitando/revertendo juntas, dentro do mesmo método
+  `@Transactional`.
+
+  Esta é exatamente a mesma forma de problema que `OrderCreated` →
+  `PrintJob` já resolve (FARELO-072): "um evento de domínio aconteceu, faça
+  um efeito colateral assíncrono em reação". Em vez de desenhar um segundo
+  mecanismo do zero, `com.farelo.api.outbox.OutboxWorker` ganhou um segundo
+  branch no seu `dispatch(...)` (ainda um `if`/`else if` simples, não um
+  registro de handlers — ver a entrada do próprio `OutboxWorker` na seção
+  "Outbox" abaixo para a decisão revisada de manter isso simples mesmo com
+  dois consumidores reais agora): um evento `OrderReady` é despachado para
+  `com.farelo.api.notification.OrderReadyNotificationService#createForOrder`,
+  que cria uma `Notification` `PENDING` (tipo `ORDER_READY`) — ou nada, se o
+  pedido não tiver `customerPhone` (ver decisão abaixo).
+
+  **Por que criar a `Notification` é uma escrita síncrona no banco (dentro
+  da transação do `OutboxWorker`), mas ENVIAR é assíncrono, num worker
+  separado**: `NotificationSender#send(Notification)` (FARELO-111) faz uma
+  chamada HTTP real de saída para a Meta WhatsApp Cloud API — exatamente o
+  tipo de chamada lenta/não confiável que o desenho do `OutboxWorker` já
+  mantém fora da sua própria transação `@Transactional` em lote (batch
+  inteiro sob `FOR UPDATE`, rollback do lote inteiro se `dispatch(...)`
+  lançar — ver javadoc de `OutboxWorker`). Colocar `NotificationSender.send(...)`
+  direto dentro de `OutboxWorker.dispatch(...)` reintroduziria esse mesmo
+  problema, só que apontado para a tabela `notification` em vez de
+  `outbox_event`. Por isso `OrderReadyNotificationService.createForOrder(...)`
+  só faz uma escrita de banco pura (mesmo formato de
+  `PrintJobService#createForOrder` para `PrintJob`) — nenhuma chamada de
+  rede acontece dentro da transação do `OutboxWorker`.
+
+  **`com.farelo.api.notification.NotificationWorker`** (novo `@Component`,
+  pacote `notification`): o "Notification Worker" citado literalmente na
+  seção 19 do prompt mestre. `@Scheduled` próprio (`notification.worker.poll-interval-ms`,
+  default 5000ms, mesmo padrão configurável de `outbox.worker.poll-interval-ms`),
+  independente do agendamento do `OutboxWorker`. `processPendingNotifications()`
+  lista toda `Notification` `PENDING` via `NotificationService#listPending()`
+  (primeira chamadora real dessa query, que já existia desde FARELO-110 sem
+  nenhum consumidor) e chama `NotificationSender#send(...)` para cada uma.
+
+  **Deliberadamente sem `@Transactional` no método do worker em si**: `send(...)`
+  já é `@Transactional` por chamada (FARELO-111); anotar o método do loop
+  também dobraria toda a chamada em uma única transação envolvente,
+  recriando "chamada HTTP lenta seguran do uma transação aberta" um nível
+  acima — exatamente o problema que este desenho existe para evitar. Sem
+  essa anotação, cada `Notification` do lote é tentada e persistida de
+  forma independente: um envio lento ou que falha para um destinatário
+  nunca segura lock nem transação para os vizinhos, e (já que `send(...)`
+  nunca deixa uma falha de entrega lançar exceção — ver seu próprio
+  javadoc) um envio ruim nunca aborta o resto do lote.
+
+  **Sem `SKIP LOCKED`, diferente do `OutboxWorker`**: `processPendingNotifications()`
+  lista `PENDING` com uma query simples, sem lock de linha — seguro hoje
+  pela mesma razão que `OutboxWorker` era seguro antes do FARELO-063 (só
+  uma instância da aplicação roda, e `@Scheduled` com `fixedDelay` padrão
+  nunca sobrepõe a si mesmo dentro de uma JVM). Limitação conhecida,
+  documentada no javadoc da classe — merece o mesmo tratamento
+  (`FOR UPDATE SKIP LOCKED`) que `OutboxEventRepository` já tem, no dia em
+  que escalar horizontalmente for uma necessidade real, não hipotética.
+  Também sem limite de tamanho de lote (`batchSize`) — mesmo raciocínio de
+  volume naturalmente baixo já usado por `PrintJobService#listPending()`/
+  `OrderService#listQueue()`: no máximo uma notificação `ORDER_READY` por
+  pedido que chega a `READY`.
+
+  **`Order.customerPhone` nulo/vazio não é uma falha** — `OrderReadyNotificationService#createForOrder`
+  trata isso como um resultado legítimo e esperado (retorna `Optional.empty()`,
+  não lança), não como um erro de dispatch. Isso importa especificamente
+  por causa do contrato de falha do `OutboxWorker`: lançar aqui reverteria
+  o lote inteiro do outbox sendo drenado naquele momento, por uma condição
+  que não é realmente um erro — um cliente que não deixou telefone
+  simplesmente não tem para quem notificar. A transição `READY` do pedido
+  já commitou, na sua própria transação anterior
+  (`OrderService#markAsReady`); este método roda depois, de forma
+  assíncrona, e nunca pode afetar se aquela transição teve sucesso — o
+  fluxo de cozinha/retirada não pode depender de se um telefone foi
+  coletado.
+
+  **Conteúdo da mensagem**: texto em português, formatado, referenciando o
+  número da comanda (o que o cliente fisicamente segura e reconhece) e,
+  quando disponível, o nome do cliente — mesmo formato "snapshot congelado
+  em texto plano" que `Notification.content` já documenta desde FARELO-110.
+  Nenhum detalhe de item/produto é incluído — o fluxo `ORDER_READY` da
+  seção 19 é sobre avisar que o pedido está pronto para retirada, não
+  reproduzir um recibo.
+
+  **`OutboxEvent`/`Notification` continuam sem dependência um do outro**: a
+  decisão de desenho 1 do `Notification` (FARELO-110 — "entidade standalone,
+  sem depender de `OutboxEvent`") se mantém de pé mesmo com o link real
+  agora existindo — `OrderReadyNotificationService` depende para frente de
+  `com.farelo.api.ordering.Order` (para ler `customerPhone`), não de nada
+  em formato de outbox. Quem aprendeu sobre o consumidor foi só o
+  `OutboxWorker` (ver `package-info.java` de `outbox`, atualizado nesta
+  seção).
+
+  **Testes**: `OrderReadyNotificationServiceIntegrationTests` (pacote
+  `notification`, chama `createForOrder(...)` diretamente, sem passar pelo
+  outbox — mesma decisão de escopo que `PrintJobServiceIntegrationTests`
+  já tomou para `PrintJobService#createForOrder`; cobre com telefone, sem
+  nome, telefone nulo, telefone em branco, e pedido inexistente),
+  `NotificationWorkerIntegrationTests` (pacote `notification`, testa
+  `processPendingNotifications()` isoladamente contra um stub HTTP local —
+  mesmo padrão de `NotificationSenderIntegrationTests` — múltiplas
+  notificações num lote, uma falha não aborta as demais, lote vazio) e
+  `OutboxWorkerOrderReadyIntegrationTests` (pacote `outbox`, ponta a ponta:
+  cria pedido com telefone → `markAsPreparing` → `markAsReady` → drena o
+  evento `OrderReady` via `outboxWorker.processPendingEvents()` → confirma
+  `Notification` `PENDING` com destinatário/conteúdo corretos → drena via
+  `notificationWorker.processPendingNotifications()` → confirma `SENT`;
+  mais os dois casos negativos exigidos pelo ticket: pedido sem telefone
+  chegando a `READY` não cria `Notification` nenhuma e a própria transição
+  não falha; transicionar só até `PREPARING` não publica `OrderReady` nem
+  cria notificação). Todos os três seguem a mesma convenção anti-flakiness
+  já estabelecida para `OutboxWorker` — cada estágio é acionado por uma
+  chamada direta e determinística (`processPendingEvents()`/
+  `processPendingNotifications()`), nunca por um `sleep`/espera de
+  wall-clock — e por isso `AbstractIntegrationTest` passou a desabilitar
+  também o `@Scheduled` real do `NotificationWorker`
+  (`notification.worker.poll-interval-ms`), mesmo raciocínio já aplicado a
+  `outbox.worker.poll-interval-ms`.
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —
@@ -2336,35 +2471,51 @@ momento)."
   consumidor (impressão/notificação/estoque eram epics futuros ainda não
   iniciados). Isso muda no FARELO-072: um evento `eventType ==
   "OrderCreated"` agora resulta na criação de um `PrintJob` `PENDING`
-  (ver `PrintJobService`, seção `printing` acima). Notificação e estoque
-  continuam sem consumidor — qualquer outro `eventType` (nenhum existe
-  hoje) permanece um no-op.
+  (ver `PrintJobService`, seção `printing` acima).
+
+  **Segundo consumidor real (FARELO-112)**: um evento `eventType ==
+  "OrderReady"` (publicado por `OrderService#markAsReady`, ver seção
+  `notification` acima, entrada "FARELO-112") agora resulta na criação de
+  uma `Notification` `PENDING` (ou nada, se o pedido não tiver
+  `customerPhone`) via `OrderReadyNotificationService#createForOrder`.
+  Estoque continua sem consumidor — qualquer outro `eventType` (nenhum
+  existe hoje) permanece um no-op.
 
   **Mecanismo de dispatch**: um método privado `dispatch(OutboxEvent)`
-  com um `if` direto em `event.getEventType()` — não um registro
+  com um `if`/`else if` em `event.getEventType()` — não um registro
   plugável de handlers (ex: `Map<String, OutboxEventHandler>`).
-  Deliberado (YAGNI), não descuido: com exatamente um `eventType`
-  (`OrderCreated`) e um consumidor (impressão), um registro seria uma
-  abstração com uma única entrada — não há um segundo caso real para
-  desenhar a forma certa contra (um handler por evento, ou vários
-  inscritos no mesmo tipo? síncrono ou enfileirado? como falhas parciais
-  entre handlers se comportam?). Isso deve virar um mecanismo de verdade
-  quando um segundo `eventType`/consumidor aparecer — ex: `inventory`
-  reagindo a `OrderCreated` também, ou um `eventType` novo para
-  `notification` (ambos epics futuros) — só então há dois casos reais
-  para desenhar a abstração contra, em vez de um caso imaginado.
+  Continuou deliberado (YAGNI) mesmo depois de ganhar o segundo branch no
+  FARELO-112: dois `if`s em linha reta, cada um chamando exatamente um
+  método de exatamente um consumidor, ainda é mais simples de ler do que a
+  indireção de um registro, e os dois branches não têm nenhum
+  comportamento em comum para extrair (nenhuma política de retry
+  compartilhada, nenhum handler múltiplo por tipo de evento). As perguntas
+  que um registro de verdade precisaria responder — um handler por tipo de
+  evento, ou vários inscritos no mesmo tipo? síncrono ou enfileirado? como
+  falhas parciais entre handlers se comportam, independente da história de
+  rollback-do-lote-inteiro abaixo? — ainda têm só uma resposta concreta
+  cada uma neste uso real, não duas concorrentes. Isso deve virar um
+  mecanismo de verdade quando um **terceiro** `eventType`/consumidor
+  aparecer — ex: `inventory` reagindo a `OrderCreated` também, ou
+  `STOCK_LOW`/`STOCK_CRITICAL`/`OUT_OF_STOCK` alimentando `notification` do
+  mesmo jeito que `OrderReady` alimenta hoje (FARELO-113 e além) — só então
+  há três casos reais (e provavelmente uma forma repetida entre pelo menos
+  dois deles) para desenhar a abstração contra, em vez de extrapolar de
+  dois.
 
   **Direção de dependência, revisada**: até o FARELO-071, esta seção
   dizia que o pacote `outbox` "nunca depende de volta para um pacote de
   domínio" (ver nota no final desta seção, "Direção de dependência"). Isso
-  muda aqui: `OutboxWorker` agora depende de
-  `com.farelo.api.printing.PrintJobService` para fazer o dispatch real.
-  Exceção deliberada e estreita — despachar um evento para trabalho de
-  verdade exige necessariamente chamar o domínio que faz esse trabalho;
-  revisitar com um registro de handlers de verdade (que restauraria um
-  worker genérico) quando um segundo consumidor real justificar a
-  abstração. Ver o javadoc revisado do `package-info.java` de `outbox`
-  para o texto completo.
+  muda no FARELO-072: `OutboxWorker` passa a depender de
+  `com.farelo.api.printing.PrintJobService` para fazer o dispatch real, e
+  ganha uma segunda dependência forward no FARELO-112, para
+  `com.farelo.api.notification.OrderReadyNotificationService`. Exceção
+  deliberada e estreita — despachar um evento para trabalho de verdade
+  exige necessariamente chamar o domínio que faz esse trabalho; revisitar
+  com um registro de handlers de verdade (que restauraria um worker
+  genérico) quando um **terceiro** consumidor real justificar a abstração.
+  Ver o javadoc revisado do `package-info.java` de `outbox` para o texto
+  completo.
 
   **Falha ao despachar (FARELO-072)**: `dispatch(event)` roda dentro da
   mesma transação `@Transactional` de `processPendingEvents()`, antes do
@@ -2570,14 +2721,19 @@ sabem nada sobre `printing`, `ordering` ou qualquer outro domínio, só como
 guardar/publicar `(aggregateType, aggregateId, eventType, payload)`
 opacos.
 
-**Direção de dependência (dispatch), revisada no FARELO-072**: do lado do
-consumo, isso não vale mais sem exceção. `OutboxWorker` agora depende de
-`com.farelo.api.printing.PrintJobService` para de fato fazer algo com um
-evento `OrderCreated` (criar um `PrintJob`) — ver a entrada do
-`OutboxWorker` acima para a justificativa completa e o `package-info.java`
-de `outbox` para o texto formal. Despachar um evento para trabalho real
-exige chamar o domínio que faz esse trabalho; com exatamente um consumidor
-real hoje, não há uma segunda instância para desenhar uma abstração
-genérica contra sem adivinhar. Revisitar com um registro de handlers
-quando um segundo consumidor real aparecer (`inventory`, `notification` —
-epics futuros).
+**Direção de dependência (dispatch), revisada no FARELO-072, estendida no
+FARELO-112**: do lado do consumo, isso não vale mais sem exceção.
+`OutboxWorker` depende de `com.farelo.api.printing.PrintJobService` para de
+fato fazer algo com um evento `OrderCreated` (criar um `PrintJob`), e, desde
+FARELO-112, também de
+`com.farelo.api.notification.OrderReadyNotificationService` para um evento
+`OrderReady` (criar uma `Notification` `PENDING`, ou nada) — ver a entrada
+do `OutboxWorker` acima para a justificativa completa e o
+`package-info.java` de `outbox` para o texto formal. Despachar um evento
+para trabalho real exige chamar o domínio que faz esse trabalho; com
+exatamente dois consumidores reais hoje, um `if`/`else if` simples em
+`OutboxWorker` ainda diz tudo que um registro de handlers diria, com menos
+indireção. Revisitar com um registro de handlers quando um **terceiro**
+consumidor real aparecer (`inventory` reagindo a `OrderCreated`, ou
+`STOCK_LOW`/`STOCK_CRITICAL`/`OUT_OF_STOCK` alimentando `notification` —
+FARELO-113 e além).

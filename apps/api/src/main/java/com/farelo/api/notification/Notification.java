@@ -65,11 +65,18 @@ import java.util.UUID;
  *       nor FARELO-113 has designed yet.</li>
  * </ul>
  *
- * <p>The eventual link — some future worker reacting to a drained {@code
- * OrderCreated}/{@code STOCK_LOW} event by creating a {@code Notification},
- * the same way {@code OutboxWorker} creates a {@code PrintJob} today — is
- * FARELO-112/113's job to design, at the point a second real dispatch target
- * exists to design the mechanism against, not this ticket's.
+ * <p><strong>Update, FARELO-112</strong>: the eventual link described above
+ * now exists for {@code ORDER_READY} — {@code OutboxWorker} dispatches a
+ * drained {@code OrderReady} event to {@code
+ * com.farelo.api.notification.OrderReadyNotificationService#createForOrder},
+ * which creates a {@code PENDING Notification} exactly the way {@code
+ * PrintJobService} creates a {@code PrintJob} for {@code OrderCreated}. The
+ * design choice above (b) held: {@code Notification} still has zero
+ * dependency on {@code com.farelo.api.outbox}'s types in either direction —
+ * the new service depends forward on {@code com.farelo.api.ordering.Order}
+ * to read {@code customerPhone}, not on anything outbox-shaped. {@code
+ * STOCK_LOW}/{@code STOCK_CRITICAL}/{@code OUT_OF_STOCK}/{@code
+ * PRINT_FAILED} remain undesigned — FARELO-113's job, a future ticket.
  *
  * <h2>Design decision 2 — {@code recipient} lives directly on this entity,
  * no separate channel abstraction</h2>

@@ -22,21 +22,28 @@
  * aggregateId, eventType, payload)} rows, which is what keeps
  * <em>publishing</em> generic across every producer.
  *
- * <p><strong>Dependency direction (dispatching, since FARELO-072)</strong>:
- * that genericity stops at publishing. {@link
+ * <p><strong>Dependency direction (dispatching, since FARELO-072, extended
+ * FARELO-112)</strong>: that genericity stops at publishing. {@link
  * com.farelo.api.outbox.OutboxWorker} — the consumer side — now depends
- * forward on {@code com.farelo.api.printing.PrintJobService} to actually do
- * something with an {@code OrderCreated} event (create a {@code PrintJob}).
- * This is a deliberate, narrow exception to "never depends back on a
- * domain package", not an oversight: dispatching an event to real work
- * inherently means calling into whatever domain does that work, and with
- * exactly one real consumer there is nothing to hide that call behind
- * without guessing at a plugin shape no second consumer exists yet to
- * validate (see {@code OutboxWorker}'s javadoc). If/when a second real
- * consumer appears (e.g. inventory, notification — future epics), that's
- * the point to revisit this with a proper handler-registry abstraction
- * that would restore a generic worker; forcing that shape into existence
- * for a single consumer today would be speculative.
+ * forward on two domain services to actually do something with an event:
+ * {@code com.farelo.api.printing.PrintJobService} for {@code OrderCreated}
+ * (create a {@code PrintJob}), and, since FARELO-112, {@code
+ * com.farelo.api.notification.OrderReadyNotificationService} for {@code
+ * OrderReady} (create a {@code PENDING Notification}, or nothing at all if
+ * the order has no {@code customerPhone}). This is a deliberate, narrow
+ * exception to "never depends back on a domain package", not an oversight:
+ * dispatching an event to real work inherently means calling into whatever
+ * domain does that work. With exactly two real consumers today, a plain
+ * {@code if}/{@code else if} in {@link com.farelo.api.outbox.OutboxWorker}
+ * still says everything a handler registry would, with less indirection —
+ * see that class's javadoc, "Dispatch mechanism", for the full reasoning.
+ * If/when a <em>third</em> real consumer appears (e.g. inventory reacting to
+ * {@code OrderCreated}, or {@code STOCK_LOW}/{@code STOCK_CRITICAL}/{@code
+ * OUT_OF_STOCK} feeding {@code notification} the way {@code OrderReady} does
+ * today — FARELO-113 and beyond), that's the point to revisit this with a
+ * proper handler-registry abstraction that would restore a generic worker;
+ * forcing that shape into existence for two consumers today would still be
+ * speculative.
  *
  * <p>See {@code docs/domain-model.md}'s "Outbox" section for the full
  * writeup.
