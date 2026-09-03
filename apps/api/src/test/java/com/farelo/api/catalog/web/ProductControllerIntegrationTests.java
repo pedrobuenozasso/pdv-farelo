@@ -1,6 +1,8 @@
 package com.farelo.api.catalog.web;
 
 import com.farelo.api.AbstractIntegrationTest;
+import com.farelo.api.audit.AuditLog;
+import com.farelo.api.audit.AuditLogRepository;
 import com.farelo.api.catalog.Category;
 import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
@@ -10,6 +12,7 @@ import com.farelo.api.security.User;
 import com.farelo.api.security.UserRepository;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.auth.JwtTokenService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -81,6 +84,9 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private AuditLogRepository auditLogRepository;
+
     @BeforeEach
     void cleanCatalogTables() {
         productRepository.deleteAll();
@@ -94,6 +100,22 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 passwordEncoder.encode(PASSWORD),
                 role));
         return jwtTokenService.issue(user).token();
+    }
+
+    // FARELO-126: same as tokenFor(UserRole), but also hands back the
+    // persisted User itself — the audit tests below need to assert the
+    // AuditLog row's userName/userEmail snapshot actually matches the
+    // caller who made the request, which a bare token string can't answer.
+    private record AuthenticatedTestUser(User user, String token) {
+    }
+
+    private AuthenticatedTestUser userAndTokenFor(UserRole role, String name) {
+        User user = userRepository.save(new User(
+                name,
+                "test-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD),
+                role));
+        return new AuthenticatedTestUser(user, jwtTokenService.issue(user).token());
     }
 
     @Test
@@ -643,6 +665,113 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"))
                 .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // --- FARELO-126: auditing a price change ------------------------------
+
+    @Test
+    void updatingPriceRecordsAuditLogWithOldAndNewPriceAndActor() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+        AuthenticatedTestUser actor = userAndTokenFor(UserRole.ADMIN, "Gerente Ana");
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 9.90,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + actor.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        List<AuditLog> auditLogs = auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
+                "Product", product.getId());
+        assertThat(auditLogs).hasSize(1);
+
+        AuditLog auditLog = auditLogs.get(0);
+        assertThat(auditLog.getAction()).isEqualTo("PRICE_CHANGED");
+        assertThat(auditLog.getUserId()).isEqualTo(actor.user().getId());
+        assertThat(auditLog.getUserName()).isEqualTo("Gerente Ana");
+        assertThat(auditLog.getUserEmail()).isEqualTo(actor.user().getEmail());
+
+        JsonNode previousValue = objectMapper.readTree(auditLog.getPreviousValue());
+        JsonNode newValue = objectMapper.readTree(auditLog.getNewValue());
+        assertThat(new BigDecimal(previousValue.get("price").asText())).isEqualByComparingTo("7.50");
+        assertThat(new BigDecimal(newValue.get("price").asText())).isEqualByComparingTo("9.90");
+    }
+
+    @Test
+    void updatingProductWithoutChangingPriceRecordsNoAuditLog() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+
+        // Same price (7.50), only the name changes — must not produce a
+        // PRICE_CHANGED audit row (see ProductService#update's javadoc: the
+        // comparison is BigDecimal#compareTo, so this also proves 7.50 vs
+        // 7.5 would count as unchanged, not just a byte-identical resend).
+        String body = """
+                {
+                  "name": "Café Espresso Duplo",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        List<AuditLog> auditLogs = auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
+                "Product", product.getId());
+        assertThat(auditLogs).isEmpty();
+    }
+
+    @Test
+    void auditLogForPriceChangeIsQueryableViaAuditLogsEndpoint() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 8.00,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        // GET /api/v1/audit-logs stays unprotected at its own first ticket
+        // (FARELO-125) — no Authorization header here on purpose, same as
+        // every other test exercising that endpoint.
+        mockMvc.perform(get("/api/v1/audit-logs")
+                        .param("entityType", "Product")
+                        .param("entityId", product.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].action").value("PRICE_CHANGED"))
+                .andExpect(jsonPath("$[0].entityType").value("Product"))
+                .andExpect(jsonPath("$[0].entityId").value(product.getId().toString()));
     }
 
 }

@@ -3,6 +3,7 @@ package com.farelo.api.catalog.web;
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductService;
 import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.AuthenticatedPrincipal;
 import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -37,6 +38,14 @@ import java.util.UUID;
  *
  * <p>{@link #list()} is deliberately left <b>unannotated</b> — see its own
  * javadoc.
+ *
+ * <p><b>FARELO-126</b>: {@link #update} now also declares an {@link
+ * AuthenticatedPrincipal} parameter — always populated here, since this
+ * method is already {@link RequireRole}-protected — and forwards {@code
+ * principal.userId()} into {@link ProductService#update} so a real price
+ * change can be attributed to the caller in the {@code audit} domain. See
+ * that method's javadoc for the actor-resolution and price-delta-detection
+ * design.
  */
 @RestController
 @RequestMapping("/api/v1/products")
@@ -86,9 +95,17 @@ public class ProductController {
                 .toList();
     }
 
+    // AuthenticatedPrincipal (FARELO-126): this method is @RequireRole-
+    // protected, so RoleAuthorizationInterceptor always populates one before
+    // this handler runs (see AuthenticatedPrincipalArgumentResolver's
+    // javadoc). Only principal.userId() is forwarded — ProductService
+    // resolves it to a real User (and decides whether a price change even
+    // happened) itself; see ProductService#update's javadoc for why that
+    // decision lives there, not here.
     @PutMapping("/{id}")
     @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
-    public ProductResponse update(@PathVariable UUID id, @Valid @RequestBody ProductUpdateRequest request) {
+    public ProductResponse update(
+            @PathVariable UUID id, @Valid @RequestBody ProductUpdateRequest request, AuthenticatedPrincipal principal) {
         Product product = productService.update(
                 id,
                 request.name(),
@@ -99,7 +116,8 @@ public class ProductController {
                 request.active(),
                 request.availableOnMenu(),
                 request.availableOnPos(),
-                request.productionStation());
+                request.productionStation(),
+                principal.userId());
 
         return ProductResponse.from(product);
     }

@@ -96,6 +96,63 @@ FARELO-012/013), `Product` (`POST`/`GET`/`PUT`, FARELO-014/015/016). Sem
 `DELETE` para nenhum dos dois (fora do roadmap atual). Ver `docs/api.md`
 para os endpoints.
 
+- **FARELO-126 ("Auditar alteração de preço")**: `ProductService#update`
+  agora grava um `AuditLog` (`com.farelo.api.audit`, FARELO-125) sempre
+  que o `price` de um produto muda de fato.
+
+  **Detecção do delta, não "auditar todo update"**: o preço antigo é
+  capturado de `product` *antes* de qualquer campo ser sobrescrito, e
+  comparado (via `BigDecimal#compareTo`, nunca `equals` — `12.50` e `12.5`
+  contam como iguais, mesmo raciocínio de AGENTS.md sobre dinheiro) contra
+  o `price` recebido *depois* do save. Só quando divergem é que o ator é
+  resolvido e `AuditLogService#record` é chamado. O prompt mestre (seção
+  27) lista "preço, estoque, cancelamento, pagamento, configuração fiscal,
+  produto" como categorias sensíveis distintas — "preço" nomeado à parte
+  de "produto" genericamente — então este ticket (literalmente "Auditar
+  alteração de PREÇO") audita o delta de preço especificamente, não
+  qualquer campo que este `PUT` de substituição completa também tenha
+  tocado (nome, categoria, disponibilidade, estação). Auditar
+  indiscriminadamente também seria ativamente enganoso: reenviar o mesmo
+  preço (ou mudar só `availableOnMenu`) produziria uma linha cujo
+  `previousValue`/`newValue` são idênticos — ruído que quem revisa a
+  trilha de auditoria teria que aprender a ignorar.
+
+  **De onde vem "quem fez a mudança"**: `ProductController#update`
+  (já protegido por `@RequireRole(ADMIN, MANAGER)` desde FARELO-123) passa
+  a declarar um parâmetro `AuthenticatedPrincipal` — sempre populado, já
+  que o método é `@RequireRole`-protegido — e encaminha só
+  `principal.userId()` para `ProductService#update`. É o serviço que
+  resolve esse id para um `User` real (via `UserService#getById`) e decide
+  se um preço de fato mudou — mesma divisão de trabalho já estabelecida
+  neste código (controller magro: parseia a requisição e encaminha ids;
+  serviço resolve ids → entidades e toma decisões de negócio, o mesmo
+  papel que `ProductService#update` já cumpre para `categoryId` →
+  `Category` duas linhas abaixo). O ator só é resolvido quando o preço
+  realmente muda — uma chamada evitável ao `UserService` no caso comum
+  (a maioria dos updates não mexe no preço).
+
+  **Formato do snapshot**: `ProductPriceSnapshot` (record `package-private`
+  em `catalog`, `{price: BigDecimal}`), serializado via `ObjectMapper` para
+  exatamente `{"price": 12.50}` — a forma literal que o próprio javadoc de
+  `AuditLog` ("Design decision 4") já antecipava para este produtor. Campo
+  único de propósito: este snapshot existe só para descrever o que uma
+  mudança de preço precisa mostrar (preço antes/depois), não uma
+  representação geral de "como é um Product".
+
+  **Ação/tipo de entidade**: `"PRICE_CHANGED"`/`"Product"` — constantes
+  `String` simples em `ProductService`, não um enum compartilhado, seguindo
+  a decisão já tomada em `AuditLog` (Design decision 3) de manter esse
+  vocabulário aberto e definido por cada produtor.
+
+  **Testes**: `ProductControllerIntegrationTests` ganhou três casos —
+  mudança de preço grava exatamente um `AuditLog` com o snapshot
+  antigo/novo corretos e o ator correto (id/nome/email batendo com o
+  usuário que fez a chamada); um `PUT` que só muda outro campo (nome) sem
+  tocar o preço não grava nenhum `AuditLog`; a linha gravada é consultável
+  via `GET /api/v1/audit-logs?entityType=Product&entityId=...` (endpoint
+  já existente, FARELO-125, sem autenticação na chamada — mesma
+  característica "ainda não protegido" documentada na seção `audit`).
+
 ## command
 
 Pacote: `com.farelo.api.command`.
