@@ -1781,6 +1781,65 @@ Sempre `200 OK`, esteja o resultado `SENT` ou `FAILED` — é um relato de
 resultado de uma tentativa de entrega, não uma validação de request; uma
 falha de entrega não é um erro de request malformado.
 
+### `GET /api/v1/audit-logs`
+
+Lista registros de auditoria (`AuditLog`) — um registro durável e
+append-only de uma operação sensível: quem fez, quando, o quê, e (quando
+aplicável) o que mudou. (FARELO-125)
+
+Somente leitura. **Nenhum produtor real existe ainda** — nada neste ticket
+cria uma `AuditLog` de verdade; auditar alteração de preço (FARELO-126) e
+auditar ajuste de estoque (FARELO-127) são tickets futuros e distintos. Sem
+marca "Requer" — este endpoint não exige nenhuma autenticação, mesmo padrão
+não-protegido de todo endpoint de primeiro corte deste projeto até aqui (ver
+seção "Autenticação/RBAC" acima e `docs/domain-model.md`, subseção `audit`
+para o raciocínio completo dessa decisão).
+
+**Query parameters opcionais**
+
+| Parâmetro | Observações |
+|---|---|
+| `userId` | UUID de um `User`. Quando presente, tem prioridade sobre `entityType`/`entityId` (não são combinados). |
+| `entityType` | Nome da entidade afetada (ex: `Product`, `Ingredient`). Só filtra quando `entityId` também é dado. |
+| `entityId` | UUID da entidade afetada. Só filtra quando `entityType` também é dado. |
+
+Nenhum filtro: lista tudo. Só `entityType` **ou** só `entityId` (sem o par
+completo): tratado como se nenhum dos dois tivesse sido dado — lista tudo,
+sem erro.
+
+**Response — `200 OK`**
+
+Lista ordenada por `createdAt` (desc — mais recente primeiro, diferente do
+`createdAt asc` de `GET /api/v1/notifications` — ver javadoc de
+`AuditLogService#list` para o porquê).
+
+```json
+[
+  {
+    "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+    "userId": "a1b2c3d4-0000-0000-0000-000000000001",
+    "userName": "Ana Souza",
+    "userEmail": "ana@farelo.dev",
+    "action": "PRICE_CHANGED",
+    "entityType": "Product",
+    "entityId": "b2c3d4e5-0000-0000-0000-000000000002",
+    "previousValue": {"price": 10.50},
+    "newValue": {"price": 12.00},
+    "createdAt": "2026-09-02T13:00:00Z"
+  }
+]
+```
+
+| Campo | Observações |
+|---|---|
+| `userId`/`userName`/`userEmail` | Snapshot de quem executou a ação, congelado no momento da criação — não muda mesmo que a conta `User` seja depois renomeada ou o email trocado. |
+| `action` | `String` livre (ex: `PRICE_CHANGED`, `STOCK_ADJUSTED`) — vocabulário aberto, definido por cada produtor futuro, não um enum fechado. |
+| `entityType`/`entityId` | Tipo (ex: `Product`, `Ingredient`) e id da entidade afetada. |
+| `previousValue`/`newValue` | JSON de formato livre, opaco a este ticket; qualquer um dos dois pode ser `null` (ex: uma criação não tem `previousValue`). |
+
+Lista vazia (`[]`) quando não existe nenhum registro de auditoria (ou
+nenhum que bata com o filtro dado).
+
 ```json
 {
   "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
