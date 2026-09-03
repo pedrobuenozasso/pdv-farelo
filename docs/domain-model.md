@@ -19,7 +19,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `payment` | `Payment`, múltiplos pagamentos por comanda | Não iniciado |
 | `fiscal` | `FiscalProfile`, `FiscalDocument`, NFC-e (futuro) | Não iniciado |
 | `reporting` | Relatórios e analytics | Não iniciado |
-| `audit` | `AuditLog` de operações sensíveis | Não iniciado |
+| `audit` | `AuditLog` de operações sensíveis | Em andamento |
 
 Cada domínio deve expor serviços claros e evitar dependências cruzadas desnecessárias.
 
@@ -2503,6 +2503,194 @@ testar essa fronteira fina). Ver também a extensão de
 `RoleAuthorizationInterceptorRegressionIntegrationTests` acima.
 
 Ver `docs/api.md` para o detalhe "Requer" em cada um dos endpoints acima.
+
+## audit
+
+Pacote: `com.farelo.api.audit`. Colocada logo após `security` (não em ordem
+alfabética/de tabela) porque é o domínio que registra o que operações
+sensíveis de `security`/RBAC (e de todo o resto do sistema) fizeram —
+faz sentido lê-la em seguida.
+
+- **`AuditLog`** (FARELO-125): entidade JPA — um registro durável e
+  *append-only* de uma operação sensível: quem fez, quando, o quê, e (quando
+  aplicável) o que mudou. Prompt mestre seção 27: "Operações sensíveis
+  precisam registrar: quem, quando, o quê, valor anterior, valor novo.
+  Principalmente: preço, estoque, cancelamento, pagamento, configuração
+  fiscal, produto." Seção 26 lista "audit log" entre os itens obrigatórios
+  de segurança. `id` (UUID, mesma estratégia dos demais domínios), `userId`/
+  `userName`/`userEmail` (snapshot de quem agiu, ver decisão abaixo),
+  `action` (`String`, ver decisão abaixo), `entityType`/`entityId` (o que foi
+  afetado), `previousValue`/`newValue` (`String`/`jsonb`, nulável, ver
+  decisão abaixo), `createdAt` (só criação, sem `updatedAt`, ver decisão
+  abaixo). Tabela `audit_log`, criada pela migration
+  `V25__create_audit_log_table.sql`.
+
+  **Escopo deste ticket, explicitamente**: só a entidade, o repositório, o
+  endpoint de leitura mínimo, e (por julgamento, ver abaixo)
+  `AuditLogService#record`, o método de escrita que futuros tickets vão
+  chamar. **Nenhum produtor real existe ainda** — auditar alteração de preço
+  é FARELO-126, auditar ajuste de estoque é FARELO-127, ambos tickets
+  futuros que vão chamar `AuditLogService#record` de dentro de
+  `ProductService`/`InventoryMovementService`. Este ticket deliberadamente
+  não toca nenhuma das duas classes — mesmo padrão "entidade primeiro,
+  produtores depois" já usado por `PrintJob` (FARELO-071), `Notification`
+  (FARELO-110) e `InventoryMovement` (FARELO-093) nos seus próprios
+  primeiros tickets.
+
+  **Decisão — append-only, sem `updatedAt`**: mesmo raciocínio que o
+  javadoc de `InventoryMovement` já dá para o ledger de estoque (ver seção
+  `inventory` acima), reaproveitado aqui porque se aplica literalmente: um
+  registro de auditoria é um fato sobre um instante único ("isto
+  aconteceu"), não uma projeção mutável de estado atual. Toda coluna é
+  `updatable = false` no nível JPA, a classe não expõe setters, e não existe
+  uso de `update`/`delete` do repositório em lugar nenhum deste domínio — só
+  `save` para uma linha nova e queries de leitura. Emparelhar com um
+  `updatedAt` que só poderia igualar `createdAt` implicaria que uma linha
+  *poderia* ser revisada no lugar — exatamente a propriedade que um trilha
+  de auditoria não pode ter (um log editável não é um log de auditoria). Se
+  uma linha registrada acabar descrevendo algo errado, a correção é uma nova
+  linha corretiva, nunca uma edição da original.
+
+  **Decisão — quem fez a ação: snapshot desnormalizado, não `@ManyToOne`
+  para `User`**: `userId`/`userName`/`userEmail` são colunas simples,
+  capturadas no momento em que a ação aconteceu, não uma associação viva.
+  Mesmo raciocínio "snapshot, não referência viva" já estabelecido por
+  `OrderItem.unitPrice` e `PrintJob.content` (ver seção `printing` acima): um
+  registro de auditoria precisa continuar descrevendo o que um admin
+  realmente fez, com o nome/email que ele tinha *naquele momento*, mesmo que
+  essa conta `User` seja depois renomeada, tenha o papel trocado, ou (se um
+  dia existir uma capacidade de exclusão — hoje não existe, só
+  `User#active`) seja apagada. Um `@ManyToOne` faria qualquer uma dessas
+  edições legítimas reescrever silenciosamente a história que é
+  justamente o trabalho desta entidade manter fiel.
+
+  Isso é um passo deliberadamente além de
+  `InventoryMovement#getOrderId()`, que continua um `UUID` simples mas ainda
+  carrega uma FK a nível de banco para `orders(id)` (integridade
+  referencial): aquela entidade não tem snapshot legível por humanos
+  próprio, então a FK é a única coisa que mantém o id significativo. Aqui,
+  `user_id` deliberadamente **não** tem nenhuma FK para `app_user(id)` (ver
+  migration) — `userName`/`userEmail` já tornam cada linha autodescritiva
+  independente da linha `app_user` continuar existindo, então uma FK não
+  compraria nada além do que já está capturado por valor, e criaria um risco
+  real: deixaria a trilha de auditoria — o único lugar deste sistema que
+  deveria conseguir sobreviver às contas que descreve — bloquear ou
+  complicar uma futura funcionalidade de exclusão de usuário, o que é
+  exatamente o oposto do propósito de um audit log.
+
+  **Decisão — `action`/`entityType` são `String` simples, não enums
+  fechados**: contraste com `InventoryMovementType`, que É um enum fechado —
+  aquilo só foi possível porque a seção 13 do prompt mestre já dava o
+  conjunto completo de sete valores de antemão. A seção 27 não dá uma lista
+  assim para ações de auditoria — só exemplos ("Principalmente: preço,
+  estoque, cancelamento, pagamento, configuração fiscal, produto")
+  introduzidos por "Principalmente", ou seja, um conjunto ilustrativo, não
+  exaustivo. Este ticket não tem visibilidade sobre o vocabulário exato de
+  ações que FARELO-126 (`"PRICE_CHANGED"`, plausivelmente), FARELO-127
+  (`"STOCK_ADJUSTED"`, plausivelmente) ou qualquer ticket de auditoria futuro
+  vai precisar — fixar um enum agora seria adivinhar o desenho deles, e cada
+  novo tipo de ação no futuro exigiria uma migration para alargar um `CHECK`.
+  Um `VARCHAR` simples (ver migration) não exige nenhum dos dois: cada
+  produtor futuro define seu próprio vocabulário de ação/tipo-de-entidade
+  onde vive, mesmo raciocínio que já mantém `OutboxEvent.eventType`/
+  `aggregateType` como `String`s abertas (um conjunto ilimitado, definido
+  por produtor) em vez de um enum fechado como `NotificationType`/
+  `InventoryMovementType` (cada um um conjunto pequeno e totalmente
+  conhecido de antemão). `entityType` é esperado como um nome de entidade
+  simples (ex: `"Product"`, `"Ingredient"`) — convenção para produtores
+  futuros seguirem, não algo que esta classe força.
+
+  **Decisão — `previousValue`/`newValue`: snapshots `jsonb` nuláveis,
+  opacos a este ticket**: a seção 27 pede "valor anterior, valor novo" sem
+  restringir o formato, e produtores futuros diferentes vão precisar de
+  formatos diferentes: uma alteração de preço plausivelmente um escalar
+  (`{"price": 12.50}`), um ajuste de estoque plausivelmente um objeto
+  pequeno (delta de quantidade, motivo). Em vez de modelar um formato que
+  este ticket não tem produtor real para desenhar contra, os dois campos
+  seguem a mesma convenção "snapshot estruturado, sem opinião sobre o
+  formato" já estabelecida por `PrintJob.content`/`OutboxEvent.payload`:
+  mapeados como `String` simples com `@JdbcTypeCode(SqlTypes.JSON)`, escritos
+  numa coluna `jsonb`. Nuláveis, diferente desses dois precedentes — uma
+  criação não tem um "antes" significativo (`previousValue` fica `null`), e
+  um produtor que só se importa com "o que virou" (ou uma exclusão, só "o
+  que era") tem motivo legítimo para deixar o outro `null` também.
+
+  `AuditLogRepository`: `findAllByOrderByCreatedAtDesc` (sem filtro),
+  `findByEntityTypeAndEntityIdOrderByCreatedAtDesc` (trilha de um registro
+  específico) e `findByUserIdOrderByCreatedAtDesc` (tudo que um usuário
+  fez) — três consultas derivadas, sem `JOIN FETCH` necessário (`AuditLog`
+  não tem nenhuma associação `@ManyToOne`/lazy).
+
+  `AuditLogService`: **`record(User actor, String action, String
+  entityType, UUID entityId, String previousValue, String newValue)`** —
+  o único método de escrita deste domínio. **Nada neste ticket chama este
+  método** — existe agora como o ponto de entrada pronto que FARELO-126/127
+  vão chamar, mesmo formato "constrói o encaixe agora, liga o ponto de
+  chamada depois" já usado por `NotificationRepository#findByStatusOrderByCreatedAtAsc`
+  em FARELO-110 (uma query sem chamador até FARELO-112/113 chegarem). Recebe
+  um `User` já carregado (o admin agindo), não um id/nome/email espalhados
+  em três parâmetros: um produtor futuro já tem (ou acabou de buscar) o
+  `User` por trás do request (ex: resolvendo `AuthenticatedPrincipal#userId()`
+  quando RBAC de fato guardar os endpoints de escrita que esses tickets
+  futuros tocam), então este método faz a única coisa pela qual só ele deve
+  ser responsável — desempacotar o snapshot de nome/email no momento da
+  chamada — em vez de empurrar esse desempacotamento para cada chamador.
+
+  `list(String entityType, UUID entityId, UUID userId)` — backs `GET
+  /api/v1/audit-logs`, com três filtros opcionais e independentes:
+  `userId` tem prioridade quando presente ("o que este usuário fez" é uma
+  pergunta que um filtro por entidade não responde, então não é combinado
+  com o filtro de entidade abaixo — este primeiro corte não tem consulta
+  para interseccionar os dois); senão, `entityType`+`entityId` juntos (a
+  trilha de um registro específico — a pergunta mais óbvia que um audit log
+  existe para responder) — **só aplicado quando os dois são dados**; um par
+  parcial (só um dos dois) é tratado como se nenhum tivesse sido dado, caindo
+  para a lista sem filtro em vez de adivinhar o que um valor sozinho
+  significa; senão, toda linha. Ordenado por `createdAt DESC` (mais recente
+  primeiro) — divergência deliberada do FIFO `createdAt ASC` de
+  `NotificationService#list` (uma fila para ser drenada em ordem): uma
+  trilha de auditoria não tem fila para drenar; um humano revisando quase
+  sempre quer "o que acabou de acontecer", mesmo motivo que um log de
+  controle de versão ou um histórico de chat mostra o mais recente primeiro.
+
+  **Endpoint**: só `GET /api/v1/audit-logs?entityType=&entityId=&userId=`
+  (filtros opcionais) — mesmo padrão minimalista de `GET
+  /api/v1/notifications` (FARELO-110). Sem `POST` nem endpoint de detalhe
+  (`/{id}`) — nada neste ticket cria uma `AuditLog` real, e a listagem já
+  cobre a leitura, mesmo corte que `Notification`/FARELO-110 fez no seu
+  próprio primeiro ticket. Ver `docs/api.md` para o endpoint completo.
+
+  **Decisão — endpoint deliberadamente desprotegido, sem `@RequireRole`**:
+  seguindo o precedente já estabelecido por este código de adiar "quem pode
+  chamar isto" para um ticket dedicado de aplicação de RBAC (FARELO-123/124),
+  em vez de embutir essa decisão num ticket de feature não relacionado — ver
+  `RoleAuthorizationInterceptorRegressionIntegrationTests`, que prova
+  explicitamente que `GET /api/v1/notifications` (o mesmo corte de primeiro
+  ticket que este endpoint segue) continuou desprotegido através de
+  FARELO-122/123. Um futuro ticket de aplicação de RBAC, quando um mirar o
+  domínio `audit`, é o lugar certo para decidir quais papéis (plausivelmente
+  só `ADMIN` — isto é arguivelmente mais sensível que `GET /api/v1/users`,
+  que FARELO-123 restringiu a `ADMIN`/`MANAGER`) podem ler a trilha de
+  auditoria; um ticket isolado que só constrói entidade/repositório/endpoint
+  de leitura não tem, por conta própria, nenhum conceito de identidade do
+  lado do request para decidir isso contra.
+
+  **Testes**: `AuditLogRepositoryIntegrationTests` (mapeamento JPA contra
+  Postgres real — grava e encontra com `previousValue`/`newValue` presentes,
+  cada um pode ser `null` independentemente, as três consultas derivadas
+  retornam na ordem/escopo certos; `userId` usado nos testes é sempre um
+  `UUID.randomUUID()` nunca persistido como `User`, prova em si de que não
+  há FK), `AuditLogServiceIntegrationTests` (`record` desempacota
+  id/nome/email do `User` ator corretamente e persiste de verdade; o
+  snapshot gravado não muda mesmo que o `User` seja depois renomeado; a
+  precedência/combinação de filtros do `list` — sem filtro, par
+  entityType+entityId completo, par parcial cai para "sem filtro",
+  `userId` tem prioridade sobre o filtro de entidade) e
+  `AuditLogControllerIntegrationTests` (lista vazia, listagem completa em
+  ordem sem filtro, filtro por entityType+entityId, filtro por userId —
+  `@BeforeEach` limpa a tabela `audit_log` inteira, seguro pela mesma razão
+  já documentada em `NotificationControllerIntegrationTests`: tabela nova
+  sem FK vinda de outra entidade, testes desta suíte rodam sequencialmente).
 
 ## notification
 
