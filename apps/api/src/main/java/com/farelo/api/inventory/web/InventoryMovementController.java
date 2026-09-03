@@ -49,6 +49,20 @@ import java.util.UUID;
  * "keep the dependency one-directional" reasoning {@code
  * CommandOrdersController}'s javadoc already documents for a similar
  * choice, just within one package instead of across two.
+ *
+ * <p><b>{@code POST .../losses} (FARELO-098, "Criar movimento de
+ * perda")</b>: a sibling route to {@code .../movements}/{@code .../balance}
+ * above, nested the same way, for the second manual producer of {@link
+ * InventoryMovement} rows — a human recording that stock was lost
+ * (spoilage/breakage/theft, not a sale). Deliberately its own endpoint
+ * rather than a {@code type} field on {@code POST .../movements}: same
+ * "don't let a client pick the type through an endpoint that has nothing to
+ * do with that flow" reasoning {@link InventoryMovementRequest}'s javadoc
+ * already documents for why that endpoint is PURCHASE-only. See {@link
+ * InventoryLossRequest}'s javadoc for why its {@code quantity} field is a
+ * positive magnitude and {@link
+ * com.farelo.api.inventory.InventoryMovementService#recordLoss} for where
+ * the sign actually gets negated.
  */
 @RestController
 @RequestMapping("/api/v1/ingredients/{ingredientId}")
@@ -88,6 +102,28 @@ public class InventoryMovementController {
     @GetMapping("/balance")
     public IngredientBalanceResponse getBalance(@PathVariable UUID ingredientId) {
         return IngredientBalanceResponse.from(inventoryMovementService.getBalance(ingredientId));
+    }
+
+    // FARELO-098 — see this class's javadoc ("POST .../losses" section) for
+    // why this is its own endpoint rather than a type field on create()
+    // above. Location points at .../movements/{id}, not .../losses/{id} —
+    // same reasoning as create(): this resource has no single-item GET of
+    // its own, it's only recoverable via the ledger listing endpoint above
+    // (which lists every type, LOSS included), so that's the URL that
+    // actually resolves.
+    @PostMapping("/losses")
+    public ResponseEntity<InventoryMovementResponse> recordLoss(
+            @PathVariable UUID ingredientId,
+            @Valid @RequestBody InventoryLossRequest request,
+            UriComponentsBuilder uriComponentsBuilder) {
+        InventoryMovement movement = inventoryMovementService.recordLoss(ingredientId, request.quantity());
+
+        URI location = uriComponentsBuilder
+                .path("/api/v1/ingredients/{ingredientId}/movements/{id}")
+                .buildAndExpand(ingredientId, movement.getId())
+                .toUri();
+
+        return ResponseEntity.created(location).body(InventoryMovementResponse.from(movement));
     }
 
 }

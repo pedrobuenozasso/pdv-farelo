@@ -1342,6 +1342,59 @@ armazenado (`docs/domain-model.md`, seção `inventory`, prompt mestre seção
   existente, `code: "INGREDIENT_NOT_FOUND"` (mesma checagem/motivo de
   `GET /api/v1/ingredients/{ingredientId}/movements` acima).
 
+### `POST /api/v1/ingredients/{ingredientId}/losses`
+
+Registra uma perda de estoque: um humano (ex: um gerente) reportando que
+uma quantidade de um ingrediente foi perdida — estragou, quebrou, foi
+roubada — não uma venda. Sempre cria uma linha `InventoryMovement` do tipo
+`LOSS` com `quantity` **negativa** (saída de estoque) e sem `orderId` (não
+tem origem em pedido). (FARELO-098)
+
+**Request body**
+
+```json
+{
+  "quantity": 250
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `quantity` | number | sim | Estritamente positivo (`@Positive`) — o cliente reporta "quanto foi perdido" como uma magnitude positiva; o servidor nega o valor internamente ao gravar a linha do ledger (`quantity` negativa é um detalhe interno, não algo que o cliente codifica). Sempre na unidade base do `Ingredient` referenciado (ver `Ingredient.unit`) — sem conversão de unidade de compra |
+
+Sem campo `type`: é sempre `LOSS`, fixado no servidor — mesmo raciocínio de
+`POST /api/v1/ingredients/{ingredientId}/movements` não aceitar `type`. Sem
+campo `reason`/`note`: considerado e deliberadamente fora do escopo deste
+ticket — nem o prompt mestre (seção 13) nem a descrição de `LOSS` em
+`InventoryMovementType` pedem um campo de motivo/observação na entidade;
+ver `docs/domain-model.md`, seção `inventory`/`InventoryMovement`/
+FARELO-098, para a justificativa completa.
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/ingredients/{ingredientId}/movements/{id}` (mesmo
+padrão de `POST .../movements`: este recurso não tem um `GET` de item
+único — só é recuperável via `GET /api/v1/ingredients/{ingredientId}/movements`
+acima, que lista todos os tipos, incluindo `LOSS`).
+
+```json
+{
+  "id": "d5b3e4f2-8e1c-6c4d-bf5c-3c4d5e6f7081",
+  "ingredientId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "quantity": -250,
+  "type": "LOSS",
+  "orderId": null,
+  "createdAt": "2026-09-02T13:05:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `quantity` ausente, zero ou negativa,
+  `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `{ingredientId}` não corresponde a nenhum ingrediente
+  existente, `code: "INGREDIENT_NOT_FOUND"`.
+
 ### `POST /api/v1/users`
 
 Cria um usuário (uma conta de quem pode operar o sistema — funcionário do

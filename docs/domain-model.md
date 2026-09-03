@@ -1711,6 +1711,88 @@ Pacote: `com.farelo.api.inventory`.
   isolamento de teste já documentado nas duas classes acima — nenhuma
   limpeza cega de tabela nova foi introduzida.
 
+  **FARELO-098 — "Criar movimento de perda"**: o terceiro produtor real de
+  `InventoryMovement`, depois da entrada manual (FARELO-094) e do consumo
+  de pedido (FARELO-096/097). Registra que uma quantidade de um ingrediente
+  foi perdida — estragou, quebrou, foi roubada — **não** uma venda. Sempre
+  cria uma linha `LOSS` com `quantity` **negativa** (saída de estoque, mesma
+  convenção de sinal já documentada acima para `quantity`) e sem `orderId`
+  (não tem origem em pedido — ver a seção "Campo de origem/idempotência"
+  acima: só `ORDER_CONSUMPTION`, e plausivelmente `RETURN`/`CANCELLATION`,
+  preenchem essa coluna).
+
+  `InventoryMovementService` ganha `recordLoss(UUID ingredientId,
+  BigDecimal quantity)` — um método novo e separado, **sem** modificar
+  `create(UUID, BigDecimal)` (FARELO-094, entrada manual/`PURCHASE`) nem
+  `consumeForOrder(UUID, List)` (FARELO-096/097). Mesmo formato de validação
+  de `create`: o ingrediente precisa existir primeiro (404
+  `IngredientNotFoundException` antes de qualquer outra coisa, mesma
+  ordem/motivo já documentado para `create`/`listByIngredient`/`getBalance`
+  acima), e `quantity > 0` é responsabilidade do `@Positive` na camada de
+  request, não re-checado no service. A diferença real de `create` é
+  puramente o tipo (`LOSS`, não `PURCHASE`) e o sinal — `recordLoss` recebe
+  `quantity` como uma magnitude **positiva** ("quanto foi perdido") e é o
+  único lugar que faz `quantity.negate()` antes de construir a linha; quem
+  chama nunca codifica o sinal diretamente, mesma divisão de trabalho já
+  estabelecida por `InventoryMovement`'s javadoc ("cada produtor decide seu
+  próprio sinal ao construir a linha").
+
+  Endpoint: `POST /api/v1/ingredients/{ingredientId}/losses` — um irmão de
+  `.../movements`/`.../balance`, aninhado da mesma forma, e deliberadamente
+  um endpoint próprio em vez de um campo `type` em `POST .../movements`
+  (mesmo raciocínio já documentado no javadoc de `InventoryMovementRequest`
+  para por que aquele endpoint é só `PURCHASE`: deixar o cliente escolher o
+  tipo abriria caminho pra submeter `ORDER_CONSUMPTION`/`LOSS`/etc por uma
+  URL que não tem nada a ver com pedidos ou perdas). Request DTO próprio,
+  `InventoryLossRequest` (`com.farelo.api.inventory.web`) — **não**
+  reutiliza/modifica `InventoryMovementRequest`, mesma separação de
+  responsabilidade por fluxo. `quantity` é `@NotNull @Positive`, mesma
+  convenção de validação de `InventoryMovementRequest#quantity()` — o
+  cliente sempre envia uma magnitude positiva ("perdemos 250 G"), nunca um
+  valor já negativo; o sinal que efetivamente vai pro ledger é um detalhe de
+  servidor (`InventoryMovementService#recordLoss`), não algo que o corpo da
+  requisição codifica. Reutiliza `InventoryMovementResponse` pra resposta
+  (já tinha `from(InventoryMovement)` genérico o suficiente — nenhum campo
+  novo precisou ser adicionado a ela).
+
+  **Decisão de desenho — sem campo `reason`/`note`, nem no request nem na
+  entidade**: considerado e deliberadamente deixado fora do escopo deste
+  ticket. Nem o prompt mestre (seção 13, que só nomeia `LOSS` como um dos
+  sete valores de `InventoryMovementType`, sem mencionar nenhum campo de
+  motivo/observação no movimento em si) nem o javadoc do próprio `LOSS` em
+  `InventoryMovementType` ("stock removed for spoilage/breakage/theft, not
+  a sale" — uma descrição do *tipo*, não um pedido de campo livre) pedem
+  isso. Adicionar uma coluna na tabela `inventory_movement` (append-only,
+  compartilhada por todos os sete tipos) para um único produtor novo, sem
+  nenhum consumidor concreto pra ler esse valor de volta, seria exatamente
+  o tipo de adição especulativa que o precedente de tickets deste código
+  evita — mesmo raciocínio YAGNI já aplicado a `Ingredient` não carregar
+  `currentStock`/`minimumStock`/`criticalStock` até o FARELO-099 precisar
+  deles. Se um ticket futuro precisar de motivo/trilha de auditoria pra uma
+  perda, essa é a migration/coluna daquele ticket — adiar isso aqui não
+  custa nada hoje (nenhuma migration, nenhum campo não usado em toda linha
+  de `InventoryMovement` de todo outro tipo).
+
+  Nenhuma alteração em `InventoryMovementRequest`/`POST .../movements`
+  (FARELO-094) — endpoint distinto, para um tipo de movimento distinto,
+  deliberadamente não tocado por este ticket.
+
+  **Testes**: novos casos em `InventoryMovementControllerIntegrationTests`
+  (HTTP real via `MockMvc`, cobrindo sucesso — linha `LOSS` com `quantity`
+  negada e `orderId` nulo —, `404 INGREDIENT_NOT_FOUND`, `400
+  VALIDATION_ERROR` para `quantity` zero/negativa/ausente, e um cenário
+  ponta-a-ponta confirmando que `GET .../balance` reflete a perda —
+  compra de 5000 G seguida de perda de 800 G resulta em saldo 4200 G) e
+  novos casos em `InventoryMovementServiceIntegrationTests` (chamando
+  `recordLoss` diretamente: linha persistida com tipo/sinal/`orderId`
+  corretos, 404 pra ingrediente inexistente, e o saldo derivado — via
+  `getBalance`, não HTTP — refletindo `create` seguido de `recordLoss`).
+  Mesmo cuidado de isolamento de teste já documentado nas classes acima —
+  cada teste cria seu próprio ingrediente com nome único, nenhuma limpeza
+  cega de tabela compartilhada foi introduzida; como `LOSS` nunca tem
+  `orderId`, nenhum destes testes novos precisou de um `Command`/`Order`
+  seedado (diferente dos testes de `ORDER_CONSUMPTION` acima).
+
 ## security
 
 Pacote: `com.farelo.api.security`.
