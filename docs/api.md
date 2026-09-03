@@ -1461,6 +1461,60 @@ um chamador autenticado.
   `code: "VALIDATION_ERROR"`.
 - `404 Not Found` — `{id}` do usuário não existe, `code: "USER_NOT_FOUND"`.
 
+### `POST /api/v1/auth/login`
+
+Autentica um usuário por email+senha e emite um token (JWT) para uso nas
+próximas requisições. (FARELO-121)
+
+Primeiro e único endpoint do login em si — nenhum endpoint (nem os já
+existentes, nem este) passa a exigir esse token depois deste ticket; ver
+`docs/domain-model.md` (seção `security`, subseção FARELO-121) para o
+desenho completo do token (JWT HS256, sem tabela de sessão, expiração
+configurável, sem revogação) e da checagem de credenciais.
+
+**Request body**
+
+```json
+{
+  "email": "ana@farelo.dev",
+  "password": "uma-senha-forte"
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `email` | string | sim | Apenas não-vazio (`@NotBlank`) — sem `@Email`, deliberado (ver `docs/domain-model.md`) |
+| `password` | string | sim | Apenas não-vazio (`@NotBlank`) — sem checagem de tamanho aqui |
+
+**Response — `200 OK`**
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9....",
+  "expiresAt": "2026-09-02T21:00:00Z"
+}
+```
+
+`expiresAt` é UTC. Token de uso futuro como
+`Authorization: Bearer <token>` — nenhum endpoint valida esse header ainda
+(FARELO-123/124).
+
+**Erros**
+
+- `400 Bad Request` — `email`/`password` ausentes/vazios,
+  `code: "VALIDATION_ERROR"`.
+- `401 Unauthorized` — email não cadastrado, senha incorreta, ou usuário
+  encontrado mas `active: false` — **os três casos retornam exatamente a
+  mesma resposta**, deliberadamente, para não revelar se a conta existe:
+
+  ```json
+  {
+    "code": "INVALID_CREDENTIALS",
+    "message": "Invalid credentials",
+    "correlationId": "..."
+  }
+  ```
+
 ### `GET /api/v1/notifications`
 
 Lista notificações (`Notification`) — registros de algo que precisa ser

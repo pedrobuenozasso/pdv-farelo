@@ -40,6 +40,19 @@ outbox:
     # literal 5000 in the annotation.
     poll-interval-ms: 5000
 
+# FARELO-121: JWT signing/expiry for POST /api/v1/auth/login. See
+# com.farelo.api.security.auth.JwtTokenService's javadoc for the full
+# design reasoning (HS256, stateless — no session table, no revocation yet).
+# `secret` MUST be overridden via JWT_SECRET outside dev — the default here
+# is intentionally insecure, same spirit as spring.datasource.password's
+# change-me default above; it's only long enough (32+ bytes) to satisfy
+# HS256's minimum key-length check so the app still boots in dev/test
+# without a real secret configured.
+security:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-insecure-jwt-secret-change-me-before-any-real-deploy}
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:480}
+
 # FARELO-111: Meta WhatsApp Cloud API adapter config — see
 # com.farelo.api.notification.whatsapp.WhatsAppCloudApiClient's javadoc for
 # what each value does and why phone-number-id/access-token default to
