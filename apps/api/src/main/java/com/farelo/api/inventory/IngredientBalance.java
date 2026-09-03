@@ -62,4 +62,50 @@ public record IngredientBalance(Ingredient ingredient, BigDecimal balance) {
         return minimumStock != null && balance.compareTo(minimumStock) < 0;
     }
 
+    /**
+     * FARELO-100/101 ("Publicar STOCK_LOW"/"Publicar OUT_OF_STOCK", prompt
+     * mestre seção 17/29): whether {@link #balance} means this ingredient is
+     * out of stock — {@code balance <= 0}.
+     *
+     * <p><b>Threshold-independent, unlike {@link #isBelowMinimum()}</b>: "out
+     * of stock" doesn't need a configured {@link Ingredient#getMinimumStock()}
+     * to be a meaningful, checkable fact — a balance of zero or less means
+     * there is nothing left to sell/consume, regardless of whether anyone
+     * ever configured a minimum-stock threshold for this ingredient. This is
+     * the deliberate reason this is a separate method rather than reusing/
+     * extending {@code isBelowMinimum()}: that method's entire contract is
+     * "never flagged low with no threshold configured" (see its own javadoc),
+     * which is the right behavior for a threshold-relative concept but the
+     * wrong one for "is there physically anything left" — an ingredient with
+     * no {@code minimumStock} configured can absolutely still hit zero and
+     * must be reported as out of stock.
+     *
+     * <p><b>Boundary — {@code <= 0}, not {@code < 0}</b>: a balance of
+     * exactly {@code 0} means nothing is left, which already reads as "out of
+     * stock" in plain language ("we're out of milk" said the moment the last
+     * drop is used, not only once the ledger somehow goes negative). Negative
+     * balances are reachable too (per {@link
+     * InventoryMovementService#consumeForOrder}'s "no stock-sufficiency
+     * check" design, FARELO-096/097) and are, if anything, an even more
+     * out-of-stock state than exactly zero — {@code <= 0} covers both
+     * uniformly with one comparison.
+     *
+     * <p><b>Interaction with {@link #isBelowMinimum()}</b>: an ingredient
+     * that is out of stock (balance {@code <= 0}) is <em>also</em> below its
+     * minimum whenever a minimum is configured and is itself {@code > 0}
+     * (which is the overwhelmingly common case — a minimum of {@code 0} or
+     * negative would be a strange configuration, since it would never flag
+     * "below" for exactly the ingredient it's meant to protect once that
+     * ingredient runs out). Both methods can therefore both return {@code
+     * true} for the same balance; callers that need to pick a single,
+     * mutually-exclusive severity for publishing a single event (see {@link
+     * InventoryMovementService}'s FARELO-100/101 dispatch logic) are expected
+     * to check {@code isOutOfStock()} first and treat it as taking precedence
+     * over {@code isBelowMinimum()} when both are true, not to publish both
+     * events for the same crossing.
+     */
+    public boolean isOutOfStock() {
+        return balance.compareTo(BigDecimal.ZERO) <= 0;
+    }
+
 }
