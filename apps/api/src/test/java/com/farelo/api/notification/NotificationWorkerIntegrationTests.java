@@ -80,6 +80,24 @@ class NotificationWorkerIntegrationTests extends AbstractIntegrationTest {
         nextResponseStatus.set(200);
     }
 
+    // Found in review (FARELO-112): this class's assertions on
+    // processPendingNotifications()'s exact batch size only hold if the
+    // notification table is empty when each test starts — {@link
+    // NotificationWorker#processPendingNotifications} deliberately has no
+    // per-caller scoping (it drains every PENDING row system-wide, by
+    // design). Other test classes sharing the singleton Postgres container
+    // (e.g. NotificationControllerIntegrationTests, which only clears the
+    // table in its own @BeforeEach, not after its last test) can leave
+    // PENDING rows behind depending on Surefire's actual run order — this
+    // class previously cleaned up only in @AfterEach, which does nothing
+    // for whatever was already there before this class's first test runs.
+    // Cleaning both before and after closes that gap without relying on
+    // run order.
+    @BeforeEach
+    void cleanUpBeforeEach() {
+        notificationRepository.deleteAll();
+    }
+
     @AfterEach
     void cleanUp() {
         notificationRepository.deleteAll();
