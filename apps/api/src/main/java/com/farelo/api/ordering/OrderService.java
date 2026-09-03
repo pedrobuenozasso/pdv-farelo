@@ -210,10 +210,36 @@ public class OrderService {
      * {@code PREPARING} only — going straight from {@code CREATED} skips
      * the kitchen's "in progress" signal, so it's rejected the same as any
      * other invalid origin.
+     *
+     * <p>Also publishes an {@code OrderReady} outbox event ({@link
+     * OrderReadyEvent}) via {@link OutboxPublisher} (FARELO-112) in this
+     * same transaction, once the transition itself has succeeded — the
+     * second real integration of the Transactional Outbox mechanism after
+     * {@code OrderCreated} (FARELO-060). {@code
+     * com.farelo.api.outbox.OutboxWorker} eventually dispatches it to
+     * {@code com.farelo.api.notification.OrderReadyNotificationService},
+     * which creates a {@code PENDING} {@code Notification} for the
+     * customer — or skips creating one entirely if the order has no {@code
+     * customerPhone} (see that class's javadoc). This method always
+     * publishes the event regardless of whether the order has a phone
+     * number on file: "an order became ready" is a fact worth recording
+     * either way, and whether there's anyone to notify about it is a
+     * decision the consumer makes at dispatch time, not something this
+     * method needs to know about.
+     *
+     * <p>Published <em>after</em> {@link #transition(UUID, OrderStatus,
+     * OrderStatus)} returns successfully (not before) — publishing first
+     * would record an {@code OrderReady} event for a transition that could
+     * still fail its own validation (e.g. an order not currently {@code
+     * PREPARING}). Both writes still commit or roll back together: this
+     * whole method remains one {@code @Transactional} unit, same as {@link
+     * #create(int, List, String, String)}'s single-transaction shape.
      */
     @Transactional
     public OrderWithItems markAsReady(UUID orderId) {
-        return transition(orderId, OrderStatus.PREPARING, OrderStatus.READY);
+        OrderWithItems result = transition(orderId, OrderStatus.PREPARING, OrderStatus.READY);
+        outboxPublisher.publish("Order", result.order().getId(), "OrderReady", OrderReadyEvent.from(result));
+        return result;
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.farelo.api.outbox;
 
+import com.farelo.api.notification.OrderReadyNotificationService;
 import com.farelo.api.printing.PrintJobService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,28 +19,43 @@ import java.util.List;
  * OrderCreated} event now results in a {@link PrintJobService#createForOrder
  * PrintJob being created} for that order — the {@code Order criado →
  * PrintJob PENDING → Farelo Edge Agent → impressora → PRINTED} flow from
- * the prompt mestre (seção 10) starts here. Every other event type is
- * still a no-op (see {@link #dispatch(OutboxEvent)}): notification and
- * inventory, the other eventual readers of outbox events, are future
- * epics that haven't started.
+ * the prompt mestre (seção 10) starts here.
+ *
+ * <p><strong>Second real consumer (FARELO-112).</strong> An {@code
+ * OrderReady} event (published by {@code
+ * com.farelo.api.ordering.OrderService#markAsReady}) now results in {@link
+ * OrderReadyNotificationService#createForOrder a PENDING Notification being
+ * created} for that order's customer (or nothing at all, if the order has no
+ * {@code customerPhone} — see that class's javadoc) — the {@code ORDER_READY
+ * → Notification Worker → WhatsApp} flow from the prompt mestre (seção 19)
+ * starts here. Every other event type remains a no-op (see {@link
+ * #dispatch(OutboxEvent)}): inventory, the last remaining eventual reader of
+ * outbox events named in seção 29, is still a future epic that hasn't
+ * started.
  *
  * <h2>Dispatch mechanism</h2>
  *
- * {@link #dispatch(OutboxEvent)} is a plain {@code if} on {@code
- * event.getEventType()}, not a pluggable handler registry (e.g. a {@code
- * Map<String, OutboxEventHandler>} looked up by event type). That's a
- * deliberate YAGNI call, not an oversight: with exactly one event type
- * ({@code OrderCreated}) and one consumer (printing), a registry would be
- * an abstraction with a single entry — there's no second case yet to prove
- * the right shape against (would it dispatch to one handler per event
- * type, or let several subscribe to the same type? synchronously or
- * queued? how do partial failures across handlers behave?). Answering
- * those questions now means guessing. <strong>This should become a real
- * registered-handler mechanism once a second event type or consumer shows
- * up</strong> (e.g. inventory reacting to {@code OrderCreated} too, or a
- * new event type entirely for notifications — both future epics) — at that
- * point there are two real cases to design the abstraction against instead
- * of one imagined one.
+ * {@link #dispatch(OutboxEvent)} is a plain {@code if}/{@code else if} chain
+ * on {@code event.getEventType()}, not a pluggable handler registry (e.g. a
+ * {@code Map<String, OutboxEventHandler>} looked up by event type). This
+ * stayed a YAGNI call even after gaining a second branch here (FARELO-112):
+ * two straight-line {@code if} checks, each calling exactly one method on
+ * exactly one consumer, is still simpler to read than a registry indirection
+ * would be, and neither branch has any behavior in common to factor out (no
+ * shared retry policy, no multiple handlers per event type, nothing a
+ * registry would actually buy today). The questions a real registry would
+ * need to answer — one handler per event type, or several subscribing to the
+ * same type? synchronous or queued? how do partial failures across handlers
+ * behave, independent of the whole-batch-rollback story below? — still have
+ * only one concrete answer each in this codebase's actual usage, not two
+ * competing ones to design against. <strong>This should become a real
+ * registered-handler mechanism once a third event type or consumer shows
+ * up</strong> (e.g. inventory reacting to {@code OrderCreated}, or {@code
+ * STOCK_LOW}/{@code STOCK_CRITICAL}/{@code OUT_OF_STOCK} feeding {@code
+ * notification} the way {@code OrderReady} does here — both FARELO-113 and
+ * beyond) — at that point there would be three real cases (and likely a
+ * repeated shape between at least two of them) to design the abstraction
+ * against, instead of extrapolating from two.
  *
  * <h2>Failure handling (FARELO-072)</h2>
  *
@@ -112,21 +128,25 @@ public class OutboxWorker {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxWorker.class);
 
-    // The only event type with a real consumer today — see class javadoc,
-    // "Dispatch mechanism", for why this is a plain if-check rather than a
-    // registered-handler lookup.
+    // The two event types with a real consumer today — see class javadoc,
+    // "Dispatch mechanism", for why this is a plain if/else-if chain rather
+    // than a registered-handler lookup.
     private static final String ORDER_CREATED_EVENT_TYPE = "OrderCreated";
+    private static final String ORDER_READY_EVENT_TYPE = "OrderReady";
 
     private final OutboxEventRepository outboxEventRepository;
     private final PrintJobService printJobService;
+    private final OrderReadyNotificationService orderReadyNotificationService;
     private final int batchSize;
 
     public OutboxWorker(
             OutboxEventRepository outboxEventRepository,
             PrintJobService printJobService,
+            OrderReadyNotificationService orderReadyNotificationService,
             @Value("${outbox.worker.batch-size:100}") int batchSize) {
         this.outboxEventRepository = outboxEventRepository;
         this.printJobService = printJobService;
+        this.orderReadyNotificationService = orderReadyNotificationService;
         this.batchSize = batchSize;
     }
 
@@ -161,12 +181,14 @@ public class OutboxWorker {
     }
 
     // See class javadoc, "Dispatch mechanism", for why this is a plain
-    // if-check instead of a registered-handler lookup. Any event type
-    // other than OrderCreated is a no-op today — there is nothing else to
-    // dispatch to yet.
+    // if/else-if chain instead of a registered-handler lookup. Any event
+    // type other than the two below is a no-op today — there is nothing
+    // else to dispatch to yet.
     private void dispatch(OutboxEvent event) {
         if (ORDER_CREATED_EVENT_TYPE.equals(event.getEventType())) {
             printJobService.createForOrder(event.getAggregateId());
+        } else if (ORDER_READY_EVENT_TYPE.equals(event.getEventType())) {
+            orderReadyNotificationService.createForOrder(event.getAggregateId());
         }
     }
 
