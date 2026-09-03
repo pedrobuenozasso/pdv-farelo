@@ -1555,6 +1555,162 @@ Pacote: `com.farelo.api.inventory`.
   outras classes (ex: `RecipeItemRepositoryIntegrationTests`) ainda
   dependem de não sofrer.
 
+  ### FARELO-097 — Implementar idempotência da baixa de estoque
+
+  Torna real a chave de idempotência que o javadoc de `InventoryMovement`
+  (seção "orderId") e o de `InventoryMovementType` já antecipavam desde
+  FARELO-093, e que o prompt mestre seção 16 dá literalmente:
+  `ORDER_CONSUMPTION orderId=123 ingredientId=5` não pode ser processado
+  duas vezes. Este ticket **não adiciona nenhum método novo** —
+  `InventoryMovementService` continua com a mesma API pública de
+  FARELO-096; o que muda é o comportamento interno de
+  `consumeForOrder(UUID orderId, List<OrderItemConsumption> items)`, que
+  passa a ser seguro chamar mais de uma vez para o mesmo pedido.
+
+  **Constraint no nível do banco — a fonte de verdade real**: nova
+  migration `V23__add_inventory_movement_order_consumption_unique_index.sql`
+  cria `idx_inventory_movement_order_consumption`, um índice único
+  **parcial** — `UNIQUE (order_id, ingredient_id) WHERE type =
+  'ORDER_CONSUMPTION'` — mesmo padrão/raciocínio do índice único parcial de
+  `Recipe` (`idx_recipe_product_id_active`, ver seção `Recipe` acima).
+  **Por que parcial, e não um `UNIQUE(type, order_id, ingredient_id)`
+  simples**: verificado diretamente no Postgres que `NULL` nunca é igual a
+  outro `NULL` para fins de unicidade — `INSERT`s repetidos com o mesmo `a`
+  e `b = NULL` contra um `UNIQUE(a, b)` sempre passam. Como `order_id` é
+  `NULL` para todo `InventoryMovement` que não seja `ORDER_CONSUMPTION`
+  (`PURCHASE`/`LOSS`/`ADJUSTMENT`/`RETURN`/`CANCELLATION`/
+  `INTERNAL_CONSUMPTION`), um `UNIQUE` simples nessas três colunas jamais
+  rejeitaria nada para esses seis tipos de qualquer forma (o `order_id`
+  deles é sempre `NULL`, e `NULL`s nunca colidem) — na prática ele
+  equivaleria ao índice parcial, mas de forma enganosa: sugeriria uma regra
+  uniforme sobre os sete tipos, quando na verdade só `ORDER_CONSUMPTION`
+  pode ter `order_id` preenchido. O índice parcial expressa exatamente o
+  que a regra significa: "nenhuma linha `ORDER_CONSUMPTION` duplicada para
+  o mesmo par `(order_id, ingredient_id)`", nada sobre os outros tipos —
+  `PURCHASE`/FARELO-094 permanece totalmente intocado (múltiplas linhas
+  `PURCHASE` para o mesmo ingrediente, todas com `order_id = NULL`,
+  continuam permitidas sem qualquer restrição nova). O índice não-único
+  já existente (`idx_inventory_movement_order_id`, V21) permanece — ainda
+  serve `findByOrderId` para qualquer tipo de movimento, papel que este
+  novo índice (escopado a `ORDER_CONSUMPTION` e moldado como
+  `(order_id, ingredient_id)`, não só `order_id`) não substitui.
+
+  **Decisão de desenho — agregação por ingrediente dentro do mesmo pedido,
+  necessária pela própria chave de idempotência, não um efeito colateral**:
+  a chave dada pelo prompt mestre é `(type, orderId, ingredientId)` —
+  **não** `(type, orderId, productId, ingredientId)` nem uma linha por
+  linha de receita. Isso tem uma consequência direta: se dois produtos
+  diferentes no mesmo pedido consomem o mesmo ingrediente (ex: um latte e
+  um cappuccino, ambos usando leite), `consumeForOrder` agora **soma** a
+  quantidade de todas as linhas de receita que tocam aquele ingrediente,
+  para todos os itens do pedido, **antes** de gravar qualquer coisa — e
+  grava **uma única** linha `ORDER_CONSUMPTION` por ingrediente, não uma
+  por produto/linha de receita. Sem essa agregação, um pedido perfeitamente
+  normal (dois produtos compartilhando um ingrediente) tentaria gravar duas
+  linhas para o mesmo par `(orderId, ingredientId)` já na **primeira**
+  chamada — o índice único parcial rejeitaria isso como se fosse uma
+  tentativa de reprocessamento, quando nunca foi uma. Este comportamento é,
+  portanto, parte deliberada da implementação correta de FARELO-097, não um
+  workaround incidental. Não muda a matemática de quantidade em si (ainda
+  `RecipeItem.quantity * OrderItemConsumption.quantity()`, negado,
+  `BigDecimal` do início ao fim) — apenas onde a soma por ingrediente
+  acontece (em memória, antes da gravação, via um
+  `Map<UUID ingredientId, BigDecimal>` acumulado com `BigDecimal::add`).
+  Nenhum teste existente de FARELO-096 tinha ingredientes compartilhados
+  entre produtos no mesmo pedido, então este ajuste não altera nenhum
+  resultado já coberto — um novo teste dedicado
+  (`aggregatesQuantityWhenTwoProductsInSameOrderShareAnIngredient`) cobre
+  esse cenário especificamente.
+
+  **Decisão de desenho — pré-checagem por ingrediente na camada de
+  serviço, não uma checagem por pedido, e por quê isso resolve conclusão
+  parcial de forma segura**: antes de gravar a linha agregada de um
+  ingrediente, `consumeForOrder` chama o novo
+  `InventoryMovementRepository#existsByTypeAndOrderIdAndIngredientId(ORDER_CONSUMPTION,
+  orderId, ingredientId)`; se já existe, aquele ingrediente é pulado — nada
+  é gravado, e nada é adicionado à lista retornada. Checar por *ingrediente*
+  (em vez de, por exemplo, "esse pedido já tem alguma linha
+  `ORDER_CONSUMPTION`? se sim, pula a chamada inteira") é o que torna uma
+  **retentativa após conclusão parcial segura e auto-corretiva**: se uma
+  chamada anterior gravou a linha do ingrediente A e então falhou
+  (processo morto, conexão com o banco perdida, o que for) antes de chegar
+  ao ingrediente B, uma nova chamada com os mesmos argumentos recalcula as
+  mesmas quantidades agregadas, encontra A já registrado (pula — sem
+  dedução duplicada) e encontra B ainda faltando (grava — sem ingrediente
+  permanentemente não deduzido). Nenhum dos dois modos de falha que o
+  ticket pede para evitar acontece: não faz *no-op* silencioso da chamada
+  inteira (que deixaria B nunca deduzido) e não falha de forma
+  irrecuperável (o que deixaria o chamador sem caminho para completar). Uma
+  chamada em que todo ingrediente já estava registrado é, portanto, um
+  *no-op* completo: faz as mesmas consultas, não grava nada, e retorna
+  lista vazia — **sucesso idempotente**, não uma exceção, porque do ponto
+  de vista do chamador "já totalmente consumido" e "acabou de ser
+  consumido" são o mesmo resultado observável (o estoque do pedido foi
+  deduzido exatamente uma vez).
+
+  **Por que pré-checagem em vez de capturar a violação de constraint do
+  banco**: mesmo padrão já estabelecido por `RecipeService#create` e
+  `RecipeItemService#create` neste mesmo pacote — ambos checam primeiro via
+  consulta ao repositório (falha rápido, sem o custo de um `INSERT`
+  fracassado) e dependem da constraint do banco só como reforço para uma
+  corrida genuína entre duas chamadas concorrentes, sem envolver o `save`
+  em `try/catch`. `consumeForOrder` segue a mesma divisão de trabalho: a
+  pré-checagem cobre o caso esperado (uma retentativa/replay sequencial,
+  exatamente o que FARELO-097 existe para resolver), e o índice único
+  parcial cobre o caso raro (duas chamadas concorrentes para o mesmo pedido
+  passando pela pré-checagem antes que qualquer uma tenha commitado) ao
+  deixar o segundo `save` lançar exceção sem captura — igual ao que
+  `RecipeItemService#create` já faz para sua própria constraint
+  `UNIQUE(recipe_id, ingredient_id)`.
+
+  **Contrato de retorno, atualizado por este ticket**: `consumeForOrder`
+  agora retorna só as linhas que a própria chamada de fato gravou — não
+  todo `ORDER_CONSUMPTION` já existente para o pedido (isso é papel de
+  `InventoryMovementRepository#findByOrderId`). Uma segunda chamada para um
+  pedido já totalmente consumido retorna lista vazia; uma retentativa após
+  conclusão parcial retorna só as linhas dos ingredientes recém-completados
+  nessa chamada. Isso é seguro para o único chamador real hoje,
+  `OrderService#create`, que descarta o valor de retorno por completo.
+
+  **Rollback de `OrderService#create` vs. essa constraint ser
+  infraestrutura defensiva para um chamador futuro**: `consumeForOrder`
+  continua rodando dentro da mesma transação de `OrderService#create`
+  (`@Transactional` inalterado desde FARELO-096) — se uma corrida genuína
+  disparasse a constraint aqui, a exceção propagaria sem captura e a
+  transação inteira de criação do pedido sofreria rollback junto, mesmo
+  formato "tudo ou nada" já estabelecido pelo publish do outbox
+  (FARELO-060). Dito isso, a criação de pedido em si **não** é o chamador
+  esperado a disparar essa constraint: `OrderService#create` sempre insere
+  uma linha `Order` nova, então não existe cenário de "mesmo pedido duas
+  vezes" alcançável só por esse caminho — um `orderId` recém-criado nunca
+  pode já ter linhas `ORDER_CONSUMPTION` antes de sua própria primeira
+  chamada a `consumeForOrder`. Esta guarda de idempotência é, portanto,
+  infraestrutura defensiva para um chamador **futuro** que legitimamente
+  reprocesse/repita a baixa para um `orderId` **já existente** — ex: uma
+  requisição HTTP reenviada atingindo algum endpoint futuro que dispare a
+  baixa de novo, um bug causando uma chamada duplicada, ou um mecanismo
+  futuro de replay/reconciliação — não um cenário que o próprio ponto de
+  chamada de FARELO-096 produz sozinho.
+
+  `InventoryMovementRepository` ganha
+  `existsByTypeAndOrderIdAndIngredientId(InventoryMovementType type, UUID
+  orderId, UUID ingredientId)` — consulta derivada simples, usada pela
+  pré-checagem acima.
+
+  **Testes**: novos casos em `InventoryMovementRepositoryIntegrationTests`
+  (nível JPA/banco real, provando o índice único parcial em si —
+  rejeita duplicata `ORDER_CONSUMPTION` para o mesmo par
+  `orderId`/`ingredientId`, permite duas linhas `PURCHASE` duplicadas para
+  o mesmo ingrediente com `order_id = NULL`, e permite o mesmo ingrediente
+  consumido por dois pedidos diferentes) e novos casos em
+  `InventoryMovementServiceIntegrationTests` (chamando `consumeForOrder`
+  diretamente: segunda chamada idêntica não produz movimentos adicionais,
+  terceira chamada também continua segura, retentativa após conclusão
+  parcial simulada só grava o ingrediente faltante, e agregação quando dois
+  produtos do mesmo pedido compartilham um ingrediente). Mesmo cuidado de
+  isolamento de teste já documentado nas duas classes acima — nenhuma
+  limpeza cega de tabela nova foi introduzida.
+
 ## security
 
 Pacote: `com.farelo.api.security`.

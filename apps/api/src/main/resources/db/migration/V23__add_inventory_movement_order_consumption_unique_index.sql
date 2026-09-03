@@ -1,0 +1,75 @@
+-- V23__add_inventory_movement_order_consumption_unique_index.sql
+-- Inventory domain (FARELO-097, "Implementar idempotência da baixa de
+-- estoque", prompt mestre seção 16): the idempotency key that
+-- InventoryMovement's own javadoc ("orderId" section) and
+-- InventoryMovementType's javadoc have anticipated since FARELO-093 —
+-- "ORDER_CONSUMPTION orderId=123 ingredientId=5 não deve conseguir ser
+-- processado duas vezes" — becomes a real DB-level constraint here.
+--
+-- Partial unique index, not a plain column-level
+-- UNIQUE(type, order_id, ingredient_id) — same pattern/reasoning as
+-- recipe's idx_recipe_product_id_active (V17__create_recipe_table.sql).
+-- Two reasons a plain UNIQUE constraint would be wrong:
+--
+-- 1) Postgres NULL-uniqueness behavior, verified directly:
+--        CREATE TABLE t (a int, b int);
+--        CREATE UNIQUE INDEX ON t (a, b);
+--        INSERT INTO t VALUES (1, NULL);  -- succeeds
+--        INSERT INTO t VALUES (1, NULL);  -- ALSO succeeds — NULL <> NULL
+--                                          -- for uniqueness purposes.
+--    order_id is NULL for every InventoryMovement row whose type is not
+--    ORDER_CONSUMPTION (see this table's own comment in V21). So a plain
+--    UNIQUE(type, order_id, ingredient_id) would, in practice, never
+--    reject anything for PURCHASE/LOSS/ADJUSTMENT/RETURN/CANCELLATION/
+--    INTERNAL_CONSUMPTION rows anyway — their order_id is always NULL, and
+--    Postgres never treats two NULLs as equal. The plain-UNIQUE form would
+--    therefore buy nothing extra over a partial index for those six types,
+--    while being misleading about what it actually constrains: its shape
+--    implies a rule applying uniformly across all seven movement types,
+--    when in truth only one of them (ORDER_CONSUMPTION) can ever carry a
+--    non-null order_id to begin with.
+-- 2) A partial index (`WHERE type = 'ORDER_CONSUMPTION'`) says exactly what
+--    FARELO-097 means, at the schema level: "no two ORDER_CONSUMPTION rows
+--    for the same (order, ingredient) pair" — nothing about PURCHASE/LOSS/
+--    etc. Mirrors recipe's own comment on this exact mechanism: "Postgres
+--    supports a WHERE clause on CREATE UNIQUE INDEX, unlike a plain
+--    column-level UNIQUE constraint (which can't express 'unique only
+--    among active rows')" — here it's "unique only among order-sourced
+--    rows" instead of "unique only among active rows".
+--
+-- This is the real source of truth for the idempotency rule — same
+-- reasoning as recipe's partial index: two concurrent calls to
+-- InventoryMovementService#consumeForOrder for the same order could both
+-- pass an application-level pre-check before either commits, so the
+-- guarantee has to live here, not only in Java. See
+-- InventoryMovementService#consumeForOrder's javadoc for the service-layer
+-- pre-check that makes hitting this constraint the rare fallback case
+-- rather than the common path, and for why the natural key is
+-- (order_id, ingredient_id) rather than one row per recipe/product line —
+-- two different products in the same order that both use the same
+-- ingredient are aggregated into a single ledger row before being written,
+-- specifically so that scenario doesn't trip this same constraint on a
+-- perfectly ordinary first-time call.
+--
+-- Allowed by this index (each remains unaffected):
+--   * Any number of PURCHASE rows for the same ingredient, all with
+--     order_id = NULL — not ORDER_CONSUMPTION, so outside the partial
+--     index's WHERE clause entirely (FARELO-094's manual-entry flow is
+--     untouched by this migration).
+--   * The same ingredient consumed by two DIFFERENT orders — order_id
+--     differs between them, so the (order_id, ingredient_id) pair differs
+--     too, even though ingredient_id repeats.
+-- Rejected by this index:
+--   * Two ORDER_CONSUMPTION rows for the same (order_id, ingredient_id)
+--     pair — exactly the double-processing scenario FARELO-097 exists to
+--     prevent.
+--
+-- The existing plain idx_inventory_movement_order_id index (V21) is left
+-- in place unchanged — it still serves findByOrderId lookups across every
+-- movement type, which this new index (scoped to ORDER_CONSUMPTION only,
+-- and shaped (order_id, ingredient_id) rather than order_id alone) doesn't
+-- replace.
+
+CREATE UNIQUE INDEX idx_inventory_movement_order_consumption
+    ON inventory_movement (order_id, ingredient_id)
+    WHERE type = 'ORDER_CONSUMPTION';

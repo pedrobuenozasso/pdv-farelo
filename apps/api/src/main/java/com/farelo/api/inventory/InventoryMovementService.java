@@ -5,7 +5,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,10 +20,12 @@ import java.util.UUID;
  * javadoc for why {@code PURCHASE} was always earmarked for that ticket.
  * FARELO-095 ("Calcular saldo do ingrediente") added {@link
  * #getBalance(UUID)}, reading the ledger this class already owns rather
- * than mutating it. FARELO-096 ("Consumir receita ao criar pedido") adds
- * {@link #consumeForOrder(UUID, List)}, the second real producer — see its
- * own javadoc. Loss (FARELO-098) and idempotency on order consumption
- * (FARELO-097) remain future work.
+ * than mutating it. FARELO-096 ("Consumir receita ao criar pedido") added
+ * {@link #consumeForOrder(UUID, List)}, the second real producer. FARELO-097
+ * ("Implementar idempotência da baixa de estoque") does not add a new
+ * method — it changes {@link #consumeForOrder(UUID, List)} itself to be
+ * safe to call more than once for the same order; see that method's own
+ * javadoc for the full design. Loss (FARELO-098) remains future work.
  */
 @Service
 public class InventoryMovementService {
@@ -111,19 +115,20 @@ public class InventoryMovementService {
      * 16): called by {@code com.farelo.api.ordering.OrderService#create}
      * right after an order and its items are persisted (so {@code orderId}
      * is available), in the same transaction. For each sold item, looks up
-     * the product's active {@link Recipe} (if any — see below) and writes
-     * one {@code ORDER_CONSUMPTION} {@link InventoryMovement} per {@link
-     * RecipeItem} in it.
+     * the product's active {@link Recipe} (if any — see below) and, for
+     * every ingredient any of the order's recipes consume, writes at most
+     * one {@code ORDER_CONSUMPTION} {@link InventoryMovement}.
      *
      * <p><b>Quantity math</b>: {@link RecipeItem#getQuantity()} is "how much
      * of this ingredient for ONE unit of the product" (its own javadoc).
-     * The movement written here is that quantity times how many units of
-     * the product were sold ({@link OrderItemConsumption#quantity()}),
-     * negated — stock going out, same sign convention documented on {@link
+     * For each {@link OrderItemConsumption}/{@link RecipeItem} pair, that
+     * quantity is multiplied by how many units of the product were sold
+     * ({@link OrderItemConsumption#quantity()}) and negated — stock going
+     * out, same sign convention documented on {@link
      * InventoryMovement#getQuantity()}. {@code BigDecimal} throughout
      * (AGENTS.md): {@code RecipeItem.quantity} (scale 3) is multiplied by
-     * an exact integer count via {@link BigDecimal#valueOf(long)}, so the
-     * product keeps the same scale — no rounding, no {@code double}
+     * an exact integer count via {@link BigDecimal#valueOf(long)}, so each
+     * term keeps the same scale — no rounding, no {@code double}
      * anywhere.
      *
      * <p><b>Products without a recipe are silently skipped, not an
@@ -132,17 +137,123 @@ public class InventoryMovementService {
      * back-reference to it). {@link RecipeRepository#findByProductIdAndActiveTrue}
      * returning empty for a given item is simply "nothing to consume for
      * this line", the same way {@code Recipe}/{@code RecipeItem}'s own
-     * javadoc already anticipates for this exact ticket.
+     * javadoc already anticipated for FARELO-096.
      *
      * <p><b>No stock-sufficiency check</b> (prompt mestre seção 16 doesn't
      * ask for one here — going negative is allowed for now, plausibly
-     * FARELO-099 "estoque mínimo"'s concern later, not this one's) and
-     * <b>no idempotency guard</b> against this method running twice for the
-     * same order — deliberately deferred to FARELO-097, exactly as {@link
-     * InventoryMovement}'s own javadoc ("orderId" section) anticipates: this
-     * ticket only adds the producer, not the "don't double-process"
-     * constraint the future ticket will need the {@code orderId} column
-     * for.
+     * FARELO-099 "estoque mínimo"'s concern later, not this one's).
+     *
+     * <p><b>FARELO-097 — idempotency ("Implementar idempotência da baixa de
+     * estoque")</b>: prompt mestre seção 16 gives the natural key
+     * literally — "{@code ORDER_CONSUMPTION orderId=123 ingredientId=5} não
+     * deve conseguir ser processado duas vezes" — i.e. the key is
+     * {@code (type, orderId, ingredientId)}, <b>not</b>
+     * {@code (type, orderId, productId, ingredientId)} or one row per
+     * recipe/product line. Two design consequences follow from taking that
+     * key literally, both implemented here:
+     *
+     * <ol>
+     *   <li><b>Aggregation across recipe lines for the same ingredient
+     *       within one order.</b> If two different products in the same
+     *       order both consume the same ingredient (e.g. a latte and a
+     *       cappuccino both using milk), every {@code RecipeItem} match for
+     *       that ingredient across every {@link OrderItemConsumption} is
+     *       summed into a single {@code BigDecimal} <em>before</em>
+     *       anything is written — see the {@code quantityByIngredientId}
+     *       map below. This is not an incidental workaround: it is required
+     *       by the key itself. Without it, an order that legitimately uses
+     *       the same ingredient in two products would try to write two
+     *       {@code ORDER_CONSUMPTION} rows for the same
+     *       {@code (orderId, ingredientId)} pair on a perfectly ordinary
+     *       <em>first</em> call — which the partial unique index (see
+     *       {@code V23__add_inventory_movement_order_consumption_unique_index.sql})
+     *       would then reject as if it were a double-processing attempt,
+     *       when it never was one.</li>
+     *   <li><b>A per-ingredient pre-check, not a per-order one.</b> Before
+     *       writing the aggregated row for a given ingredient, this method
+     *       calls {@link InventoryMovementRepository#existsByTypeAndOrderIdAndIngredientId}
+     *       for {@code (ORDER_CONSUMPTION, orderId, ingredientId)}; if a row
+     *       already exists, that ingredient is skipped — nothing is
+     *       written, and nothing is added to the returned list. Checking
+     *       per ingredient (rather than e.g. "does this order have
+     *       <em>any</em> {@code ORDER_CONSUMPTION} rows yet, and if so skip
+     *       the whole call") is what makes a <b>partial-completion retry
+     *       safe and self-healing</b>: if a previous call wrote ingredient
+     *       A's row and then crashed (process killed, DB connection lost,
+     *       whatever) before reaching ingredient B, a retry with the exact
+     *       same arguments recomputes the same aggregated quantities,
+     *       finds A already recorded (skips it — no double deduction) and
+     *       finds B still missing (writes it — no permanently-undeducted
+     *       ingredient). Neither of the two failure modes the ticket calls
+     *       out happens: it does not silently no-op the entire retry
+     *       (which would leave B never deducted), and it does not error out
+     *       unrecoverably (which would leave the caller with no path to
+     *       completion). A call where every ingredient was already recorded
+     *       is therefore a full no-op: it performs the same lookups,
+     *       writes nothing, and returns an empty list — <em>idempotent
+     *       success</em>, not an exception, because from the caller's
+     *       perspective "already fully consumed" and "just consumed" are
+     *       the same outcome (the order's stock has been deducted exactly
+     *       once).</li>
+     * </ol>
+     *
+     * <p><b>Return value contract, updated by this ticket</b>: this method
+     * returns only the {@link InventoryMovement} rows it <em>actually wrote
+     * during this call</em> — not every {@code ORDER_CONSUMPTION} row that
+     * exists for the order (that's what {@link
+     * InventoryMovementRepository#findByOrderId} is for). A second call for
+     * an already-fully-consumed order therefore returns an empty list, and
+     * a partial-completion retry returns only the newly-completed
+     * ingredients' rows. This is safe for the one real caller today,
+     * {@code OrderService#create}, which discards the return value
+     * entirely (order creation never calls this twice for the same order —
+     * see the class-level note below on why this guard is defensive
+     * infrastructure for a future caller, not something FARELO-096's own
+     * call site needs); a future retry/replay caller that does care can
+     * rely on this contract to tell "I completed N new movements" apart
+     * from "there was nothing left to do".
+     *
+     * <p><b>Why a pre-check instead of catching the DB constraint
+     * violation</b>: this mirrors the precedent already established by
+     * {@link RecipeService#create(UUID)} and
+     * {@link RecipeItemService#create(UUID, UUID, BigDecimal)} in this same
+     * package — both check first via a repository query (fail fast, no DB
+     * round-trip cost of a failed {@code INSERT}) and rely on the DB
+     * constraint only as the backstop for a genuine race between two
+     * concurrent calls, without wrapping the {@code save} in a
+     * {@code try/catch}. This method follows the same division of labor:
+     * the pre-check handles the expected case (a sequential retry/replay,
+     * which is what FARELO-097 exists for), and the partial unique index
+     * handles the rare case (two concurrent calls for the same order
+     * racing past the pre-check before either commits) by letting the
+     * second {@code save} throw — uncaught, exactly like
+     * {@code RecipeItemService#create} does for its own
+     * {@code UNIQUE(recipe_id, ingredient_id)} constraint.
+     *
+     * <p><b>Whether a constraint violation should roll back order
+     * creation, and why this guard is mainly defensive infrastructure for a
+     * future caller</b>: this method still runs inside {@code
+     * OrderService#create}'s {@code @Transactional} method (see
+     * {@code @Transactional} below — unchanged from FARELO-096). If a
+     * genuine race did trip the DB constraint here, the exception
+     * propagates uncaught and the whole order-creation transaction rolls
+     * back with it — same "one more thing happens after order creation,
+     * same transaction, all-or-nothing" shape {@code OutboxPublisher}
+     * already established (FARELO-060), deliberately not swallowed. That
+     * said, order creation itself is not expected to ever be the caller
+     * that trips this constraint: {@code OrderService#create} always
+     * inserts a brand-new {@code Order} row first, so there is no "same
+     * order twice" scenario reachable from that path alone — a fresh
+     * {@code orderId} can never already have {@code ORDER_CONSUMPTION}
+     * rows before its own first {@code consumeForOrder} call. This
+     * idempotency guard is therefore defensive infrastructure for a
+     * <em>future</em> caller that legitimately retries/replays consumption
+     * for an <b>existing</b> {@code orderId} — e.g. a retried HTTP request
+     * hitting some future endpoint that re-triggers consumption, a bug
+     * causing a duplicate call, or a future replay/reconciliation
+     * mechanism — not a scenario FARELO-096's own call site produces on its
+     * own. Documented here so a future reader doesn't mistake this for
+     * dead code.
      *
      * <p><b>{@code @Transactional}</b>: called from within {@code
      * OrderService#create}'s own {@code @Transactional} method, so this
@@ -157,7 +268,17 @@ public class InventoryMovementService {
      */
     @Transactional
     public List<InventoryMovement> consumeForOrder(UUID orderId, List<OrderItemConsumption> items) {
-        List<InventoryMovement> movements = new ArrayList<>();
+        // ingredientId -> ingredient (first one seen) / aggregated quantity
+        // across every recipe line, for every product in this call, that
+        // touches that ingredient. See this method's javadoc ("FARELO-097
+        // — idempotency", point 1) for why aggregating before writing
+        // anything is required by the (type, orderId, ingredientId) key
+        // itself, not just a convenience. LinkedHashMap: no ordering
+        // requirement from the DB/tests, just deterministic iteration for
+        // readability/debugging (same non-reason every other Map in this
+        // codebase's service layer would use it).
+        Map<UUID, Ingredient> ingredientsById = new LinkedHashMap<>();
+        Map<UUID, BigDecimal> quantityByIngredientId = new LinkedHashMap<>();
 
         for (OrderItemConsumption item : items) {
             Optional<Recipe> recipe = recipeRepository.findByProductIdAndActiveTrue(item.productId());
@@ -167,14 +288,34 @@ public class InventoryMovementService {
 
             List<RecipeItem> recipeItems = recipeItemRepository.findByRecipeId(recipe.get().getId());
             for (RecipeItem recipeItem : recipeItems) {
-                BigDecimal quantity = recipeItem.getQuantity()
+                Ingredient ingredient = recipeItem.getIngredient();
+                BigDecimal delta = recipeItem.getQuantity()
                         .multiply(BigDecimal.valueOf(item.quantity()))
                         .negate();
 
-                InventoryMovement movement = new InventoryMovement(
-                        recipeItem.getIngredient(), quantity, InventoryMovementType.ORDER_CONSUMPTION, orderId);
-                movements.add(inventoryMovementRepository.save(movement));
+                ingredientsById.putIfAbsent(ingredient.getId(), ingredient);
+                quantityByIngredientId.merge(ingredient.getId(), delta, BigDecimal::add);
             }
+        }
+
+        List<InventoryMovement> movements = new ArrayList<>();
+        for (Map.Entry<UUID, BigDecimal> entry : quantityByIngredientId.entrySet()) {
+            UUID ingredientId = entry.getKey();
+
+            // FARELO-097 idempotency pre-check — see this method's javadoc
+            // (point 2) for why this is per-ingredient, not per-order, and
+            // why that's what makes a partial-completion retry safe.
+            if (inventoryMovementRepository.existsByTypeAndOrderIdAndIngredientId(
+                    InventoryMovementType.ORDER_CONSUMPTION, orderId, ingredientId)) {
+                continue;
+            }
+
+            InventoryMovement movement = new InventoryMovement(
+                    ingredientsById.get(ingredientId),
+                    entry.getValue(),
+                    InventoryMovementType.ORDER_CONSUMPTION,
+                    orderId);
+            movements.add(inventoryMovementRepository.save(movement));
         }
 
         return movements;

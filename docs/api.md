@@ -438,13 +438,20 @@ futuros, não iniciados) — só o mecanismo de publicação.
 **Baixa de estoque via receita (FARELO-096, prompt mestre seção 16)**: não
 é um campo do request nem do response — é um efeito colateral interno.
 Para cada item vendido cujo produto tenha uma `Recipe` ativa, cada
-`RecipeItem` dela gera uma linha `ORDER_CONSUMPTION` (quantidade negativa)
-em `InventoryMovement`, vinculada a este pedido via `orderId` — quantidade
-= `RecipeItem.quantity` × `items[].quantity` do pedido. Um produto sem
-receita ativa simplesmente não gera nenhum movimento (não é erro). Ver
-seção `inventory` (FARELO-096) em `docs/domain-model.md` para o desenho
-completo; não há endpoint novo para consultar isso além do já existente
-`GET /api/v1/ingredients/{ingredientId}/movements`.
+`RecipeItem` dela contribui para uma linha `ORDER_CONSUMPTION` (quantidade
+negativa) em `InventoryMovement` por *ingrediente*, vinculada a este pedido
+via `orderId` — quantidade = soma de `RecipeItem.quantity` ×
+`items[].quantity` do pedido, por ingrediente. Um produto sem receita ativa
+simplesmente não gera nenhum movimento (não é erro). **FARELO-097**: se
+dois produtos do mesmo pedido compartilham um ingrediente, a quantidade é
+agregada numa única linha por ingrediente (não uma por produto) — a chave
+de idempotência é `(ORDER_CONSUMPTION, orderId, ingredientId)`, reforçada
+por um índice único parcial no banco, então repetir a criação de baixa
+para o mesmo `orderId` (cenário defensivo, não alcançável hoje só via
+`POST /api/v1/orders`) nunca duplica um movimento já gravado. Ver seção
+`inventory` (FARELO-096/FARELO-097) em `docs/domain-model.md` para o
+desenho completo; não há endpoint novo para consultar isso além do já
+existente `GET /api/v1/ingredients/{ingredientId}/movements`.
 
 **Response — `201 Created`**
 

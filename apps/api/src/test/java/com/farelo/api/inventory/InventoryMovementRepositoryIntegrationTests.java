@@ -8,6 +8,7 @@ import com.farelo.api.ordering.OrderRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -15,6 +16,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Verifies that {@link InventoryMovement} maps correctly onto the table
@@ -31,6 +33,17 @@ import static org.assertj.core.api.Assertions.assertThat;
  * ingredient's id, so leftover rows from other test classes sharing the
  * singleton Postgres container (see {@link AbstractIntegrationTest}) never
  * affect an assertion here.
+ *
+ * <p><b>FARELO-097</b> ("Implementar idempotência da baixa de estoque")
+ * added the {@code idempotencyPartialUniqueIndex*} tests below, verifying
+ * {@code idx_inventory_movement_order_consumption} (see
+ * {@code V23__add_inventory_movement_order_consumption_unique_index.sql})
+ * directly at the JPA/DB mapping level — the same layer this class already
+ * tests everything else at. Service-level idempotency behavior of {@link
+ * InventoryMovementService#consumeForOrder} (the pre-check, the
+ * partial-completion retry, the aggregation across recipe lines) is {@code
+ * InventoryMovementServiceIntegrationTests}' job instead, same division of
+ * labor as every other repository/service test pair in this domain.
  */
 @SpringBootTest
 class InventoryMovementRepositoryIntegrationTests extends AbstractIntegrationTest {
@@ -143,6 +156,68 @@ class InventoryMovementRepositoryIntegrationTests extends AbstractIntegrationTes
         BigDecimal balance = inventoryMovementRepository.sumQuantityByIngredientId(cinnamon.getId());
 
         assertThat(balance).isEqualByComparingTo("0");
+    }
+
+    // FARELO-097: the core guarantee of idx_inventory_movement_order_consumption
+    // — a second ORDER_CONSUMPTION row for the exact same (order_id,
+    // ingredient_id) pair is rejected at the DB level, not just by
+    // application-level logic.
+    @Test
+    void idempotencyPartialUniqueIndexRejectsDuplicateOrderConsumptionForSameOrderAndIngredient() {
+        Ingredient egg = createIngredient("Ovo (FARELO-097 idx)", IngredientUnit.UNIT);
+        UUID orderId = createOrder().getId();
+
+        inventoryMovementRepository.saveAndFlush(
+                new InventoryMovement(egg, new BigDecimal("-3"), InventoryMovementType.ORDER_CONSUMPTION, orderId));
+
+        assertThatThrownBy(() -> inventoryMovementRepository.saveAndFlush(
+                new InventoryMovement(egg, new BigDecimal("-3"), InventoryMovementType.ORDER_CONSUMPTION, orderId)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    // The partial index only applies WHERE type = 'ORDER_CONSUMPTION' — a
+    // PURCHASE row (order_id always null, per FARELO-094's design) must not
+    // be affected at all: two PURCHASE rows for the same ingredient (both
+    // with order_id = null) must both succeed, proving the manual-entry
+    // flow (FARELO-094) is untouched by this constraint. This also
+    // incidentally demonstrates the Postgres NULL-uniqueness behavior
+    // documented in V23's migration comment — two NULL order_ids never
+    // collide — though it's exercised here for PURCHASE specifically
+    // rather than as a standalone NULL-behavior test, since that's the
+    // real-world case that matters.
+    @Test
+    void idempotencyPartialUniqueIndexAllowsDuplicatePurchaseRowsForSameIngredientWithNullOrderId() {
+        Ingredient coffee = createIngredient("Café em grão (FARELO-097 idx)", IngredientUnit.GRAM);
+
+        InventoryMovement first = inventoryMovementRepository.saveAndFlush(
+                new InventoryMovement(coffee, new BigDecimal("1000"), InventoryMovementType.PURCHASE));
+        InventoryMovement second = inventoryMovementRepository.saveAndFlush(
+                new InventoryMovement(coffee, new BigDecimal("500"), InventoryMovementType.PURCHASE));
+
+        assertThat(first.getId()).isNotEqualTo(second.getId());
+        assertThat(inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(coffee.getId())).hasSize(2);
+    }
+
+    // Same ingredient, two DIFFERENT orders — the (order_id, ingredient_id)
+    // pair differs even though ingredient_id repeats, so both rows must be
+    // allowed. This is exactly the case that makes a plain
+    // UNIQUE(ingredient_id) (without order_id in the key) the wrong shape —
+    // the same ingredient legitimately gets consumed by many different
+    // orders over time.
+    @Test
+    void idempotencyPartialUniqueIndexAllowsSameIngredientConsumedByTwoDifferentOrders() {
+        Ingredient milk = createIngredient("Leite (FARELO-097 idx)", IngredientUnit.MILLILITER);
+        UUID firstOrderId = createOrder().getId();
+        UUID secondOrderId = createOrder().getId();
+
+        InventoryMovement first = inventoryMovementRepository.saveAndFlush(new InventoryMovement(
+                milk, new BigDecimal("-150"), InventoryMovementType.ORDER_CONSUMPTION, firstOrderId));
+        InventoryMovement second = inventoryMovementRepository.saveAndFlush(new InventoryMovement(
+                milk, new BigDecimal("-150"), InventoryMovementType.ORDER_CONSUMPTION, secondOrderId));
+
+        assertThat(first.getId()).isNotEqualTo(second.getId());
+        assertThat(inventoryMovementRepository.findByOrderId(firstOrderId)).hasSize(1);
+        assertThat(inventoryMovementRepository.findByOrderId(secondOrderId)).hasSize(1);
     }
 
 }

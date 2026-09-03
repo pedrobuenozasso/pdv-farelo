@@ -62,6 +62,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * touching the table generally — avoids that without reintroducing a blind
  * wipe of a table other tests (e.g. {@code RecipeItemRepositoryIntegrationTests})
  * still rely on being left alone.
+ *
+ * <p><b>FARELO-097</b> ("Implementar idempotência da baixa de estoque")
+ * added the {@code idempotent*}/{@code aggregat*} tests below, covering
+ * {@link InventoryMovementService#consumeForOrder}'s new behavior: calling
+ * it twice for the same order is safe (a full no-op the second time),
+ * calling it again after a simulated partial completion only writes the
+ * still-missing ingredient, and two products sharing an ingredient in the
+ * same order are aggregated into a single ledger row rather than two. See
+ * that method's own javadoc for the full design reasoning.
  */
 @SpringBootTest
 class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
@@ -281,6 +290,126 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
                 .filter(m -> m.getIngredient().getId().equals(bread.getId()))
                 .findFirst().orElseThrow();
         assertThat(breadMovement.getQuantity()).isEqualByComparingTo("-6");
+    }
+
+    // FARELO-097 — core idempotency guarantee: calling consumeForOrder
+    // twice with the exact same arguments must not double-deduct stock.
+    // First call writes the real movements; second call must write nothing
+    // new (empty return list) and the ledger must still only contain the
+    // first call's rows.
+    @Test
+    void secondCallForSameOrderAndItemsProducesNoAdditionalMovements() {
+        Ingredient eggs = createIngredient("Ovos (FARELO-097 svc idempotent)", IngredientUnit.UNIT);
+        Ingredient bacon = createIngredient("Bacon (FARELO-097 svc idempotent)", IngredientUnit.GRAM);
+        Product sandwich = createActiveProduct("Pão com ovos e bacon (FARELO-097 svc idempotent)");
+        Recipe recipe = createActiveRecipe(sandwich);
+        addRecipeItem(recipe, eggs, new BigDecimal("3"));
+        addRecipeItem(recipe, bacon, new BigDecimal("80"));
+
+        UUID orderId = createOrderId();
+        List<OrderItemConsumption> items = List.of(new OrderItemConsumption(sandwich.getId(), 4));
+
+        List<InventoryMovement> firstCall = inventoryMovementService.consumeForOrder(orderId, items);
+        assertThat(firstCall).hasSize(2);
+
+        List<InventoryMovement> secondCall = inventoryMovementService.consumeForOrder(orderId, items);
+        assertThat(secondCall).isEmpty();
+
+        // The ledger itself — not just the return value — must still only
+        // hold the first call's two rows: one per ingredient, not two.
+        assertThat(inventoryMovementRepository.findByOrderId(orderId)).hasSize(2);
+        assertThat(inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(eggs.getId())).hasSize(1);
+        assertThat(inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(bacon.getId())).hasSize(1);
+    }
+
+    // Calling a third time (or any further time) must remain just as safe
+    // — not a "first retry only" guarantee.
+    @Test
+    void thirdCallForSameOrderAndItemsAlsoProducesNoAdditionalMovements() {
+        Ingredient milk = createIngredient("Leite (FARELO-097 svc idempotent x3)", IngredientUnit.MILLILITER);
+        Product latte = createActiveProduct("Café com leite (FARELO-097 svc idempotent x3)");
+        Recipe recipe = createActiveRecipe(latte);
+        addRecipeItem(recipe, milk, new BigDecimal("150"));
+
+        UUID orderId = createOrderId();
+        List<OrderItemConsumption> items = List.of(new OrderItemConsumption(latte.getId(), 2));
+
+        inventoryMovementService.consumeForOrder(orderId, items);
+        inventoryMovementService.consumeForOrder(orderId, items);
+        List<InventoryMovement> thirdCall = inventoryMovementService.consumeForOrder(orderId, items);
+
+        assertThat(thirdCall).isEmpty();
+        assertThat(inventoryMovementRepository.findByOrderId(orderId)).hasSize(1);
+    }
+
+    // FARELO-097 — partial-completion scenario: simulates a previous call
+    // that wrote ingredient A's row and then crashed before reaching
+    // ingredient B (both belong to the same recipe/order here). A retry
+    // must skip A (already recorded — no double deduction) and write only
+    // B (still missing) — not silently no-op the whole call (which would
+    // leave B permanently un-deducted) and not error out.
+    @Test
+    void retryAfterPartialCompletionOnlyWritesTheMissingIngredient() {
+        Ingredient eggs = createIngredient("Ovos (FARELO-097 svc partial)", IngredientUnit.UNIT);
+        Ingredient bacon = createIngredient("Bacon (FARELO-097 svc partial)", IngredientUnit.GRAM);
+        Product sandwich = createActiveProduct("Pão com ovos e bacon (FARELO-097 svc partial)");
+        Recipe recipe = createActiveRecipe(sandwich);
+        addRecipeItem(recipe, eggs, new BigDecimal("3"));
+        addRecipeItem(recipe, bacon, new BigDecimal("80"));
+
+        UUID orderId = createOrderId();
+
+        // Simulate "a previous call already wrote eggs' row, then crashed
+        // before writing bacon's" by writing exactly that row directly via
+        // the repository, bypassing the service.
+        inventoryMovementRepository.saveAndFlush(new InventoryMovement(
+                eggs, new BigDecimal("-12"), InventoryMovementType.ORDER_CONSUMPTION, orderId));
+
+        List<InventoryMovement> retryResult = inventoryMovementService.consumeForOrder(
+                orderId, List.of(new OrderItemConsumption(sandwich.getId(), 4)));
+
+        // Only bacon's row is newly written by this call.
+        assertThat(retryResult).hasSize(1);
+        assertThat(retryResult.get(0).getIngredient().getId()).isEqualTo(bacon.getId());
+        assertThat(retryResult.get(0).getQuantity()).isEqualByComparingTo("-320");
+
+        // The ledger now has both: the pre-existing eggs row (untouched,
+        // not duplicated) and the newly-completed bacon row.
+        List<InventoryMovement> allMovements = inventoryMovementRepository.findByOrderId(orderId);
+        assertThat(allMovements).hasSize(2);
+        assertThat(inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(eggs.getId())).hasSize(1);
+        assertThat(inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(bacon.getId())).hasSize(1);
+    }
+
+    // FARELO-097 — aggregation: two different products in the same order
+    // that both consume the same ingredient must produce exactly ONE
+    // ORDER_CONSUMPTION row for that ingredient (summed quantity), not one
+    // row per product/recipe line — required by the (type, orderId,
+    // ingredientId) idempotency key itself (see consumeForOrder's javadoc).
+    @Test
+    void aggregatesQuantityWhenTwoProductsInSameOrderShareAnIngredient() {
+        Ingredient milk = createIngredient("Leite (FARELO-097 svc aggregate)", IngredientUnit.MILLILITER);
+
+        Product latte = createActiveProduct("Café com leite (FARELO-097 svc aggregate)");
+        Recipe latteRecipe = createActiveRecipe(latte);
+        addRecipeItem(latteRecipe, milk, new BigDecimal("150"));
+
+        Product cappuccino = createActiveProduct("Cappuccino (FARELO-097 svc aggregate)");
+        Recipe cappuccinoRecipe = createActiveRecipe(cappuccino);
+        addRecipeItem(cappuccinoRecipe, milk, new BigDecimal("100"));
+
+        UUID orderId = createOrderId();
+        List<InventoryMovement> movements = inventoryMovementService.consumeForOrder(orderId, List.of(
+                new OrderItemConsumption(latte.getId(), 2),
+                new OrderItemConsumption(cappuccino.getId(), 1)));
+
+        // 2 * 150 (latte) + 1 * 100 (cappuccino) = 400, negated: -400.
+        assertThat(movements).hasSize(1);
+        assertThat(movements.get(0).getIngredient().getId()).isEqualTo(milk.getId());
+        assertThat(movements.get(0).getQuantity()).isEqualByComparingTo("-400");
+
+        // Persisted as a single ledger row too, not two.
+        assertThat(inventoryMovementRepository.findByOrderId(orderId)).hasSize(1);
     }
 
 }
