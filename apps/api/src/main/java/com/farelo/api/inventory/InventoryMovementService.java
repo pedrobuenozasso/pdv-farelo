@@ -16,7 +16,9 @@ import java.util.UUID;
  * for why {@code PURCHASE} was always earmarked for this ticket. Order
  * consumption (FARELO-096/097) and loss (FARELO-098) remain future
  * producers; until they land, {@code PURCHASE} is the only movement type
- * this service can create.
+ * this service can create. FARELO-095 ("Calcular saldo do ingrediente")
+ * adds {@link #getBalance(UUID)}, reading the ledger this class already
+ * owns rather than mutating it.
  */
 @Service
 public class InventoryMovementService {
@@ -66,6 +68,32 @@ public class InventoryMovementService {
     public List<InventoryMovement> listByIngredient(UUID ingredientId) {
         ingredientService.getById(ingredientId);
         return inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(ingredientId);
+    }
+
+    /**
+     * FARELO-095 ("Calcular saldo do ingrediente"): an ingredient's current
+     * stock balance — the sum of every {@link InventoryMovement} row
+     * recorded for it (prompt mestre seção 13: "O saldo deve ser
+     * rastreável (derivado do ledger, nunca editado diretamente)"). Reuses
+     * {@link InventoryMovementRepository#sumQuantityByIngredientId} exactly
+     * as FARELO-093 laid it down for this purpose — the database already
+     * computes {@code COALESCE(SUM(quantity), 0)}, so re-summing in Java
+     * would be a slower, riskier duplicate of the same logic (and the
+     * project convention, per AGENTS.md, is {@code BigDecimal} end to end
+     * for exactly this kind of quantity, never a primitive re-derivation).
+     *
+     * <p>Same "ingredient exists first" validation and ordering as {@link
+     * #listByIngredient(UUID)} (404 {@link IngredientNotFoundException}
+     * before anything else): a balance of {@code 0} because the ingredient
+     * genuinely has no movements yet must stay distinguishable from an
+     * ingredient id that doesn't exist at all — same reasoning {@link
+     * #listByIngredient(UUID)} already documents for an empty movement
+     * list.
+     */
+    public IngredientBalance getBalance(UUID ingredientId) {
+        Ingredient ingredient = ingredientService.getById(ingredientId);
+        BigDecimal balance = inventoryMovementRepository.sumQuantityByIngredientId(ingredientId);
+        return new IngredientBalance(ingredient, balance);
     }
 
 }

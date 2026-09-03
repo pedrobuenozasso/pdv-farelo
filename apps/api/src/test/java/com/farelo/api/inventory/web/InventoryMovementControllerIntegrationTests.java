@@ -35,10 +35,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Integration test for {@code POST}/{@code GET
- * /api/v1/ingredients/{ingredientId}/movements}, against a real PostgreSQL
- * instance (Testcontainers). {@code POST} is FARELO-094 ("Criar entrada
- * manual de estoque"); {@code GET} is FARELO-093 (see the class javadoc
- * history above/git log for that original scope).
+ * /api/v1/ingredients/{ingredientId}/movements} and {@code GET
+ * /api/v1/ingredients/{ingredientId}/balance}, against a real PostgreSQL
+ * instance (Testcontainers). {@code POST .../movements} is FARELO-094
+ * ("Criar entrada manual de estoque"); {@code GET .../movements} is
+ * FARELO-093; {@code GET .../balance} is FARELO-095 ("Calcular saldo do
+ * ingrediente") (see the class javadoc history above/git log for that
+ * original scope).
  *
  * <p>No {@code @BeforeEach} table cleanup — same reasoning as {@code
  * RecipeItemControllerIntegrationTests}: every test creates its own fresh
@@ -228,6 +231,52 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
 
         assertThat(movements).extracting(InventoryMovementResponse::ingredientId)
                 .containsOnly(flour.getId());
+    }
+
+    @Test
+    void returnsZeroBalanceWhenIngredientHasNoMovements() throws Exception {
+        Ingredient ingredient = createIngredient("Cardamomo", IngredientUnit.GRAM);
+
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", ingredient.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ingredientId").value(ingredient.getId().toString()))
+                .andExpect(jsonPath("$.balance").value(0))
+                .andExpect(jsonPath("$.unit").value("GRAM"));
+    }
+
+    @Test
+    void returnsBalanceAsSumOfMovementsScopedToIngredient() throws Exception {
+        Ingredient cocoa = createIngredient("Cacau em pó", IngredientUnit.GRAM);
+        Ingredient vanilla = createIngredient("Baunilha", IngredientUnit.MILLILITER);
+        UUID orderId = createOrder().getId();
+
+        inventoryMovementRepository.save(
+                new InventoryMovement(cocoa, new BigDecimal("2000"), InventoryMovementType.PURCHASE));
+        inventoryMovementRepository.save(
+                new InventoryMovement(cocoa, new BigDecimal("500"), InventoryMovementType.PURCHASE));
+        inventoryMovementRepository.save(new InventoryMovement(
+                cocoa, new BigDecimal("-300"), InventoryMovementType.ORDER_CONSUMPTION, orderId));
+        // A movement on a different ingredient must not affect cocoa's balance.
+        inventoryMovementRepository.save(
+                new InventoryMovement(vanilla, new BigDecimal("1000"), InventoryMovementType.PURCHASE));
+
+        // 2000 + 500 - 300 = 2200
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", cocoa.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ingredientId").value(cocoa.getId().toString()))
+                .andExpect(jsonPath("$.balance").value(2200))
+                .andExpect(jsonPath("$.unit").value("GRAM"));
+    }
+
+    @Test
+    void returnsIngredientNotFoundWhenGettingBalanceOfUnknownIngredient() throws Exception {
+        UUID missingIngredientId = UUID.randomUUID();
+
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", missingIngredientId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("INGREDIENT_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
     }
 
 }
