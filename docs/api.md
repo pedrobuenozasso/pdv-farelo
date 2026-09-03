@@ -428,11 +428,23 @@ Se o preço do produto mudar depois, o pedido já criado mantém o preço
 antigo (AGENTS.md, convenção de snapshot de preço).
 
 Toda a operação (validar comanda, validar produtos, criar o pedido e seus
-itens, a transição `AVAILABLE`→`OPEN` quando aplicável, e a publicação do
-evento de outbox `OrderCreated` — FARELO-060, ver seção "Outbox" em
-`docs/domain-model.md`) roda em uma única transação: ou tudo comita junto,
-ou nada comita. Ainda sem consumidor real do evento (impressão/notificação/
-estoque são epics futuros, não iniciados) — só o mecanismo de publicação.
+itens, a transição `AVAILABLE`→`OPEN` quando aplicável, a baixa de estoque
+via receita — ver abaixo — e a publicação do evento de outbox
+`OrderCreated` — FARELO-060, ver seção "Outbox" em `docs/domain-model.md`)
+roda em uma única transação: ou tudo comita junto, ou nada comita. Ainda
+sem consumidor real do evento outbox (impressão/notificação são epics
+futuros, não iniciados) — só o mecanismo de publicação.
+
+**Baixa de estoque via receita (FARELO-096, prompt mestre seção 16)**: não
+é um campo do request nem do response — é um efeito colateral interno.
+Para cada item vendido cujo produto tenha uma `Recipe` ativa, cada
+`RecipeItem` dela gera uma linha `ORDER_CONSUMPTION` (quantidade negativa)
+em `InventoryMovement`, vinculada a este pedido via `orderId` — quantidade
+= `RecipeItem.quantity` × `items[].quantity` do pedido. Um produto sem
+receita ativa simplesmente não gera nenhum movimento (não é erro). Ver
+seção `inventory` (FARELO-096) em `docs/domain-model.md` para o desenho
+completo; não há endpoint novo para consultar isso além do já existente
+`GET /api/v1/ingredients/{ingredientId}/movements`.
 
 **Response — `201 Created`**
 

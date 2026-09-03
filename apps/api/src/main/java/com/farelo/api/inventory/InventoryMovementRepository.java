@@ -33,4 +33,15 @@ public interface InventoryMovementRepository extends JpaRepository<InventoryMove
     @Query("SELECT COALESCE(SUM(im.quantity), 0) FROM InventoryMovement im WHERE im.ingredient.id = :ingredientId")
     BigDecimal sumQuantityByIngredientId(@Param("ingredientId") UUID ingredientId);
 
+    // FARELO-096 ("Consumir receita ao criar pedido"): the query a caller
+    // needs to see every movement a single order produced (e.g. every
+    // ORDER_CONSUMPTION row {@link InventoryMovementService#consumeForOrder}
+    // wrote for it), across every ingredient it touched — a plain derived
+    // query on the (indexed, see V21__create_inventory_movement_table.sql)
+    // order_id column. Not ordered by createdAt: unlike
+    // findByIngredientIdOrderByCreatedAtAsc, no consumer needs a specific
+    // order here yet (tests just assert on the set of rows, filtering by
+    // ingredient id themselves).
+    List<InventoryMovement> findByOrderId(UUID orderId);
+
 }
