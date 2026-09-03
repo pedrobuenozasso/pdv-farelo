@@ -9,6 +9,11 @@ import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandRepository;
 import com.farelo.api.ordering.Order;
 import com.farelo.api.ordering.OrderRepository;
+import com.farelo.api.outbox.OutboxEvent;
+import com.farelo.api.outbox.OutboxEventRepository;
+import com.farelo.api.outbox.OutboxEventStatus;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -80,6 +85,35 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * InventoryMovementService#create(UUID, BigDecimal)} already does, and the
  * derived balance ({@link InventoryMovementService#getBalance}) goes down
  * accordingly.
+ *
+ * <p><b>FARELO-100/101</b> ("Publicar STOCK_LOW"/"Publicar OUT_OF_STOCK")
+ * added the {@code *StockLow*}/{@code *OutOfStock*}/{@code
+ * *NeverPublishes*} tests below, covering {@link
+ * InventoryMovementService#recordLoss}/{@link
+ * InventoryMovementService#consumeForOrder}'s new side effect: publishing an
+ * outbox event (via the already-existing {@code OutboxPublisher}, same
+ * mechanism/precedent as {@code OrderService#markAsReady}) when the
+ * ingredient's resulting balance is low or out of stock. Follows the same
+ * "call the service method directly against real Postgres, assert on
+ * persisted state" style as the rest of this class — here, "persisted
+ * state" also includes {@code outbox_event} rows, read via {@link
+ * OutboxEventRepository#findByStatusOrderByCreatedAtAsc}, same query {@code
+ * OutboxPublisherIntegrationTests}/{@code OrderControllerIntegrationTests}
+ * already use to find a just-published event. See the private helper
+ * {@code InventoryMovementService.publishStockThresholdEventIfNeeded} for
+ * the full design being tested here (precedence of {@code OUT_OF_STOCK}
+ * over {@code STOCK_LOW}, {@code PURCHASE} never checking, no-threshold
+ * ingredients only ever getting {@code OUT_OF_STOCK}, publishing on every
+ * qualifying movement rather than only on the threshold crossing).
+ *
+ * <p>Every stock-event test below tracks the ingredient id(s) it creates in
+ * {@link #stockEventIngredientIds} so the targeted {@link
+ * #cleanUpStockEvents()} teardown can delete exactly the {@code
+ * outbox_event} rows this class itself published — same "targeted cleanup,
+ * not a blind {@code deleteAll()}" discipline as {@link
+ * #cleanUpRecipeItems()} above, for the same reason (this class runs early
+ * in the suite's execution order and other classes elsewhere in the suite
+ * do their own blind table wipes).
  */
 @SpringBootTest
 class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
@@ -121,18 +155,64 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private OrderRepository orderRepository;
 
+    @Autowired
+    private OutboxEventRepository outboxEventRepository;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
     // Tracks every RecipeItem this test class creates, so cleanUpRecipeItems
     // below can delete exactly those rows — see this class's javadoc for
     // why that's necessary here specifically.
     private final List<RecipeItem> createdRecipeItems = new ArrayList<>();
+
+    // FARELO-100/101 — tracks every ingredient id a stock-event test creates,
+    // so cleanUpStockEvents below can delete exactly the outbox_event rows
+    // this class itself published (aggregateType "Ingredient", aggregateId
+    // in this list) — see this class's javadoc for why targeted, not blind.
+    private final List<UUID> stockEventIngredientIds = new ArrayList<>();
 
     @AfterEach
     void cleanUpRecipeItems() {
         recipeItemRepository.deleteAll(createdRecipeItems);
     }
 
+    @AfterEach
+    void cleanUpStockEvents() {
+        List<OutboxEvent> pending = outboxEventRepository.findByStatusOrderByCreatedAtAsc(OutboxEventStatus.PENDING);
+        pending.stream()
+                .filter(event -> "Ingredient".equals(event.getAggregateType())
+                        && stockEventIngredientIds.contains(event.getAggregateId()))
+                .forEach(outboxEventRepository::delete);
+    }
+
     private Ingredient createIngredient(String name, IngredientUnit unit) {
         return ingredientRepository.save(new Ingredient(name, unit));
+    }
+
+    // FARELO-099/100/101: an ingredient with a configured minimumStock
+    // threshold, tracked in stockEventIngredientIds so cleanUpStockEvents
+    // can find and remove any outbox_event rows this test's movements
+    // publish for it. minimumStock may be null (deliberately, to exercise
+    // the "no threshold configured" tests below).
+    private Ingredient createIngredientWithMinimumStock(String name, IngredientUnit unit, BigDecimal minimumStock) {
+        Ingredient ingredient = new Ingredient(name, unit);
+        ingredient.setMinimumStock(minimumStock);
+        Ingredient saved = ingredientRepository.save(ingredient);
+        stockEventIngredientIds.add(saved.getId());
+        return saved;
+    }
+
+    // All PENDING outbox events published for a given ingredient/event type
+    // combination — used by the stock-event tests below instead of a single
+    // findFirst()/orElseThrow() lookup, since several tests specifically
+    // assert on *how many* times an event type was (or wasn't) published.
+    private List<OutboxEvent> stockEventsFor(UUID ingredientId, String eventType) {
+        return outboxEventRepository.findByStatusOrderByCreatedAtAsc(OutboxEventStatus.PENDING).stream()
+                .filter(event -> "Ingredient".equals(event.getAggregateType())
+                        && event.getAggregateId().equals(ingredientId)
+                        && eventType.equals(event.getEventType()))
+                .toList();
     }
 
     private Product createActiveProduct(String name) {
@@ -469,6 +549,205 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
         // 2000 - 300 = 1700
         IngredientBalance balance = inventoryMovementService.getBalance(cocoa.getId());
         assertThat(balance.balance()).isEqualByComparingTo("1700");
+    }
+
+    // FARELO-100 — a LOSS that leaves the balance below the configured
+    // minimum (but still positive) must publish exactly one STOCK_LOW event,
+    // and no OUT_OF_STOCK event.
+    @Test
+    void recordLossThatLeavesBalanceBelowMinimumButPositivePublishesOnlyStockLow() throws Exception {
+        Ingredient coffee = createIngredientWithMinimumStock(
+                "Café em grão (FARELO-100 svc below-minimum)", IngredientUnit.GRAM, new BigDecimal("500"));
+        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"));
+
+        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600"));
+
+        // 1000 - 600 = 400, below the 500 threshold but still positive.
+        List<OutboxEvent> stockLowEvents = stockEventsFor(coffee.getId(), "STOCK_LOW");
+        assertThat(stockLowEvents).hasSize(1);
+        assertThat(stockEventsFor(coffee.getId(), "OUT_OF_STOCK")).isEmpty();
+
+        JsonNode payload = objectMapper.readTree(stockLowEvents.get(0).getPayload());
+        assertThat(payload.get("ingredientId").asText()).isEqualTo(coffee.getId().toString());
+        assertThat(payload.get("ingredientName").asText()).isEqualTo(coffee.getName());
+        assertThat(payload.get("unit").asText()).isEqualTo("GRAM");
+        assertThat(new BigDecimal(payload.get("balance").asText())).isEqualByComparingTo("400");
+        assertThat(new BigDecimal(payload.get("minimumStock").asText())).isEqualByComparingTo("500");
+    }
+
+    // FARELO-101 — a LOSS that drains the balance to exactly zero must
+    // publish OUT_OF_STOCK, and — even though a balance of 0 is also below
+    // the configured minimum — must NOT also publish STOCK_LOW: at most one
+    // event per movement, OUT_OF_STOCK taking precedence (see
+    // publishStockThresholdEventIfNeeded's javadoc).
+    @Test
+    void recordLossThatDrainsBalanceToExactlyZeroPublishesOnlyOutOfStock() {
+        Ingredient milk = createIngredientWithMinimumStock(
+                "Leite (FARELO-101 svc zero)", IngredientUnit.MILLILITER, new BigDecimal("500"));
+        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"));
+
+        inventoryMovementService.recordLoss(milk.getId(), new BigDecimal("1000"));
+
+        assertThat(stockEventsFor(milk.getId(), "OUT_OF_STOCK")).hasSize(1);
+        assertThat(stockEventsFor(milk.getId(), "STOCK_LOW")).isEmpty();
+    }
+
+    // A LOSS that drains the balance NEGATIVE (allowed per FARELO-096/097's
+    // "no stock-sufficiency check") must also publish OUT_OF_STOCK — the
+    // <= 0 boundary, not only == 0.
+    @Test
+    void recordLossThatDrainsBalanceNegativePublishesOutOfStock() {
+        Ingredient sugar = createIngredientWithMinimumStock(
+                "Açúcar (FARELO-101 svc negative)", IngredientUnit.GRAM, null);
+        inventoryMovementService.create(sugar.getId(), new BigDecimal("200"));
+
+        inventoryMovementService.recordLoss(sugar.getId(), new BigDecimal("300"));
+
+        // 200 - 300 = -100.
+        List<OutboxEvent> outOfStockEvents = stockEventsFor(sugar.getId(), "OUT_OF_STOCK");
+        assertThat(outOfStockEvents).hasSize(1);
+        assertThat(stockEventsFor(sugar.getId(), "STOCK_LOW")).isEmpty();
+    }
+
+    // FARELO-101 — OUT_OF_STOCK is threshold-independent: an ingredient with
+    // NO minimumStock configured still gets OUT_OF_STOCK once its balance
+    // hits <= 0, even though it can never get STOCK_LOW (no threshold to be
+    // "below").
+    @Test
+    void ingredientWithNoThresholdStillPublishesOutOfStockWhenBalanceHitsZero() {
+        Ingredient cups = createIngredientWithMinimumStock(
+                "Copo 300ml (FARELO-101 svc no-threshold)", IngredientUnit.UNIT, null);
+        inventoryMovementService.create(cups.getId(), new BigDecimal("50"));
+
+        inventoryMovementService.recordLoss(cups.getId(), new BigDecimal("50"));
+
+        assertThat(stockEventsFor(cups.getId(), "OUT_OF_STOCK")).hasSize(1);
+        assertThat(stockEventsFor(cups.getId(), "STOCK_LOW")).isEmpty();
+    }
+
+    // FARELO-100 — an ingredient with NO minimumStock configured must never
+    // get STOCK_LOW, no matter how much stock is lost, as long as it stays
+    // positive (mirrors IngredientBalance#isBelowMinimum()'s own contract).
+    @Test
+    void ingredientWithNoThresholdAndPositiveBalanceNeverPublishesAnyStockEvent() {
+        Ingredient tea = createIngredientWithMinimumStock(
+                "Chá (FARELO-100 svc no-threshold positive)", IngredientUnit.GRAM, null);
+        inventoryMovementService.create(tea.getId(), new BigDecimal("1000"));
+
+        inventoryMovementService.recordLoss(tea.getId(), new BigDecimal("200"));
+
+        // 1000 - 200 = 800, positive, no threshold configured at all.
+        assertThat(stockEventsFor(tea.getId(), "STOCK_LOW")).isEmpty();
+        assertThat(stockEventsFor(tea.getId(), "OUT_OF_STOCK")).isEmpty();
+    }
+
+    // FARELO-100/101 — PURCHASE (create) only ever increases stock and must
+    // never trigger a threshold check at all, even when the ingredient is
+    // already below its minimum from a prior LOSS (i.e. the purchase must
+    // not publish a *second*, redundant STOCK_LOW event of its own).
+    @Test
+    void createNeverPublishesStockThresholdEvents() {
+        Ingredient coffee = createIngredientWithMinimumStock(
+                "Café em grão (FARELO-100 svc purchase)", IngredientUnit.GRAM, new BigDecimal("500"));
+        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"));
+        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600"));
+
+        // Balance now 400, below the 500 threshold — the LOSS above already
+        // published one STOCK_LOW event.
+        assertThat(stockEventsFor(coffee.getId(), "STOCK_LOW")).hasSize(1);
+
+        // A PURCHASE that still leaves the balance below the threshold
+        // (400 + 10 = 410 < 500) must not publish a second event — create()
+        // never even calls the threshold check.
+        inventoryMovementService.create(coffee.getId(), new BigDecimal("10"));
+
+        assertThat(stockEventsFor(coffee.getId(), "STOCK_LOW")).hasSize(1);
+        assertThat(stockEventsFor(coffee.getId(), "OUT_OF_STOCK")).isEmpty();
+    }
+
+    // FARELO-100 — publishes on every qualifying movement, not only on the
+    // threshold *crossing* (see publishStockThresholdEventIfNeeded's javadoc
+    // for why this is the deliberate default): two separate LOSS movements
+    // that each leave the balance below the threshold must each publish
+    // their own STOCK_LOW event, not just the first.
+    @Test
+    void repeatedLossMovementsBelowThresholdEachPublishTheirOwnStockLowEvent() {
+        Ingredient coffee = createIngredientWithMinimumStock(
+                "Café em grão (FARELO-100 svc repeated)", IngredientUnit.GRAM, new BigDecimal("500"));
+        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"));
+
+        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600")); // 400, below 500
+        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("50")); // 350, still below 500
+
+        assertThat(stockEventsFor(coffee.getId(), "STOCK_LOW")).hasSize(2);
+    }
+
+    // FARELO-100 — consumeForOrder must also check the resulting balance:
+    // an ORDER_CONSUMPTION that leaves it below the minimum (but positive)
+    // publishes STOCK_LOW.
+    @Test
+    void consumeForOrderThatLeavesBalanceBelowMinimumPublishesStockLow() {
+        Ingredient milk = createIngredientWithMinimumStock(
+                "Leite (FARELO-100 svc consume)", IngredientUnit.MILLILITER, new BigDecimal("200"));
+        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"));
+
+        Product latte = createActiveProduct("Café com leite (FARELO-100 svc consume)");
+        Recipe recipe = createActiveRecipe(latte);
+        addRecipeItem(recipe, milk, new BigDecimal("850"));
+
+        UUID orderId = createOrderId();
+        inventoryMovementService.consumeForOrder(orderId, List.of(new OrderItemConsumption(latte.getId(), 1)));
+
+        // 1000 - 850 = 150, below the 200 threshold but still positive.
+        assertThat(stockEventsFor(milk.getId(), "STOCK_LOW")).hasSize(1);
+        assertThat(stockEventsFor(milk.getId(), "OUT_OF_STOCK")).isEmpty();
+    }
+
+    // FARELO-101 — consumeForOrder draining the balance to exactly zero
+    // publishes OUT_OF_STOCK instead of STOCK_LOW (same precedence as the
+    // recordLoss test above).
+    @Test
+    void consumeForOrderThatDrainsBalanceToZeroPublishesOutOfStock() {
+        Ingredient milk = createIngredientWithMinimumStock(
+                "Leite (FARELO-101 svc consume zero)", IngredientUnit.MILLILITER, new BigDecimal("200"));
+        inventoryMovementService.create(milk.getId(), new BigDecimal("300"));
+
+        Product latte = createActiveProduct("Café com leite (FARELO-101 svc consume zero)");
+        Recipe recipe = createActiveRecipe(latte);
+        addRecipeItem(recipe, milk, new BigDecimal("300"));
+
+        UUID orderId = createOrderId();
+        inventoryMovementService.consumeForOrder(orderId, List.of(new OrderItemConsumption(latte.getId(), 1)));
+
+        assertThat(stockEventsFor(milk.getId(), "OUT_OF_STOCK")).hasSize(1);
+        assertThat(stockEventsFor(milk.getId(), "STOCK_LOW")).isEmpty();
+    }
+
+    // FARELO-100/101 — a retry of consumeForOrder for an already-fully-
+    // consumed order is a no-op per FARELO-097's idempotency guard (no new
+    // InventoryMovement row is written), so it must not publish a second,
+    // redundant stock event either — the threshold check only runs for
+    // ingredients this call actually wrote a row for.
+    @Test
+    void retryOfConsumeForOrderDoesNotPublishAdditionalStockEvent() {
+        Ingredient milk = createIngredientWithMinimumStock(
+                "Leite (FARELO-100 svc retry)", IngredientUnit.MILLILITER, new BigDecimal("200"));
+        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"));
+
+        Product latte = createActiveProduct("Café com leite (FARELO-100 svc retry)");
+        Recipe recipe = createActiveRecipe(latte);
+        addRecipeItem(recipe, milk, new BigDecimal("850"));
+
+        UUID orderId = createOrderId();
+        List<OrderItemConsumption> items = List.of(new OrderItemConsumption(latte.getId(), 1));
+
+        inventoryMovementService.consumeForOrder(orderId, items);
+        assertThat(stockEventsFor(milk.getId(), "STOCK_LOW")).hasSize(1);
+
+        // Retry: consumeForOrder itself is a no-op (no new movement row),
+        // so no new event either.
+        inventoryMovementService.consumeForOrder(orderId, items);
+        assertThat(stockEventsFor(milk.getId(), "STOCK_LOW")).hasSize(1);
     }
 
 }

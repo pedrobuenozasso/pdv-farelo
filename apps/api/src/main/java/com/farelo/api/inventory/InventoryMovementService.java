@@ -1,5 +1,6 @@
 package com.farelo.api.inventory;
 
+import com.farelo.api.outbox.OutboxPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,7 +30,15 @@ import java.util.UUID;
  * adds {@link #recordLoss(UUID, BigDecimal)}, the third real producer:
  * a human recording that stock was lost (spoilage/breakage/theft — not a
  * sale), mirroring {@link #create(UUID, BigDecimal)}'s validation shape
- * with a different type and a negated sign.
+ * with a different type and a negated sign. FARELO-100/101 ("Publicar
+ * STOCK_LOW"/"Publicar OUT_OF_STOCK") do not add a new method either — they
+ * add a threshold check, {@link #publishStockThresholdEventIfNeeded(Ingredient)},
+ * called after every stock-<em>reducing</em> movement this class writes
+ * ({@link #recordLoss(UUID, BigDecimal)} and {@link #consumeForOrder(UUID, List)}
+ * — deliberately <b>not</b> {@link #create(UUID, BigDecimal)}, since a
+ * {@code PURCHASE} only ever increases stock and can never newly cross into
+ * low/out-of-stock territory). See that method's own javadoc for the full
+ * STOCK_LOW-vs-OUT_OF_STOCK design.
  */
 @Service
 public class InventoryMovementService {
@@ -38,16 +47,19 @@ public class InventoryMovementService {
     private final IngredientService ingredientService;
     private final RecipeRepository recipeRepository;
     private final RecipeItemRepository recipeItemRepository;
+    private final OutboxPublisher outboxPublisher;
 
     public InventoryMovementService(
             InventoryMovementRepository inventoryMovementRepository,
             IngredientService ingredientService,
             RecipeRepository recipeRepository,
-            RecipeItemRepository recipeItemRepository) {
+            RecipeItemRepository recipeItemRepository,
+            OutboxPublisher outboxPublisher) {
         this.inventoryMovementRepository = inventoryMovementRepository;
         this.ingredientService = ingredientService;
         this.recipeRepository = recipeRepository;
         this.recipeItemRepository = recipeItemRepository;
+        this.outboxPublisher = outboxPublisher;
     }
 
     /**
@@ -110,12 +122,23 @@ public class InventoryMovementService {
      * <p>{@code @Transactional}: same reasoning as {@link #create(UUID,
      * BigDecimal)} — matches every other mutating method in this domain
      * rather than relying on Spring Data's own per-method transaction.
+     *
+     * <p><b>FARELO-100/101</b>: after writing the row, checks whether {@code
+     * ingredient}'s resulting balance is now low/out of stock and, if so,
+     * publishes the corresponding outbox event — see {@link
+     * #publishStockThresholdEventIfNeeded(Ingredient)} for the full design.
+     * Still inside this same transaction (unchanged {@code @Transactional}
+     * above), same "one more thing happens after the domain write, same
+     * transaction" shape already established by {@code OutboxPublisher}'s
+     * other integrations ({@code OrderService#create}/{@code #markAsReady}).
      */
     @Transactional
     public InventoryMovement recordLoss(UUID ingredientId, BigDecimal quantity) {
         Ingredient ingredient = ingredientService.getById(ingredientId);
-        return inventoryMovementRepository.save(
+        InventoryMovement movement = inventoryMovementRepository.save(
                 new InventoryMovement(ingredient, quantity.negate(), InventoryMovementType.LOSS));
+        publishStockThresholdEventIfNeeded(ingredient);
+        return movement;
     }
 
     // Validates the ingredient exists first (404 INGREDIENT_NOT_FOUND) so
@@ -354,15 +377,114 @@ public class InventoryMovementService {
                 continue;
             }
 
+            Ingredient ingredient = ingredientsById.get(ingredientId);
             InventoryMovement movement = new InventoryMovement(
-                    ingredientsById.get(ingredientId),
+                    ingredient,
                     entry.getValue(),
                     InventoryMovementType.ORDER_CONSUMPTION,
                     orderId);
             movements.add(inventoryMovementRepository.save(movement));
+
+            // FARELO-100/101: only for ingredients this call actually wrote
+            // a row for — an ingredient skipped by the idempotency pre-check
+            // above already had its threshold checked (and, if applicable,
+            // its event published) by whichever earlier call first wrote
+            // that row; re-checking it again here on every retry/no-op call
+            // would be redundant, not a new crossing. See
+            // #publishStockThresholdEventIfNeeded(Ingredient) for the full
+            // design.
+            publishStockThresholdEventIfNeeded(ingredient);
         }
 
         return movements;
+    }
+
+    /**
+     * FARELO-100/101 ("Publicar STOCK_LOW"/"Publicar OUT_OF_STOCK", prompt
+     * mestre seção 17/29): after a stock-<em>reducing</em> movement has been
+     * written for {@code ingredient}, re-reads its ledger-derived balance
+     * (same query {@link #getBalance(UUID)} uses,
+     * {@link InventoryMovementRepository#sumQuantityByIngredientId}) and
+     * publishes an outbox event if that balance is now low or out of stock.
+     * Called by {@link #recordLoss(UUID, BigDecimal)} and {@link
+     * #consumeForOrder(UUID, List)} — deliberately <b>not</b> by {@link
+     * #create(UUID, BigDecimal)}: a {@code PURCHASE} row is always positive
+     * (see that method's javadoc), so it only ever increases a balance and
+     * can never newly cross <em>into</em> low/out-of-stock territory. Not
+     * {@code @Transactional} itself — it always runs as part of the caller's
+     * already-{@code @Transactional} method, same "one write, same
+     * transaction" shape as every other mutation in this class.
+     *
+     * <p><b>Only three of the seven event names prompt mestre seção 29
+     * lists are in scope</b>: {@code STOCK_LOW} and {@code OUT_OF_STOCK} —
+     * literally the two tickets this method exists for (FARELO-100/101).
+     * {@code STOCK_CRITICAL} (seção 17/29 also names it, alongside a
+     * matching {@code Ingredient.criticalStock} field) is deliberately
+     * <b>not</b> published here: FARELO-099 ("Criar estoque mínimo")
+     * explicitly scoped {@code criticalStock} out as "ticket futuro, não
+     * numerado ainda" (see {@code Ingredient.minimumStock}'s javadoc and
+     * docs/domain-model.md's FARELO-099 entry), and no numbered ticket in
+     * the current roadmap (docs/PROMPT_MESTRE.md §47, Epic 7) claims {@code
+     * STOCK_CRITICAL} — only FARELO-100/101 are numbered, for the other two
+     * events. There is no {@code criticalStock} field to even compare
+     * against today, so implementing {@code STOCK_CRITICAL} here would mean
+     * inventing both a new column and a threshold semantic the ticket never
+     * asked for — exactly the kind of unscheduled-work anticipation this
+     * codebase's existing precedent avoids (see e.g. {@code Ingredient}'s
+     * own javadoc on why {@code criticalStock} wasn't added alongside {@code
+     * minimumStock}). Left out on purpose, not an oversight.
+     *
+     * <p><b>{@code isOutOfStock()} takes precedence over {@code
+     * isBelowMinimum()}</b>: at most <em>one</em> event is published per
+     * call, never both, even though {@link IngredientBalance#isOutOfStock()}
+     * and {@link IngredientBalance#isBelowMinimum()} can both be {@code
+     * true} for the same balance (see {@code isOutOfStock()}'s javadoc,
+     * "Interaction with isBelowMinimum()"). {@code OUT_OF_STOCK} is checked
+     * first and, if true, is published instead of {@code STOCK_LOW} — it is
+     * strictly the more severe, more specific fact ("nothing left" versus
+     * "less than we'd like"), and a future consumer (FARELO-113) reacting to
+     * both event types would otherwise receive two events describing the
+     * same single movement, one of them redundant. An ingredient whose
+     * balance is below its minimum but still positive (not out of stock)
+     * publishes {@code STOCK_LOW} only, as expected.
+     *
+     * <p><b>Publishes on every qualifying movement, not only on the
+     * threshold <em>crossing</em></b>: if an ingredient is already below its
+     * minimum (or already at/below zero) and another {@code LOSS}/{@code
+     * ORDER_CONSUMPTION} movement pushes it further down, this method
+     * publishes again — it does not try to detect "was the previous balance
+     * already below the same threshold" and suppress a repeat. This is a
+     * deliberate, judgment-call default, not an oversight: neither prompt
+     * mestre seção 17 nor seção 29 says anything about deduplicating
+     * repeated alerts, and detecting "was this already below threshold
+     * before this movement" would require an extra query per movement (the
+     * balance immediately before the just-written row) purely to support a
+     * consumer that doesn't exist yet — {@code OutboxWorker#dispatch} has no
+     * branch for {@code STOCK_LOW}/{@code OUT_OF_STOCK} today (by this
+     * ticket's own explicit scope; reacting to these events, e.g. creating a
+     * {@code Notification}, is FARELO-113, a separate future ticket). A
+     * "publish on every crossing only" design is plausibly more correct
+     * long-term (it would avoid flooding a future WhatsApp integration with
+     * one message per sale once an ingredient is already known to be low),
+     * but building that suppression logic now would be speculative — the
+     * real shape of "already notified" (per-ingredient? per-day? until
+     * restocked above threshold?) is exactly the kind of decision that
+     * belongs to FARELO-113, the ticket that actually has a downstream
+     * consumer to design it against. Every ticket up to FARELO-099 already
+     * establishes this codebase's YAGNI convention (e.g. {@code
+     * criticalStock} left out above); this follows the same discipline.
+     */
+    private void publishStockThresholdEventIfNeeded(Ingredient ingredient) {
+        BigDecimal balance = inventoryMovementRepository.sumQuantityByIngredientId(ingredient.getId());
+        IngredientBalance ingredientBalance = new IngredientBalance(ingredient, balance);
+
+        if (ingredientBalance.isOutOfStock()) {
+            outboxPublisher.publish(
+                    "Ingredient", ingredient.getId(), "OUT_OF_STOCK", StockThresholdEvent.from(ingredient, balance));
+        } else if (ingredientBalance.isBelowMinimum()) {
+            outboxPublisher.publish(
+                    "Ingredient", ingredient.getId(), "STOCK_LOW", StockThresholdEvent.from(ingredient, balance));
+        }
     }
 
 }

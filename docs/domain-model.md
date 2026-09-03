@@ -1914,6 +1914,152 @@ Pacote: `com.farelo.api.inventory`.
   de salvar, sem mudar o helper de dois argumentos já usado por todos os
   outros testes da classe.
 
+  ### FARELO-100/101 — Publicar STOCK_LOW / Publicar OUT_OF_STOCK
+
+  Prompt mestre seção 17 ("Eventos: `STOCK_LOW`, `STOCK_CRITICAL`, `OUT_OF_STOCK`.
+  Os alertas são determinísticos — não utilizar IA para decidir quando algo
+  acabou") e seção 29 (lista `STOCK_LOW`/`STOCK_CRITICAL`/`OUT_OF_STOCK` entre
+  os eventos internos de domínio preferidos, via Transactional Outbox).
+  Tratados como um único ticket combinado — mesmo mecanismo (uma checagem de
+  cruzamento de limite depois de um movimento que reduz estoque), duas
+  severidades diferentes — para não criar conflitos de merge artificiais nos
+  mesmos arquivos. **Só `STOCK_LOW`/`OUT_OF_STOCK` são publicados aqui —
+  `STOCK_CRITICAL` fica deliberadamente de fora**: nenhum ticket numerado do
+  roadmap atual (`docs/PROMPT_MESTRE.md` §47, Epic 7) é dono desse terceiro
+  evento, e FARELO-099 já havia deixado `criticalStock` explicitamente fora
+  de escopo ("ticket futuro, não numerado ainda" — ver javadoc de
+  `Ingredient.minimumStock`). Sem uma coluna `criticalStock` para comparar,
+  publicar `STOCK_CRITICAL` aqui exigiria inventar tanto o campo quanto a
+  semântica do limite — exatamente o tipo de antecipação de trabalho não
+  agendado que este código evita (mesmo raciocínio já registrado para
+  `criticalStock` em si). Documentado explicitamente no javadoc de
+  `InventoryMovementService#publishStockThresholdEventIfNeeded`.
+
+  **Onde a checagem acontece — depois de todo movimento que *reduz* estoque,
+  nunca depois de `PURCHASE`**: `InventoryMovementService` ganha um método
+  privado, `publishStockThresholdEventIfNeeded(Ingredient)`, chamado por
+  `recordLoss` (FARELO-098) e por `consumeForOrder` (FARELO-096/097) logo
+  depois de cada linha do ledger ser gravada — mas **não** por `create`
+  (FARELO-094, `PURCHASE`): uma compra só aumenta o saldo, então nunca pode
+  cruzar *para dentro* do território baixo/zerado — só um saldo que estava
+  acima poderia cruzar para abaixo, e isso nunca acontece somando estoque.
+  Em `consumeForOrder`, a checagem roda só para os ingredientes que a própria
+  chamada de fato escreveu uma linha nova — um ingrediente pulado pela
+  pré-checagem de idempotência de FARELO-097 (já registrado em uma chamada
+  anterior) não é checado de novo: quem quer que tenha escrito aquela linha
+  originalmente já rodou (ou deveria ter rodado) essa mesma checagem na hora.
+
+  **`IngredientBalance.isOutOfStock()`** (novo método, ao lado de
+  `isBelowMinimum()` de FARELO-099): `balance <= 0`, **independente de
+  limite configurado** — ao contrário de `isBelowMinimum()` (que exige
+  `minimumStock` configurado para significar algo), "está zerado" é um fato
+  verificável sozinho: não precisa de um limite para "balanço `0`, nada
+  sobrando" ser verdade. Um ingrediente sem `minimumStock` configurado nunca
+  pode disparar `STOCK_LOW` (mesmo contrato de `isBelowMinimum()`, sem
+  mudança), mas pode e deve disparar `OUT_OF_STOCK` assim que seu saldo
+  chegar a zero — são conceitos independentes por design.
+
+  **Fronteira `<= 0`, não `< 0`**: um saldo exatamente igual a zero já é
+  "zerado" na leitura cotidiana da palavra ("acabou o leite" no instante em
+  que a última gota é usada, não só quando o ledger de alguma forma fica
+  negativo). Saldos negativos são alcançáveis (o "sem checagem de saldo
+  suficiente" de FARELO-096/097) e ficam cobertos pela mesma comparação.
+
+  **Interação entre os dois — `OUT_OF_STOCK` tem precedência sobre
+  `STOCK_LOW`, no máximo um evento por movimento**: um saldo `<= 0` com um
+  `minimumStock` configurado maior que zero (o caso comum) é *ao mesmo
+  tempo* `isOutOfStock() == true` e `isBelowMinimum() == true`. Publicar os
+  dois eventos para o mesmo movimento seria redundante — `OUT_OF_STOCK` é o
+  fato estritamente mais severo e mais específico ("não sobrou nada" vs
+  "menos do que gostaríamos"). `publishStockThresholdEventIfNeeded` checa
+  `isOutOfStock()` primeiro e publica só esse quando verdadeiro; caso
+  contrário, verifica `isBelowMinimum()` e publica `STOCK_LOW`. Um
+  ingrediente abaixo do mínimo mas ainda positivo publica só `STOCK_LOW`,
+  como esperado.
+
+  **Sem deduplicação por "já estava baixo antes" — publica em todo movimento
+  qualificado, não só no cruzamento do limite**: uma decisão de julgamento
+  explícita, documentada no javadoc do método. Se um ingrediente já está
+  abaixo do mínimo (ou já zerado) e outro `LOSS`/`ORDER_CONSUMPTION`
+  acontece, um novo evento é publicado de novo — não há tentativa de
+  detectar "o saldo anterior já estava abaixo do mesmo limite" para suprimir
+  a repetição. Nem a seção 17 nem a 29 do prompt mestre dizem algo sobre
+  deduplicar alertas repetidos, e detectar "já estava abaixo antes deste
+  movimento" exigiria uma consulta extra por movimento (o saldo imediatamente
+  anterior à linha recém-gravada) só para servir um consumidor que ainda não
+  existe — `OutboxWorker#dispatch` não tem nenhum branch para `STOCK_LOW`/
+  `OUT_OF_STOCK` hoje, de propósito: reagir a esses eventos (ex: criar uma
+  `Notification`) é FARELO-113, um ticket futuro distinto, fora do escopo
+  deste. Um desenho "publica só no cruzamento" é plausivelmente mais correto
+  a longo prazo (evitaria inundar uma futura integração de WhatsApp com uma
+  mensagem por venda depois que um ingrediente já está sabidamente baixo),
+  mas construir essa supressão agora seria especulativo — a forma real de "já
+  avisado" (por ingrediente? por dia? até repor acima do limite?) é
+  exatamente o tipo de decisão que pertence a FARELO-113, o ticket que de
+  fato tem um consumidor a jusante para desenhar contra. Mesma disciplina
+  YAGNI já estabelecida por `criticalStock` (acima) e por todo o restante
+  deste ticket.
+
+  **`StockThresholdEvent`** (novo record, pacote `com.farelo.api.inventory`,
+  mesmo raciocínio de "o payload pertence ao domínio que o produz" já
+  documentado para `OrderCreatedEvent`/`OrderReadyEvent` em `ordering`):
+  `ingredientId`, `ingredientName`, `unit`, `balance`, `minimumStock`
+  (nullable — sempre `null` para um `OUT_OF_STOCK` publicado para um
+  ingrediente sem limite configurado). Ao contrário de `OrderReadyEvent`
+  (deliberadamente mínimo porque seu único consumidor real rebusca o pedido
+  do banco), este payload carrega o suficiente para ser útil sem uma segunda
+  consulta — não há consumidor ainda (FARELO-113 é o primeiro), então a forma
+  escolhida é o que um humano inspecionando `outbox_event.payload`
+  diretamente, ou um futuro consumidor de notificação, plausivelmente
+  precisaria: qual ingrediente, saldo atual, e o limite configurado (se
+  houver).
+
+  **Nomes de `eventType` — `"STOCK_LOW"`/`"OUT_OF_STOCK"` (upper snake case
+  literal), divergindo deliberadamente da convenção `PascalCase` já
+  estabelecida por `"OrderCreated"`/`"OrderReady"`**: uma divergência
+  intencional, não uma inconsistência. O texto do próprio ticket nomeia os
+  eventos como `STOCK_LOW`/`OUT_OF_STOCK`, e a seção 29 do prompt mestre já
+  grafa esses três nomes (`STOCK_LOW`, `STOCK_CRITICAL`, `OUT_OF_STOCK`)
+  literalmente em upper snake case — ao contrário de `ORDER_CREATED`/
+  `ORDER_READY`, que a implementação de FARELO-060/112 já havia decidido
+  grafar como `OrderCreated`/`OrderReady` (`PascalCase`) antes deste ticket.
+  Manter a grafia exata que tanto o ticket quanto o prompt mestre usam para
+  estes três nomes específicos evita qualquer ambiguidade para um futuro
+  consumidor (FARELO-113) que vá comparar `event.getEventType()` contra o
+  vocabulário literal já documentado — o `aggregateType`, por outro lado,
+  continua `"Ingredient"` (`PascalCase`, mesmo padrão de `"Order"`), já que
+  nada no ticket ou no prompt mestre pede uma grafia diferente para esse
+  campo.
+
+  **`OutboxWorker#dispatch` não ganha nenhum branch novo, de propósito**:
+  `STOCK_LOW`/`OUT_OF_STOCK` continuam sendo eventos `PENDING` sem nenhum
+  consumidor — o mesmo no-op inofensivo que qualquer `eventType` não
+  reconhecido já é hoje (ver javadoc de `OutboxWorker`, "Dispatch
+  mechanism"). Reagir a eles (ex: criar uma `Notification` de estoque baixo/
+  zerado) é FARELO-113, um ticket futuro e distinto — não implementado aqui.
+  `OutboxWorker.java` não foi tocado por este ticket.
+
+  **Testes**: novos casos em `InventoryMovementServiceIntegrationTests`
+  (chamando `recordLoss`/`consumeForOrder` diretamente e lendo
+  `OutboxEventRepository` para os eventos publicados, mesmo padrão de
+  `OutboxPublisherIntegrationTests`/o teste `publishesOrderCreatedOutboxEventOnOrderCreation`
+  de `OrderControllerIntegrationTests`): `STOCK_LOW` publicado quando o saldo
+  fica abaixo do mínimo mas ainda positivo (payload conferido via
+  `ObjectMapper.readTree`); `OUT_OF_STOCK` publicado (e `STOCK_LOW`
+  **não**) quando o saldo chega exatamente a zero ou fica negativo, inclusive
+  sem limite configurado; nenhum evento quando o saldo fica positivo e sem
+  limite configurado; `create`/`PURCHASE` nunca publica nenhum dos dois,
+  mesmo quando o ingrediente já está abaixo do limite por uma perda anterior;
+  dois movimentos de perda sucessivos, ambos deixando o saldo abaixo do
+  limite, publicam dois eventos `STOCK_LOW` (prova do "sem deduplicação"
+  acima); e uma repetição idempotente de `consumeForOrder` (FARELO-097, sem
+  linha nova gravada) não publica um evento adicional. Mesmo cuidado de
+  isolamento de teste já documentado nesta classe: cada ingrediente usado
+  pelos novos testes é rastreado numa lista própria
+  (`stockEventIngredientIds`) e um `@AfterEach` dedicado
+  (`cleanUpStockEvents`) remove só os `OutboxEvent`s publicados para esses
+  ingredientes especificamente — sem `deleteAll()` cego em `outbox_event`.
+
 ## security
 
 Pacote: `com.farelo.api.security`.
@@ -2785,8 +2931,14 @@ momento)."
   `notification` acima, entrada "FARELO-112") agora resulta na criação de
   uma `Notification` `PENDING` (ou nada, se o pedido não tiver
   `customerPhone`) via `OrderReadyNotificationService#createForOrder`.
-  Estoque continua sem consumidor — qualquer outro `eventType` (nenhum
-  existe hoje) permanece um no-op.
+  Estoque continua sem consumidor. **FARELO-100/101** deram a `inventory`
+  seu primeiro papel de *produtor* de evento (não consumidor):
+  `InventoryMovementService#recordLoss`/`#consumeForOrder` agora publicam
+  `STOCK_LOW`/`OUT_OF_STOCK` (ver seção `inventory` acima, entrada
+  "FARELO-100/101"), mas `OutboxWorker#dispatch` continua sem nenhum branch
+  para eles, de propósito — assim como qualquer outro `eventType` sem
+  consumidor, essas duas linhas permanecem um no-op inofensivo até
+  FARELO-113 (ticket futuro e distinto) reagir a elas.
 
   **Mecanismo de dispatch**: um método privado `dispatch(OutboxEvent)`
   com um `if`/`else if` em `event.getEventType()` — não um registro
