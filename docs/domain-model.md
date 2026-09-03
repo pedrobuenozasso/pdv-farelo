@@ -1136,6 +1136,158 @@ Pacote: `com.farelo.api.inventory`.
   `recipeId` específico, nenhuma asserção depende dessas tabelas
   compartilhadas estarem vazias.
 
+- **`InventoryMovement`** (FARELO-093): entidade JPA — o ledger append-only
+  de estoque (prompt mestre seção 13: "Não armazenar apenas um número
+  editável de saldo. Utilizar ledger: `InventoryMovement`"). `id` (UUID,
+  mesma estratégia dos demais domínios), `ingredient` (`@ManyToOne`
+  obrigatório para `Ingredient`), `quantity` (`BigDecimal`, coluna
+  `NUMERIC(12,3)` — mesma precisão de `RecipeItem.quantity` — **pode ser
+  positivo ou negativo**: positivo é entrada de estoque, ex: `PURCHASE`;
+  negativo é saída, ex: `ORDER_CONSUMPTION`/`LOSS`; o saldo de um
+  ingrediente é `SUM(quantity)` sobre suas linhas, nunca um campo mutável em
+  `Ingredient`), `type` (enum `InventoryMovementType`, ver abaixo),
+  `orderId` (UUID, nullable — ver "Campo de origem/idempotência" abaixo),
+  `createdAt` (UTC). Tabela criada pela migration
+  `V21__create_inventory_movement_table.sql`. Segue `Ingredient`
+  (FARELO-090), `Recipe` (FARELO-091) e `RecipeItem` (FARELO-092).
+
+  **Escopo deste ticket é só a entidade `InventoryMovement` em si — o
+  ledger e a infraestrutura de consulta.** Nenhum "produtor" automático de
+  movimentos foi criado aqui: nada neste código constrói um
+  `InventoryMovement` a partir de um pedido (FARELO-096), de uma entrada
+  manual (FARELO-094) ou de uma perda registrada (FARELO-098) — todos
+  tickets futuros. Hoje a única forma de uma linha existir é
+  `InventoryMovementRepository.save(...)` chamado diretamente (nos testes
+  deste ticket). Mesma abordagem incremental já usada em
+  `Ingredient`/`Recipe`/`RecipeItem`: esta entidade só existe e é gravável,
+  não age sobre nada ainda.
+
+  **Append-only, nunca mutado**: reforçado estruturalmente, não só por
+  convenção — toda coluna da tabela é `updatable = false` no mapeamento
+  JPA, e a classe não expõe nenhum *setter*. Uma vez persistida, uma
+  instância não pode ser alterada através da própria API da entidade. Se um
+  movimento estiver errado, a correção é uma nova linha *compensatória*
+  (ex: um `ADJUSTMENT` ou `CANCELLATION`), nunca uma edição da linha
+  original — o histórico do ledger permanece fiel aos fatos.
+
+  **`createdAt` sem `updatedAt`, de propósito** — diverge do padrão
+  `createdAt`/`updatedAt` usado por toda outra entidade deste código
+  (`Ingredient`/`Recipe`/`RecipeItem` inclusive). Uma linha de ledger
+  append-only não tem o conceito de "atualizado depois" — é um fato sobre
+  um instante único (esse movimento aconteceu), imutável desde que é
+  escrita. Emparelhar com um `updatedAt` que só poderia sempre ser igual a
+  `createdAt` seria enganoso — sugeriria que a linha *pode* ser revisada no
+  lugar, exatamente o anti-padrão que esta entidade existe para evitar (um
+  saldo mutável).
+
+  **`InventoryMovementType`**: `PURCHASE`, `ORDER_CONSUMPTION`, `LOSS`,
+  `ADJUSTMENT`, `RETURN`, `CANCELLATION`, `INTERNAL_CONSUMPTION` — a lista
+  **literal e completa** do prompt mestre (seção 13), usada verbatim, não
+  reduzida. Diferente de `IngredientUnit` (FARELO-090, que deliberadamente
+  cortou a lista de unidades do prompt mestre para só o que um consumidor
+  real precisava na hora), aqui o prompt mestre já nomeia as sete opções
+  explícita e exaustivamente para esta entidade específica — não há nada
+  para "adivinhar": usar uma lista reduzida hoje só garantiria uma migration
+  de `ALTER` no `CHECK` assim que cada ticket do roadmap abaixo precisasse
+  de um valor que a fonte da verdade já previu.
+  `ORDER_CONSUMPTION` é FARELO-096/097 (o exemplo literal de idempotência da
+  seção 16: `ORDER_CONSUMPTION orderId=123 ingredientId=5`); `PURCHASE` é
+  FARELO-094 ("Criar entrada manual de estoque"); `LOSS` é FARELO-098
+  ("Criar movimento de perda"). `ADJUSTMENT`/`RETURN`/`CANCELLATION`/
+  `INTERNAL_CONSUMPTION` são nomeados pelo prompt mestre mas ainda sem um
+  ticket numerado dedicado — plausivelmente: `RETURN`/`CANCELLATION`
+  revertem um `ORDER_CONSUMPTION` quando um pedido/item é cancelado ou
+  devolvido; `ADJUSTMENT` cobre uma correção manual distinta de uma
+  `PURCHASE`; `INTERNAL_CONSUMPTION` cobre uso de estoque fora de uma
+  venda (ex: consumo interno da equipe, teste de receita). Nenhum código
+  produz nenhum desses quatro ainda. Coluna `type` na migration usa a
+  mesma convenção `VARCHAR` + `CHECK` de `ingredient.unit`/
+  `product.production_station`/`command.status`/`orders.status`.
+
+  **Campo de origem/idempotência — `orderId`, preparando terreno para
+  FARELO-097, sem implementar a constraint em si**: o prompt mestre seção
+  16 dá a chave de idempotência literalmente como
+  `ORDER_CONSUMPTION orderId=123 ingredientId=5` — ou seja, a chave natural
+  que não pode ser processada duas vezes é (conceitualmente)
+  `(type, orderId, ingredientId)` para movimentos com origem em pedido.
+  Esta entidade já tem `type` e `ingredient`; a peça que faltava era a
+  origem do pedido, então este ticket adiciona `orderId` agora para evitar
+  uma migration extra quando FARELO-097 precisar de uma coluna pra
+  construir a constraint única contra.
+
+  Deliberadamente uma coluna `UUID` nullable simples — **não** um
+  `@ManyToOne` para `com.farelo.api.ordering.Order`, diferente da relação
+  cross-domain que `com.farelo.api.printing.PrintJob` já tem para `Order`.
+  Três razões: (1) nada lê um campo real de `Order` através desta entidade
+  — nenhum produtor de `ORDER_CONSUMPTION` (ou qualquer outro tipo
+  relacionado a pedido) existe ainda, então uma associação lazy ficaria
+  permanentemente não-inicializada, superfície sem uso; (2) só
+  `ORDER_CONSUMPTION` (e plausivelmente `RETURN`/`CANCELLATION`) chegaria a
+  preencher esse campo — `PURCHASE`/`LOSS`/`ADJUSTMENT`/
+  `INTERNAL_CONSUMPTION` não têm origem em pedido nenhuma, então uma
+  relação obrigatória estaria errada, e uma `@ManyToOne` opcional não traz
+  nada que uma coluna nullable simples já não traga; (3) isso deixa a forma
+  exata da chave de idempotência — ex: se vira mesmo uma constraint única
+  em `(type, order_id, ingredient_id)`, ou algo mais amplo — como decisão
+  de FARELO-097, não deste ticket. Este ticket só adiciona a coluna e um
+  índice correspondente (não-único); **nenhuma constraint de unicidade é
+  criada aqui** — ver comentário explícito em
+  `V21__create_inventory_movement_table.sql` deixando claro que garantir
+  "não processar duas vezes" é responsabilidade de FARELO-097, não deste
+  ticket. A coluna carrega uma FK de nível de banco simples para
+  `orders(id)` para integridade referencial básica quando estiver
+  preenchida (sem ids órfãos), o que não custa nada hoje e não precisa de
+  nenhuma relação do lado Java pra existir.
+
+  `InventoryMovementRepository` (Spring Data JPA):
+  `findByIngredientIdOrderByCreatedAtAsc` (consulta derivada simples — o
+  Spring Data resolve `IngredientId` através da associação `ingredient`,
+  suporte padrão a "property path through a relation"; sem `JOIN FETCH`
+  necessário, porque `InventoryMovementResponse` só lê
+  `ingredient.getId()`, já presente no proxy lazy sem precisar
+  inicializá-lo — diferente de `RecipeItemResponse`, que lê nome/unidade do
+  ingrediente e por isso precisa de `JOIN FETCH`) e
+  `sumQuantityByIngredientId` (`@Query` somando `quantity` via
+  `COALESCE(SUM(...), 0)` — **não usada por nenhum endpoint ainda**; existe
+  como a infraestrutura de consulta que o cálculo de saldo "de verdade"
+  como funcionalidade exposta, FARELO-095 ("Calcular saldo do
+  ingrediente"), vai reusar em vez de reimplementar).
+
+  `InventoryMovementService`: só um método, `listByIngredient` — valida que
+  o ingrediente existe primeiro (reusa `IngredientService#getById`, 404
+  `INGREDIENT_NOT_FOUND` se não existir, mesmo raciocínio de
+  `RecipeItemService#listByRecipe` pra distinguir "ingrediente sem
+  movimentos" de "ingrediente inexistente") e então lista os movimentos.
+  **Sem método `create`**: nada neste ticket produz uma linha do ledger
+  (ver acima).
+
+  **Endpoint**: só `GET /api/v1/ingredients/{ingredientId}/movements`
+  (lista os movimentos do ingrediente, mais antigo primeiro) —
+  **somente leitura**, sem `POST`. Um endpoint de criação genérico agora
+  anteciparia o desenho de FARELO-094 ("Criar entrada manual de estoque",
+  o ticket que de fato é dono de "como um humano registra um movimento
+  manual"). Mesmo padrão minimalista já usado pelo primeiro ticket de
+  outros domínios (ex: `Printer`/FARELO-070, sem endpoint no primeiro
+  ticket) — aqui optou-se por um endpoint de leitura mínimo em vez de
+  nenhum, já que a infraestrutura de consulta (`findByIngredientIdOrderByCreatedAtAsc`)
+  já existe e expor "ver o ledger de um ingrediente" tem valor
+  independente de quem/o que grava nele. Ver `docs/api.md` para o
+  endpoint completo.
+
+  **Testes**: `InventoryMovementRepositoryIntegrationTests` (mapeamento
+  JPA contra Postgres real, cobrindo movimento positivo, movimento
+  negativo com `orderId`, listagem por ingrediente em ordem — inclusive
+  não vazando movimentos de outro ingrediente — e a soma de saldo via
+  `sumQuantityByIngredientId`) e
+  `InventoryMovementControllerIntegrationTests` (HTTP real via `MockMvc`,
+  cobrindo lista vazia, 404 `INGREDIENT_NOT_FOUND`, e listagem ordenada
+  com `orderId` presente/ausente no JSON). **Mesmo cuidado de isolamento
+  de teste já documentado para `Recipe`/`RecipeItem`**: nenhum
+  `@BeforeEach` limpa `ingredient`/`inventory_movement` — cada teste cria
+  seu próprio ingrediente com nome único e só afirma sobre movimentos
+  filtrados por aquele `ingredientId` específico, então nenhuma asserção
+  depende dessas tabelas compartilhadas estarem vazias.
+
 ## security
 
 Pacote: `com.farelo.api.security`.

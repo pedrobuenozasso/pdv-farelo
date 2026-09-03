@@ -1208,6 +1208,52 @@ completa dessa divergência do padrão de `Recipe`. Sem corpo de requisição.
   receita — um delete cross-recipe é tratado como 404, não executado),
   `code: "RECIPE_ITEM_NOT_FOUND"`.
 
+### `GET /api/v1/ingredients/{ingredientId}/movements`
+
+Lista os movimentos do ledger de estoque (`InventoryMovement`) de um
+ingrediente, ordenados por `createdAt` (asc — mais antigo primeiro).
+(FARELO-093)
+
+Único endpoint deste ticket — **somente leitura**. Não há `POST` aqui: nada
+neste ticket produz um `InventoryMovement` ainda (ver
+`docs/domain-model.md`, seção `inventory`/`InventoryMovement`); um endpoint
+de criação genérico agora anteciparia o desenho de FARELO-094 ("Criar
+entrada manual de estoque"). Hoje só é possível popular a tabela via
+testes/acesso direto ao repository.
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+    "ingredientId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+    "quantity": -500,
+    "type": "ORDER_CONSUMPTION",
+    "orderId": "8a1f2c3d-4e5f-6789-0abc-def123456789",
+    "createdAt": "2026-09-02T13:00:00Z"
+  }
+]
+```
+
+| Campo | Observações |
+|---|---|
+| `quantity` | Positivo (entrada) ou negativo (saída/consumo/perda), sempre na unidade base do `Ingredient` (ver `Ingredient.unit`) |
+| `type` | Um de `PURCHASE`/`ORDER_CONSUMPTION`/`LOSS`/`ADJUSTMENT`/`RETURN`/`CANCELLATION`/`INTERNAL_CONSUMPTION` |
+| `orderId` | `null` exceto em movimentos com origem em um pedido (hoje, nenhum é produzido por este ticket) |
+
+Sem `updatedAt` — este é um registro de ledger, imutável desde a criação
+(ver `docs/domain-model.md`, seção `inventory`/`InventoryMovement`).
+
+Lista vazia (`[]`) quando o ingrediente existe mas ainda não tem movimentos.
+
+**Erros**
+
+- `404 Not Found` — `{ingredientId}` não corresponde a nenhum ingrediente
+  existente, `code: "INGREDIENT_NOT_FOUND"` (distingue "ingrediente sem
+  movimentos" de "ingrediente inexistente" — ambas retornariam a mesma lista
+  vazia sem essa checagem).
+
 ### `POST /api/v1/users`
 
 Cria um usuário (uma conta de quem pode operar o sistema — funcionário do
