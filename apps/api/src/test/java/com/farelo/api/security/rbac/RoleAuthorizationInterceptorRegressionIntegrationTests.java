@@ -30,6 +30,24 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * ({@code GET /api/v1/notifications}) — none of them {@code inventory}/
  * {@code ordering} internals this ticket was told not to touch, but real,
  * already-shipped, unauthenticated-by-design production endpoints.
+ *
+ * <h2>FARELO-123 additions</h2>
+ *
+ * This ticket, unlike FARELO-122, deliberately DOES annotate two of the
+ * controllers exercised here — {@code CategoryController} and
+ * {@code ProductController} — but only their write methods (see those
+ * classes' javadocs). {@link #categoriesListingStillWorksWithNoAuthorizationHeader()}
+ * and the new {@link #productsListingStillWorksWithNoAuthorizationHeader()}
+ * now double as the regression proof for that half of FARELO-123's own
+ * design: {@code GET} stays public (the customer-facing "Cardápio QR"
+ * dependency) even though {@code POST}/{@code PUT} on the very same
+ * controllers now require a token. {@link #ordersListingStillWorksWithNoAuthorizationHeader()}
+ * is added as a second confirmation — alongside {@code ingredients}/
+ * {@code notifications} above — that this ticket's blast radius stopped at
+ * exactly the three controllers it was scoped to touch
+ * ({@code CategoryController}, {@code ProductController},
+ * {@code UserController}): {@code ordering} is untouched, so
+ * {@code GET /api/v1/orders} must still need no token at all.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -44,6 +62,16 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
                 .andExpect(status().isOk());
     }
 
+    // FARELO-123: CategoryController now carries @RequireRole on create(),
+    // but deliberately not on list() — see that controller's javadoc. This
+    // is the test that would fail if that boundary were ever accidentally
+    // widened to the whole class.
+    @Test
+    void productsListingStillWorksWithNoAuthorizationHeader() throws Exception {
+        mockMvc.perform(get("/api/v1/products"))
+                .andExpect(status().isOk());
+    }
+
     @Test
     void ingredientsListingStillWorksWithNoAuthorizationHeader() throws Exception {
         mockMvc.perform(get("/api/v1/ingredients"))
@@ -53,6 +81,15 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
     @Test
     void notificationsListingStillWorksWithNoAuthorizationHeader() throws Exception {
         mockMvc.perform(get("/api/v1/notifications"))
+                .andExpect(status().isOk());
+    }
+
+    // FARELO-123: ordering is explicitly out of scope for this ticket
+    // (that is FARELO-124's PDV/kitchen surface) — proves this ticket's
+    // three-controller scope didn't leak into a fourth domain.
+    @Test
+    void ordersListingStillWorksWithNoAuthorizationHeader() throws Exception {
+        mockMvc.perform(get("/api/v1/orders"))
                 .andExpect(status().isOk());
     }
 

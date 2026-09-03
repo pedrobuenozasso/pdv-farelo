@@ -4,6 +4,7 @@ import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.security.User;
 import com.farelo.api.security.UserRepository;
 import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,10 +47,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@link #createsUserAndPersistsIt()}/{@link #hashesNewPasswordOnPasswordChange()}
  * confirm the stored value is a real hash, never equal to the plaintext
  * password sent in the request.
+ *
+ * <p><b>FARELO-123</b>: every endpoint in {@code UserController} now
+ * requires {@link UserRole#ADMIN} (list/getById also allow
+ * {@link UserRole#MANAGER}) — see that controller's javadoc. Every request
+ * below mints a real token via {@link #tokenFor} (same pattern as
+ * {@code RoleAuthorizationInterceptorIntegrationTests}, FARELO-122) and
+ * sends it as {@code Authorization: Bearer <token>}; the caller ({@code
+ * "Caller Admin"} et al.) is a throwaway account distinct from whatever
+ * user each test is exercising, minted fresh so tests never collide on
+ * unique email.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 class UserControllerIntegrationTests extends AbstractIntegrationTest {
+
+    private static final String PASSWORD = "senha-forte-123";
 
     @Autowired
     private MockMvc mockMvc;
@@ -61,6 +74,9 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
     private PasswordEncoder passwordEncoder;
 
     @Autowired
+    private JwtTokenService jwtTokenService;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @BeforeEach
@@ -68,9 +84,37 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
         userRepository.deleteAll();
     }
 
+    // Mints a real token for a throwaway caller of the given role, then
+    // deletes that caller's row again before returning — unlike
+    // CategoryControllerIntegrationTests/ProductControllerIntegrationTests
+    // (whose count assertions are against category/product tables, never
+    // app_user), this class's own list()/getById() tests assert exact
+    // counts/contents of app_user itself, so a caller left behind here
+    // would silently inflate every list assertion below (e.g.
+    // returnsEmptyListWhenNoUsersExist's hasSize(0)). Deleting the row is
+    // safe only because a JWT is fully self-contained: JwtTokenService#parse
+    // never touches the database (no revocation mechanism — see that
+    // class's javadoc), so a deleted caller's already-issued token still
+    // verifies exactly as if the row still existed.
+    private String tokenFor(UserRole role) {
+        User caller = userRepository.save(new User(
+                "Caller " + role,
+                "caller-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD),
+                role));
+        String token = jwtTokenService.issue(caller).token();
+        userRepository.delete(caller);
+        return token;
+    }
+
+    private String adminToken() {
+        return tokenFor(UserRole.ADMIN);
+    }
+
     @Test
     void createsUserAndPersistsIt() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Ana Souza", "email": "ana@farelo.dev", "password": "senha-forte-123", "role": "MANAGER"}
@@ -101,6 +145,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void neverExposesPasswordHashInAnyResponse() throws Exception {
         MvcResult createResult = mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Bia Rocha", "email": "bia@farelo.dev", "password": "senha-forte-123", "role": "ATTENDANT"}
@@ -112,15 +157,18 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
         JsonNode created = objectMapper.readTree(createResult.getResponse().getContentAsString());
         UUID id = UUID.fromString(created.get("id").asText());
 
-        mockMvc.perform(get("/api/v1/users"))
+        mockMvc.perform(get("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].passwordHash").doesNotExist());
 
-        mockMvc.perform(get("/api/v1/users/{id}", id))
+        mockMvc.perform(get("/api/v1/users/{id}", id)
+                        .header("Authorization", "Bearer " + adminToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.passwordHash").doesNotExist());
 
         mockMvc.perform(put("/api/v1/users/{id}", id)
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Bia Rocha", "email": "bia@farelo.dev", "role": "ATTENDANT", "active": true}
@@ -129,6 +177,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.passwordHash").doesNotExist());
 
         mockMvc.perform(patch("/api/v1/users/{id}/password", id)
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"newPassword": "outra-senha-456"}
@@ -140,6 +189,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void returnsConflictWhenEmailAlreadyExists() throws Exception {
         mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Primeiro", "email": "duplicado@farelo.dev", "password": "senha-forte-123", "role": "CASHIER"}
@@ -147,6 +197,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Segundo", "email": "duplicado@farelo.dev", "password": "outra-senha-456", "role": "CASHIER"}
@@ -160,6 +211,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsBlankNameWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "", "email": "valido@farelo.dev", "password": "senha-forte-123", "role": "CASHIER"}
@@ -173,6 +225,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsInvalidEmailWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Nome", "email": "nao-e-um-email", "password": "senha-forte-123", "role": "CASHIER"}
@@ -184,6 +237,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsShortPasswordWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Nome", "email": "valido@farelo.dev", "password": "123", "role": "CASHIER"}
@@ -195,6 +249,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsMissingRoleWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Nome", "email": "valido@farelo.dev", "password": "senha-forte-123"}
@@ -205,7 +260,8 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsEmptyListWhenNoUsersExist() throws Exception {
-        mockMvc.perform(get("/api/v1/users"))
+        mockMvc.perform(get("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
@@ -216,7 +272,8 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
         userRepository.save(new User("Zeca", "zeca@farelo.dev", passwordEncoder.encode("senha-forte-123"), UserRole.KITCHEN));
         userRepository.save(new User("Ana", "ana2@farelo.dev", passwordEncoder.encode("senha-forte-123"), UserRole.KITCHEN));
 
-        MvcResult result = mockMvc.perform(get("/api/v1/users"))
+        MvcResult result = mockMvc.perform(get("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andReturn();
@@ -235,7 +292,8 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
         User user = userRepository.save(
                 new User("Carlos", "carlos@farelo.dev", passwordEncoder.encode("senha-forte-123"), UserRole.ADMIN));
 
-        mockMvc.perform(get("/api/v1/users/{id}", user.getId()))
+        mockMvc.perform(get("/api/v1/users/{id}", user.getId())
+                        .header("Authorization", "Bearer " + adminToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(user.getId().toString()))
                 .andExpect(jsonPath("$.name").value("Carlos"))
@@ -246,7 +304,8 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
     void returnsUserNotFoundWhenGettingUnknownId() throws Exception {
         UUID missingId = UUID.randomUUID();
 
-        mockMvc.perform(get("/api/v1/users/{id}", missingId))
+        mockMvc.perform(get("/api/v1/users/{id}", missingId)
+                        .header("Authorization", "Bearer " + adminToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -268,6 +327,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/{id}", user.getId())
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -299,6 +359,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/{id}", user.getId())
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -321,6 +382,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/{id}", second.getId())
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isConflict())
@@ -341,6 +403,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/{id}", missingId)
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isNotFound())
@@ -361,6 +424,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/users/{id}", user.getId())
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -374,6 +438,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
         String originalHash = user.getPasswordHash();
 
         mockMvc.perform(patch("/api/v1/users/{id}/password", user.getId())
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"newPassword": "senha-nova-456"}
@@ -393,6 +458,7 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
         UUID missingId = UUID.randomUUID();
 
         mockMvc.perform(patch("/api/v1/users/{id}/password", missingId)
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"newPassword": "senha-nova-456"}
@@ -407,12 +473,157 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
                 new User("Julia", "julia@farelo.dev", passwordEncoder.encode("senha-forte-123"), UserRole.KITCHEN));
 
         mockMvc.perform(patch("/api/v1/users/{id}/password", user.getId())
+                        .header("Authorization", "Bearer " + adminToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"newPassword": "123"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    // --- FARELO-123: RBAC ------------------------------------------------
+
+    @Test
+    void rejectsCreateWithNoAuthorizationHeader() throws Exception {
+        mockMvc.perform(post("/api/v1/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Nome", "email": "sem-token@farelo.dev", "password": "senha-forte-123", "role": "CASHIER"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsCreateWhenCallerRoleIsNotAllowed() throws Exception {
+        // MANAGER may list/view users (see class javadoc) but not create
+        // one — proves list/getById's widened role set does NOT leak into
+        // create()'s (still ADMIN-only, method-level, no union).
+        mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Nome", "email": "manager-tentando@farelo.dev", "password": "senha-forte-123", "role": "CASHIER"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsListWithNoAuthorizationHeader() throws Exception {
+        mockMvc.perform(get("/api/v1/users"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsListWhenCallerRoleIsNotAllowed() throws Exception {
+        mockMvc.perform(get("/api/v1/users")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void allowsListAsManager() throws Exception {
+        mockMvc.perform(get("/api/v1/users")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void allowsGetByIdAsManager() throws Exception {
+        User user = userRepository.save(
+                new User("Karin", "karin@farelo.dev", passwordEncoder.encode("senha-forte-123"), UserRole.ATTENDANT));
+
+        mockMvc.perform(get("/api/v1/users/{id}", user.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Karin"));
+    }
+
+    @Test
+    void rejectsUpdateWithNoAuthorizationHeader() throws Exception {
+        User user = userRepository.save(
+                new User("Nilo", "nilo@farelo.dev", passwordEncoder.encode("senha-forte-123"), UserRole.ATTENDANT));
+
+        String body = """
+                {
+                  "name": "Nilo",
+                  "email": "nilo@farelo.dev",
+                  "role": "ATTENDANT",
+                  "active": true
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/users/{id}", user.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsUpdateWhenCallerRoleIsNotAllowed() throws Exception {
+        // MANAGER may view this user but not edit it — update() (unlike
+        // list()/getById()) stays ADMIN-only precisely because it can set
+        // `role`; see the class javadoc's privilege-escalation reasoning.
+        User user = userRepository.save(
+                new User("Otto", "otto@farelo.dev", passwordEncoder.encode("senha-forte-123"), UserRole.ATTENDANT));
+
+        String body = """
+                {
+                  "name": "Otto",
+                  "email": "otto@farelo.dev",
+                  "role": "ADMIN",
+                  "active": true
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/users/{id}", user.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsPasswordChangeWithNoAuthorizationHeader() throws Exception {
+        User user = userRepository.save(
+                new User("Paula", "paula@farelo.dev", passwordEncoder.encode("senha-forte-123"), UserRole.ATTENDANT));
+
+        mockMvc.perform(patch("/api/v1/users/{id}/password", user.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newPassword": "senha-nova-456"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsPasswordChangeWhenCallerRoleIsNotAllowed() throws Exception {
+        User user = userRepository.save(
+                new User("Rui", "rui@farelo.dev", passwordEncoder.encode("senha-forte-123"), UserRole.ATTENDANT));
+
+        mockMvc.perform(patch("/api/v1/users/{id}/password", user.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newPassword": "senha-nova-456"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
     }
 
 }

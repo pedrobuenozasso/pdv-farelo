@@ -24,20 +24,21 @@ import java.lang.annotation.Target;
  * keeps the check trivial to reason about at each handler: "read the one
  * annotation closest to this method".
  *
- * <p><b>FARELO-122 scope — nothing uses this annotation yet</b>: this
- * ticket builds the mechanism only (see {@code docs/domain-model.md},
- * {@code security} section, FARELO-122 subsection, for the full design
- * writeup and for why). No production controller
- * ({@code CategoryController}, {@code ProductController},
- * {@code CommandController}, {@code OrderController},
- * {@code PrintJobController}, {@code IngredientController},
- * {@code RecipeController}, {@code UserController}, {@code AuthController},
- * {@code NotificationController} — every controller that exists as of this
- * ticket) is annotated with {@code @RequireRole}. Deciding *which* roles
- * may call *which* real endpoint is deliberately deferred to FARELO-123
- * (Admin surface) and FARELO-124 (PDV/kitchen surface) — this ticket only
- * proves the mechanism works, against a dedicated test-only controller (see
- * {@code RoleAuthorizationInterceptorIntegrationTests}).
+ * <p><b>FARELO-122 scope — mechanism only, no production controller
+ * annotated yet</b>: FARELO-122 itself built only this mechanism (see
+ * {@code docs/domain-model.md}, {@code security} section, FARELO-122
+ * subsection) — as of that ticket, no production controller used
+ * {@code @RequireRole} at all; the only proof it worked was a dedicated
+ * test-only controller (see {@code RoleAuthorizationInterceptorIntegrationTests}).
+ * <b>FARELO-123 is the first ticket to actually apply it</b>: the Admin
+ * surface — {@code CategoryController}/{@code ProductController} (write
+ * methods only) and {@code UserController} (see that subsection of
+ * {@code docs/domain-model.md} for exactly which methods and roles, and the
+ * reasoning). Still deliberately untouched: {@code CommandController},
+ * {@code OrderController}, {@code PrintJobController},
+ * {@code IngredientController}, {@code RecipeController},
+ * {@code AuthController}, {@code NotificationController} — the PDV/kitchen
+ * surface is FARELO-124, a future, distinct ticket.
  */
 @Target({ElementType.TYPE, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)

@@ -6,6 +6,10 @@ import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductRepository;
 import com.farelo.api.catalog.ProductionStation;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -39,10 +44,21 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * means the {@code product}/{@code category} tables may already have rows
  * from other test classes, so tests that assert list contents clear both
  * tables first (products before categories, because of the FK).
+ *
+ * <p><b>FARELO-123</b>: {@code POST}/{@code PUT} now require
+ * {@link UserRole#ADMIN}/{@link UserRole#MANAGER} (see
+ * {@code ProductController}'s javadoc), so every {@code POST}/{@code PUT}
+ * here mints a real token via {@link #tokenFor} and sends it as
+ * {@code Authorization: Bearer <token>} — same pattern as
+ * {@code CategoryControllerIntegrationTests}. {@code GET} is deliberately
+ * left with <b>no</b> header anywhere in this class — see the controller
+ * javadoc for why it stays unprotected (public "Cardápio QR" dependency).
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 class ProductControllerIntegrationTests extends AbstractIntegrationTest {
+
+    private static final String PASSWORD = "senha-forte-123";
 
     @Autowired
     private MockMvc mockMvc;
@@ -54,12 +70,30 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
     private ProductRepository productRepository;
 
     @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void cleanCatalogTables() {
         productRepository.deleteAll();
         categoryRepository.deleteAll();
+    }
+
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Test User",
+                "test-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD),
+                role));
+        return jwtTokenService.issue(user).token();
     }
 
     @Test
@@ -77,6 +111,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(category.getId());
 
         MvcResult result = mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -124,6 +159,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(category.getId());
 
         MvcResult result = mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -153,6 +189,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(category.getId());
 
         MvcResult result = mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -182,6 +219,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(missingCategoryId);
 
         mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isNotFound())
@@ -193,6 +231,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsMissingRequiredFieldsWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
@@ -214,6 +253,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(category.getId());
 
         mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -273,6 +313,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(newCategory.getId());
 
         mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -316,6 +357,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(category.getId());
 
         mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -347,6 +389,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(category.getId());
 
         mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -380,6 +423,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(category.getId());
 
         mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -407,6 +451,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(category.getId());
 
         mockMvc.perform(put("/api/v1/products/{id}", missingProductId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isNotFound())
@@ -433,6 +478,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(missingCategoryId);
 
         mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isNotFound())
@@ -458,10 +504,145 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 """.formatted(category.getId());
 
         mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    // --- FARELO-123: RBAC on create()/update() ---------------------------
+
+    @Test
+    void createsProductAsManager() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s"
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void rejectsCreateWithNoAuthorizationHeader() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s"
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(post("/api/v1/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsCreateWhenCallerRoleIsNotAllowed() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s"
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void updatesProductAsManager() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsUpdateWithNoAuthorizationHeader() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsUpdateWhenCallerRoleIsNotAllowed() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
     }
 
 }

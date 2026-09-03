@@ -16,11 +16,52 @@ Este documento é preenchido conforme cada endpoint é criado.
 }
 ```
 
+### Autenticação/RBAC (FARELO-121/122/123)
+
+A maioria dos endpoints abaixo não exige nenhuma autenticação — esse é o
+padrão do projeto até aqui (ver `docs/domain-model.md`, seção `security`).
+Um endpoint marcado **"Requer: `<PAPEL>`"** abaixo é a exceção: precisa de
+um header `Authorization: Bearer <token>` (token emitido por
+`POST /api/v1/auth/login`) cujo usuário tenha um dos papéis listados
+(`ADMIN`/`MANAGER`/`CASHIER`/`KITCHEN`/`ATTENDANT`, ver seção 26 do prompt
+mestre). Quando um endpoint marcado assim é chamado:
+
+- **Sem header `Authorization` (ou malformado/token inválido/expirado)** —
+  `401 Unauthorized`:
+
+  ```json
+  {
+    "code": "UNAUTHENTICATED",
+    "message": "...",
+    "correlationId": "..."
+  }
+  ```
+
+- **Header presente e token válido, mas o papel do usuário não está na
+  lista exigida** — `403 Forbidden`:
+
+  ```json
+  {
+    "code": "FORBIDDEN",
+    "message": "...",
+    "correlationId": "..."
+  }
+  ```
+
+Um endpoint **sem** a marca "Requer" continua acessível sem nenhum header,
+exatamente como sempre foi — inclusive depois do FARELO-123, que só
+adicionou a marca a alguns endpoints de `categories`/`products`/`users`
+(ver essas seções abaixo e o raciocínio completo em
+`docs/domain-model.md`, subseção FARELO-123).
+
 ## Endpoints
 
 ### `POST /api/v1/categories`
 
 Cria uma categoria de produto. (FARELO-012)
+
+**Requer: `ADMIN`, `MANAGER`** (FARELO-123) — ver a seção "Autenticação/RBAC"
+acima para o formato do header e das respostas `401`/`403`.
 
 **Request body**
 
@@ -67,6 +108,12 @@ Ainda não há `PUT`/`DELETE` para categoria (tickets futuros).
 
 Lista todas as categorias, ordenadas por `name` (asc). (FARELO-013)
 
+**Sem autenticação — deliberado (FARELO-123).** Apesar de `POST` acima
+exigir `ADMIN`/`MANAGER`, este `GET` fica público de propósito: é
+consumido pelo Cardápio QR cliente-facing (`pedido.farelo.com.br`,
+FARELO-042), que não tem login de nenhum tipo. Ver
+`docs/domain-model.md`, subseção FARELO-123, para o raciocínio completo.
+
 Sem paginação/filtros por enquanto (YAGNI — mantido para um ticket futuro se
 o Admin precisar).
 
@@ -89,6 +136,9 @@ Lista vazia (`[]`) quando não há categorias cadastradas.
 ### `POST /api/v1/products`
 
 Cria um produto vendável do cardápio. (FARELO-014)
+
+**Requer: `ADMIN`, `MANAGER`** (FARELO-123) — ver a seção "Autenticação/RBAC"
+acima para o formato do header e das respostas `401`/`403`.
 
 **Request body**
 
@@ -170,6 +220,11 @@ estação atribuída.
 
 Lista todos os produtos, ordenados por `name` (asc). (FARELO-015)
 
+**Sem autenticação — deliberado (FARELO-123).** Mesmo raciocínio de
+`GET /api/v1/categories` acima: consumido pelo Cardápio QR cliente-facing
+(FARELO-043), sem login de nenhum tipo, apesar de `POST`/`PUT` deste mesmo
+recurso exigirem `ADMIN`/`MANAGER`.
+
 Sem paginação nem filtros (ex: por `categoryId`) por enquanto — decisão
 deliberada de escopo (YAGNI, mesma lógica de `GET /api/v1/categories`):
 nenhum consumidor (Admin/PDV) existe ainda pedindo isso. Um filtro por
@@ -202,6 +257,9 @@ Lista vazia (`[]`) quando não há produtos cadastrados.
 ### `PUT /api/v1/products/{id}`
 
 Atualiza (substituição completa) um produto existente. (FARELO-016)
+
+**Requer: `ADMIN`, `MANAGER`** (FARELO-123) — ver a seção "Autenticação/RBAC"
+acima para o formato do header e das respostas `401`/`403`.
 
 Fecha o CRUD básico de `Product` — sem `DELETE` por enquanto (fora do
 roadmap atual).
@@ -1347,6 +1405,13 @@ armazenado (`docs/domain-model.md`, seção `inventory`, prompt mestre seção
 Cria um usuário (uma conta de quem pode operar o sistema — funcionário do
 Farelo). (FARELO-120)
 
+**Requer: `ADMIN`** (FARELO-123) — só `ADMIN`, diferente dos `GET` abaixo
+(que também aceitam `MANAGER`): este endpoint aceita um `role` livre no
+corpo, então permitir `MANAGER` deixaria um gerente criar/promover uma
+conta `ADMIN`. Ver a seção "Autenticação/RBAC" acima para o formato do
+header e das respostas `401`/`403`, e `docs/domain-model.md` (subseção
+FARELO-123) para o raciocínio completo.
+
 Primeiro endpoint do domínio `security`. `password` viaja em texto plano
 neste request (sobre HTTPS, prompt mestre seção 26) exatamente uma vez — o
 serviço hasheia (BCrypt) antes de persistir, e nunca é logada. Sem `active`
@@ -1401,6 +1466,11 @@ nenhuma resposta deste controller, sem exceção.
 Lista todos os usuários (ativos e inativos), ordenados por `name` (asc).
 (FARELO-120)
 
+**Requer: `ADMIN`, `MANAGER`** (FARELO-123) — mais permissivo que `POST`/
+`PUT`/`PATCH .../password` acima porque ler a lista de funcionários não
+pode ser usado para escalonar privilégio nenhum, diferente de criar/editar
+contas. `UserResponse` nunca inclui `passwordHash`, para qualquer papel.
+
 Sem paginação/filtro `active`-only por enquanto (YAGNI, mesmo padrão de
 `GET /api/v1/ingredients`).
 
@@ -1426,6 +1496,9 @@ Lista vazia (`[]`) quando não há usuários cadastrados.
 
 Busca um usuário pelo `id` técnico (UUID). (FARELO-120)
 
+**Requer: `ADMIN`, `MANAGER`** (FARELO-123) — mesmo raciocínio de
+`GET /api/v1/users` acima.
+
 **Response — `200 OK`**
 
 Mesmo formato de item de `GET /api/v1/users`.
@@ -1440,6 +1513,10 @@ Mesmo formato de item de `GET /api/v1/users`.
 Atualiza (substituição completa) o perfil de um usuário existente —
 `name`/`email`/`role`/`active`. Não altera a senha (ver
 `PATCH /api/v1/users/{id}/password` abaixo). (FARELO-120)
+
+**Requer: `ADMIN`** (FARELO-123) — mesmo raciocínio de `POST` acima: este
+endpoint também define `role`, então permitir `MANAGER` deixaria um
+gerente se auto-promover (ou promover outra conta) a `ADMIN`.
 
 Mesmo raciocínio de `PUT /api/v1/ingredients/{id}`: DTO próprio
 (`UserUpdateRequest`) em vez de reaproveitar o request de criação, para
@@ -1479,6 +1556,11 @@ poder exigir `active` explicitamente sem torná-lo opcional na criação.
 ### `PATCH /api/v1/users/{id}/password`
 
 Troca a senha de um usuário. (FARELO-120)
+
+**Requer: `ADMIN`** (FARELO-123) — mantido estritamente `ADMIN` (não
+`MANAGER`): este endpoint ainda não confirma a senha atual (ver abaixo),
+então permitir `MANAGER` deixaria um gerente sequestrar a senha de
+qualquer conta, inclusive de outro `ADMIN`.
 
 Endpoint separado do `PUT` geral acima — deliberado, ver
 `docs/domain-model.md` (seção `security`) para a justificativa completa.
