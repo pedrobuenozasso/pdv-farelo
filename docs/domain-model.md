@@ -1528,6 +1528,104 @@ Pacote: `com.farelo.api.notification`.
   tabela nova sem nenhuma FK vinda de outra entidade e os testes desta
   suíte rodam sequencialmente, não concorrentemente).
 
+- **FARELO-111 — adapter WhatsApp Cloud API** (mecanismo de envio, não
+  gatilho). Escopo estrito: dado um `Notification` já existente e `PENDING`,
+  enviá-lo e registrar o resultado (`SENT`/`FAILED`). **Não** constrói
+  nenhum produtor (reagir a `ORDER_READY` é FARELO-112, "estoque baixo" é
+  FARELO-113 — ambos tickets futuros) nem um poller/scheduler que
+  automaticamente varre `PENDING` e envia — essa orquestração (quando/como
+  o envio é disparado) fica para FARELO-112/113, no ponto em que existir um
+  gatilho real para desenhar o mecanismo contra.
+
+  **`com.farelo.api.notification.whatsapp.WhatsAppClient`**: interface com
+  um método, `sendTextMessage(recipient, messageBody)`. Existe como seam
+  testável — não porque uma segunda implementação real seja esperada, mas
+  para que `NotificationSender` (abaixo) seja testável sem uma conta Meta
+  real, com um fake trivial no lugar de um mock HTTP em todo teste que
+  exercita só a orquestração.
+
+  **`WhatsAppCloudApiClient`** (única implementação real, `@Component`):
+  fala com a Meta WhatsApp Cloud API via `org.springframework.web.client.RestClient`
+  (Spring 6.1+, já transitivo via `spring-boot-starter-web` — nenhuma
+  dependência nova). `RestClient` escolhido sobre `WebClient` (esta
+  aplicação é Spring MVC puro, `spring-webflux` nem está no classpath — um
+  `WebClient` puxaria a stack reativa inteira para um caso de uso
+  síncrono/bloqueante) e sobre `RestTemplate` (em modo de manutenção,
+  `RestClient` é o sucessor indicado). Este é o primeiro cliente HTTP de
+  saída deste codebase — não havia precedente (`RestTemplate`/`WebClient`/
+  `HttpClient` não apareciam em nenhum lugar de `apps/api` antes deste
+  ticket).
+
+  Requisição: `POST {base-url}/{phone-number-id}/messages`, header
+  `Authorization: Bearer {access-token}`, corpo (`WhatsAppMessageRequest`,
+  classe package-private) no formato real da Cloud API:
+  ```json
+  { "messaging_product": "whatsapp", "to": "5511999999999", "type": "text", "text": { "body": "..." } }
+  ```
+  Toda falha (erro de rede, timeout, resposta não-2xx — todas subtipos de
+  `RestClientException`) é capturada e reembrulhada como
+  `WhatsAppSendException` (unchecked, único tipo de falha que este pacote
+  expõe) — nunca deixa uma exceção de baixo nível escapar. Mesma filosofia
+  "nada aqui derruba o processo" já aplicada por `apps/edge-agent`'s
+  `poller.ts`/`printOverTcp`.
+
+  **Config** (`application.yml`, lidos de variáveis de ambiente, nunca
+  hardcoded — mesmo padrão `${ENV_VAR:default}` já usado por
+  `spring.datasource.*`):
+  - `whatsapp.api.base-url` (`WHATSAPP_API_BASE_URL`, padrão
+    `https://graph.facebook.com/v20.0`) — sobrescrito em teste para apontar
+    a um stub HTTP local.
+  - `whatsapp.api.phone-number-id` (`WHATSAPP_PHONE_NUMBER_ID`, padrão
+    vazio — nenhuma conta Meta real existe neste ambiente de dev).
+  - `whatsapp.api.access-token` (`WHATSAPP_ACCESS_TOKEN`, padrão vazio).
+  - `whatsapp.api.connect-timeout-ms`/`whatsapp.api.read-timeout-ms`
+    (`WHATSAPP_API_CONNECT_TIMEOUT_MS`/`WHATSAPP_API_READ_TIMEOUT_MS`,
+    padrão 5000/10000) — limitam quanto tempo uma tentativa de envio pode
+    bloquear esperando uma API externa possivelmente fora do ar.
+
+  **`NotificationSender`** (novo `@Service`, não em `NotificationService` —
+  aquela classe é documentada como só-leitura desde FARELO-110, então em
+  vez de reescrevê-la este ticket soma uma classe nova e estreita, aditiva):
+  `send(Notification)` chama `WhatsAppClient#sendTextMessage`, captura
+  `WhatsAppSendException` e chama `markFailed()`, ou chama `markSent()` no
+  sucesso — sempre salva e sempre retorna, nunca deixa a exceção escapar
+  (mesmo contrato "nenhuma falha derruba o processo" um nível acima).
+  `sendById(UUID)` busca por id (lança `NotificationNotFoundException`,
+  novo, se não existir) e delega a `send`. **Sem validação de transição de
+  status** antes de tentar o envio — mesma razão pela qual
+  `markSent()`/`markFailed()` na entidade continuam sem validação (ver
+  javadoc de `NotificationStatus`): os únicos chamadores previstos
+  (FARELO-112/113, e o endpoint manual abaixo) só fariam sentido reenviando
+  livremente, não haveria um caso real conflitante para desenhar uma regra
+  contra hoje.
+
+  **Endpoint manual — `POST /api/v1/notifications/{id}/send`**: acionamento
+  manual do mecanismo real de envio, para operabilidade/testabilidade hoje
+  (não é o gatilho automático que a seção 19 eventualmente quer —
+  FARELO-112/113 continuam sendo os gatilhos reais). Sempre `200 OK` com o
+  `NotificationResponse` atualizado, esteja `status` como `SENT` ou
+  `FAILED` — é um relato de resultado de tentativa, não uma falha de
+  validação de request. `404 Not Found`/`NOTIFICATION_NOT_FOUND` se o `id`
+  não existir (`ApiExceptionHandler`, novo handler).
+
+  **Testes**: `WhatsAppCloudApiClientTests` (JUnit puro, sem Spring/Postgres
+  — contra um `com.sun.net.httpserver.HttpServer` local real, não uma
+  chamada HTTP mockada; nenhuma dependência de teste nova foi adicionada —
+  `MockWebServer`/WireMock não estavam no `pom.xml` — mesmo espírito do
+  teste de `printerTransport.ts` do `apps/edge-agent`, que usa um
+  `net.createServer` local real em vez de mock; verifica método/caminho/
+  header de autorização/corpo da requisição no sucesso, e que 4xx/5xx/falha
+  de conexão sempre viram `WhatsAppSendException`, nunca uma exceção de
+  baixo nível), `NotificationSenderIntegrationTests` (`@SpringBootTest` +
+  Postgres real via Testcontainers + o mesmo stub HTTP local apontado via
+  `whatsapp.api.base-url` — prova o ciclo completo enviar→persistir
+  resultado, `SENT` no sucesso, `FAILED` sem lançar exceção na falha, mais
+  `sendById` não encontrado) e `NotificationSendControllerIntegrationTests`
+  (`@SpringBootTest` + `MockMvc` + Postgres real, mesmo padrão de
+  `NotificationControllerIntegrationTests` — `200 OK` com `SENT`/`FAILED`
+  conforme a resposta do stub, `404`/`NOTIFICATION_NOT_FOUND` para id
+  inexistente).
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —

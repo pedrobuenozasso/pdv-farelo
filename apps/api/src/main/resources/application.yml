@@ -39,3 +39,15 @@ outbox:
     # OutboxWorker's javadoc for why this is configurable rather than a
     # literal 5000 in the annotation.
     poll-interval-ms: 5000
+
+# FARELO-111: Meta WhatsApp Cloud API adapter config — see
+# com.farelo.api.notification.whatsapp.WhatsAppCloudApiClient's javadoc for
+# what each value does and why phone-number-id/access-token default to
+# empty (no live Meta account exists in this dev environment).
+whatsapp:
+  api:
+    base-url: ${WHATSAPP_API_BASE_URL:https://graph.facebook.com/v20.0}
+    phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}
+    access-token: ${WHATSAPP_ACCESS_TOKEN:}
+    connect-timeout-ms: ${WHATSAPP_API_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${WHATSAPP_API_READ_TIMEOUT_MS:10000}

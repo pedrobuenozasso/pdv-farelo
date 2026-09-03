@@ -12,6 +12,7 @@ import com.farelo.api.inventory.RecipeAlreadyExistsException;
 import com.farelo.api.inventory.RecipeItemAlreadyExistsException;
 import com.farelo.api.inventory.RecipeItemNotFoundException;
 import com.farelo.api.inventory.RecipeNotFoundException;
+import com.farelo.api.notification.NotificationNotFoundException;
 import com.farelo.api.ordering.OrderInvalidTransitionException;
 import com.farelo.api.ordering.OrderNotFoundException;
 import com.farelo.api.printing.PrintJobInvalidTransitionException;
@@ -195,6 +196,15 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleUserEmailAlreadyExists(UserEmailAlreadyExistsException ex) {
         return new ErrorResponse("USER_EMAIL_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // FARELO-111: id given to POST /api/v1/notifications/{id}/send doesn't
+    // exist — same "not found" shape as every other *NotFoundException
+    // handler above.
+    @ExceptionHandler(NotificationNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleNotificationNotFound(NotificationNotFoundException ex) {
+        return new ErrorResponse("NOTIFICATION_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {
