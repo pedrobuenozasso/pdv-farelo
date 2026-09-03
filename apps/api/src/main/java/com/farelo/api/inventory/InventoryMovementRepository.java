@@ -44,4 +44,23 @@ public interface InventoryMovementRepository extends JpaRepository<InventoryMove
     // ingredient id themselves).
     List<InventoryMovement> findByOrderId(UUID orderId);
 
+    // FARELO-097 ("Implementar idempotência da baixa de estoque"): the
+    // per-ingredient pre-check InventoryMovementService#consumeForOrder
+    // runs before writing an ORDER_CONSUMPTION row, so a retried/replayed
+    // call for an order already (fully or partially) consumed skips
+    // exactly the ingredients already recorded for it instead of
+    // re-writing them — see that method's javadoc for the full reasoning,
+    // including why the check (and the aggregated row it guards) is keyed
+    // per-ingredient rather than per-order. Backed at the DB level by the
+    // partial unique index on (order_id, ingredient_id) WHERE
+    // type = 'ORDER_CONSUMPTION' — see
+    // V23__add_inventory_movement_order_consumption_unique_index.sql —
+    // which remains the real source of truth if two concurrent calls ever
+    // raced past this same application-level check. A plain derived query
+    // (type is passed explicitly rather than hardcoded here, even though
+    // only ORDER_CONSUMPTION calls this today, so the method itself stays
+    // a generic "does this natural key already exist" check rather than
+    // baking in one caller's assumption).
+    boolean existsByTypeAndOrderIdAndIngredientId(InventoryMovementType type, UUID orderId, UUID ingredientId);
+
 }
