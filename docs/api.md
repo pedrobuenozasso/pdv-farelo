@@ -1426,11 +1426,10 @@ Lista notificações (`Notification`) — registros de algo que precisa ser
 (ou já foi) enviado a um destinatário, hoje sempre uma mensagem de
 WhatsApp. (FARELO-110)
 
-Único endpoint deste ticket — **somente leitura**. Não há `POST` nem
-endpoints de transição (`/sent`, `/failed`) aqui: nada neste ticket
-constrói ou transiciona uma `Notification` real (ver
-`docs/domain-model.md`, seção `notification`); isso é responsabilidade de
-FARELO-111 (adapter WhatsApp) e FARELO-112/113 (gatilhos automáticos).
+Somente leitura. Não há endpoints de transição (`/sent`, `/failed`)
+diretos — o único endpoint de escrita deste domínio é `POST
+/api/v1/notifications/{id}/send` (abaixo, FARELO-111), que relata um
+resultado em vez de aceitar um.
 
 **Query parameter opcional**
 
@@ -1466,6 +1465,43 @@ filtro de `status`.
 
 Lista vazia (`[]`) quando não existe nenhuma notificação (ou nenhuma com o
 `status` filtrado).
+
+### `POST /api/v1/notifications/{id}/send`
+
+Aciona manualmente o mecanismo real de envio (FARELO-111): tenta entregar a
+notificação `{id}` via Meta WhatsApp Cloud API
+(`com.farelo.api.notification.whatsapp.WhatsAppCloudApiClient`) e marca o
+resultado (`SENT` ou `FAILED`). **Não é o gatilho automático** que a seção
+19 do prompt mestre eventualmente quer (`ORDER_READY`/estoque baixo —
+FARELO-112/113, ainda tickets futuros) — existe para operabilidade (um
+operador forçando/reenviando manualmente) e testabilidade do mecanismo de
+envio hoje. Sem corpo de requisição.
+
+Sem validação de status atual: pode ser chamado numa notificação já `SENT`
+ou `FAILED` (tenta reenviar) — ver javadoc de `NotificationSender#send`
+para o porquê de nenhuma regra de transição existir ainda.
+
+**Response — `200 OK`**
+
+Sempre `200 OK`, esteja o resultado `SENT` ou `FAILED` — é um relato de
+resultado de uma tentativa de entrega, não uma validação de request; uma
+falha de entrega não é um erro de request malformado.
+
+```json
+{
+  "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+  "type": "ORDER_READY",
+  "recipient": "5511999999999",
+  "content": "Seu pedido está pronto!",
+  "status": "SENT",
+  "createdAt": "2026-09-02T13:00:00Z",
+  "updatedAt": "2026-09-02T13:00:05Z"
+}
+```
+
+**Erros**
+
+- `404 Not Found` — `{id}` não existe, `code: "NOTIFICATION_NOT_FOUND"`.
 
 Sempre `200 OK` — sem parâmetro de path a validar.
 
