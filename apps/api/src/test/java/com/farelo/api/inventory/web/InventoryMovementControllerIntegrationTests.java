@@ -82,6 +82,17 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         return ingredientRepository.save(new Ingredient(name, unit));
     }
 
+    // FARELO-099 ("Criar estoque mínimo"): same as createIngredient() above,
+    // but with a minimumStock threshold configured from the start — the
+    // two-argument Ingredient constructor always leaves minimumStock null
+    // (see its javadoc), so tests that need a configured threshold set it
+    // explicitly via the setter before saving.
+    private Ingredient createIngredient(String name, IngredientUnit unit, BigDecimal minimumStock) {
+        Ingredient ingredient = new Ingredient(name, unit);
+        ingredient.setMinimumStock(minimumStock);
+        return ingredientRepository.save(ingredient);
+    }
+
     // order_id carries a real DB-level FK to orders(id) — a random UUID is
     // rejected by that constraint, so a real persisted Order is needed (see
     // InventoryMovementRepositoryIntegrationTests#createOrder).
@@ -279,6 +290,87 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                 .andExpect(jsonPath("$.code").value("INGREDIENT_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
                 .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // --- FARELO-099 ("Criar estoque mínimo") — GET .../balance now also
+    // reports belowMinimum, computed from comparing the live balance against
+    // Ingredient.minimumStock. ---
+
+    @Test
+    void reportsBelowMinimumTrueWhenBalanceIsUnderTheConfiguredThreshold() throws Exception {
+        Ingredient coffee = createIngredient(
+                "Café em grão (below, FARELO-099)", IngredientUnit.GRAM, new BigDecimal("1000"));
+
+        inventoryMovementRepository.save(
+                new InventoryMovement(coffee, new BigDecimal("400"), InventoryMovementType.PURCHASE));
+
+        // balance (400) < minimumStock (1000) -> below.
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", coffee.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(400))
+                .andExpect(jsonPath("$.belowMinimum").value(true));
+    }
+
+    @Test
+    void reportsBelowMinimumFalseWhenBalanceExactlyMatchesTheConfiguredThreshold() throws Exception {
+        Ingredient coffee = createIngredient(
+                "Café em grão (at, FARELO-099)", IngredientUnit.GRAM, new BigDecimal("1000"));
+
+        inventoryMovementRepository.save(
+                new InventoryMovement(coffee, new BigDecimal("1000"), InventoryMovementType.PURCHASE));
+
+        // balance (1000) == minimumStock (1000) -> at threshold, not below it.
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", coffee.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(1000))
+                .andExpect(jsonPath("$.belowMinimum").value(false));
+    }
+
+    @Test
+    void reportsBelowMinimumFalseWhenBalanceIsAboveTheConfiguredThreshold() throws Exception {
+        Ingredient coffee = createIngredient(
+                "Café em grão (above, FARELO-099)", IngredientUnit.GRAM, new BigDecimal("1000"));
+
+        inventoryMovementRepository.save(
+                new InventoryMovement(coffee, new BigDecimal("5000"), InventoryMovementType.PURCHASE));
+
+        // balance (5000) > minimumStock (1000) -> above.
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", coffee.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(5000))
+                .andExpect(jsonPath("$.belowMinimum").value(false));
+    }
+
+    // No threshold configured at all (minimumStock null) must never report
+    // belowMinimum true, no matter the balance — including a NEGATIVE
+    // balance, reachable per InventoryMovementService#consumeForOrder's "no
+    // stock-sufficiency check" design (FARELO-096/097, see that method's
+    // javadoc). This is the ticket's own explicit test requirement.
+    @Test
+    void neverReportsBelowMinimumWhenNoThresholdIsConfiguredEvenWithNegativeBalance() throws Exception {
+        Ingredient noThreshold = createIngredient("Ingrediente sem limite (FARELO-099)", IngredientUnit.GRAM);
+        UUID orderId = createOrder().getId();
+
+        inventoryMovementRepository.save(
+                new InventoryMovement(noThreshold, new BigDecimal("100"), InventoryMovementType.PURCHASE));
+        inventoryMovementRepository.save(new InventoryMovement(
+                noThreshold, new BigDecimal("-300"), InventoryMovementType.ORDER_CONSUMPTION, orderId));
+
+        // balance = 100 - 300 = -200, and minimumStock is null.
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", noThreshold.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(-200))
+                .andExpect(jsonPath("$.belowMinimum").value(false));
+    }
+
+    @Test
+    void returnsZeroBalanceWithBelowMinimumFalseWhenNoThresholdConfiguredAndNoMovements() throws Exception {
+        Ingredient ingredient = createIngredient("Erva-doce (FARELO-099)", IngredientUnit.GRAM);
+
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", ingredient.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(0))
+                .andExpect(jsonPath("$.belowMinimum").value(false));
     }
 
     // FARELO-098 — "Criar movimento de perda". POST .../losses takes a

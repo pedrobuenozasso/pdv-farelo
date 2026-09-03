@@ -1,0 +1,41 @@
+-- V24__add_ingredient_minimum_stock_column.sql
+-- Inventory domain (FARELO-099, "Criar estoque mínimo", prompt mestre seção
+-- 17: "Ingredient: currentStock, minimumStock, criticalStock"). Adds the
+-- minimum-stock threshold column that ingredient (V16) deliberately left out
+-- until a concrete ticket needed it — see that migration's own comment
+-- ("No stock balance columns yet ... minimumStock/criticalStock are
+-- FARELO-095/099").
+--
+-- Nullable, no default: NULL means "no threshold configured for this
+-- ingredient yet" — a distinct, permanent state from "threshold is zero"
+-- (which would mean "flag as low the instant balance goes negative"), not
+-- just a temporary placeholder. See Ingredient.java's javadoc on
+-- minimumStock for the full reasoning, and IngredientBalance#isBelowMinimum
+-- for how NULL is read as "never below minimum" regardless of balance.
+--
+-- Only minimumStock, not criticalStock: this ticket (FARELO-099) is
+-- literally "Criar estoque mínimo" — criticalStock (also named in prompt
+-- mestre seção 17, alongside the STOCK_CRITICAL event) is a distinct,
+-- unscheduled future ticket, not something to anticipate speculatively here
+-- (AGENTS.md: não criar abstrações prematuras). Also no currentStock column
+-- — that concept is already the ledger-derived balance
+-- (InventoryMovementService#getBalance, FARELO-095), never a stored/mutable
+-- column (prompt mestre seção 13).
+--
+-- NUMERIC(12,3): same precision/scale as recipe_item.quantity (V19) and
+-- inventory_movement.quantity (V21) — a stock quantity, comparable directly
+-- against InventoryMovementService#getBalance's derived balance, which uses
+-- the same scale.
+--
+-- CHECK (minimum_stock IS NULL OR minimum_stock >= 0): a negative "minimum
+-- stock" threshold is meaningless (there's no such thing as needing at
+-- least a negative amount on hand) — mirrors the non-negative
+-- product.price convention already enforced at the application layer via
+-- @DecimalMin, made a real DB-level constraint here since this column has
+-- no equivalent request-side validation guarding every possible write path
+-- otherwise (defense in depth, same reasoning as the VARCHAR + CHECK
+-- convention already used for every enum-backed column in this schema).
+
+ALTER TABLE ingredient
+    ADD COLUMN minimum_stock NUMERIC(12, 3)
+        CHECK (minimum_stock IS NULL OR minimum_stock >= 0);

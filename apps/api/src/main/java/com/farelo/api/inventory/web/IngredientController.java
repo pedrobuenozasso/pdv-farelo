@@ -31,7 +31,7 @@ public class IngredientController {
     public ResponseEntity<IngredientResponse> create(
             @Valid @RequestBody IngredientRequest request,
             UriComponentsBuilder uriComponentsBuilder) {
-        Ingredient ingredient = ingredientService.create(request.name(), request.unit());
+        Ingredient ingredient = ingredientService.create(request.name(), request.unit(), request.minimumStock());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/ingredients/{id}")
@@ -57,7 +57,8 @@ public class IngredientController {
 
     @PutMapping("/{id}")
     public IngredientResponse update(@PathVariable UUID id, @Valid @RequestBody IngredientUpdateRequest request) {
-        Ingredient ingredient = ingredientService.update(id, request.name(), request.unit(), request.active());
+        Ingredient ingredient = ingredientService.update(
+                id, request.name(), request.unit(), request.active(), request.minimumStock());
         return IngredientResponse.from(ingredient);
     }
 

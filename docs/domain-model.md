@@ -1793,6 +1793,127 @@ Pacote: `com.farelo.api.inventory`.
   `orderId`, nenhum destes testes novos precisou de um `Command`/`Order`
   seedado (diferente dos testes de `ORDER_CONSUMPTION` acima).
 
+  ### FARELO-099 — Criar estoque mínimo
+
+  Prompt mestre seção 17: "`Ingredient`: `currentStock`, `minimumStock`,
+  `criticalStock`. Eventos: `STOCK_LOW`, `STOCK_CRITICAL`, `OUT_OF_STOCK`."
+  Este ticket é só a metade "dado" dessa seção — adiciona o campo
+  `minimumStock` a `Ingredient` e expõe se um ingrediente está abaixo dele,
+  agora. **Sem `criticalStock`** (ticket futuro, não numerado ainda — este
+  ticket é literalmente "Criar estoque mínimo", não "estoque
+  mínimo/crítico") e **sem nenhum evento outbox** (`STOCK_LOW`/
+  `STOCK_CRITICAL` são FARELO-100/`OUT_OF_STOCK` é FARELO-101, ambos fora do
+  escopo aqui de propósito — este ticket só produz o dado e o cálculo que
+  esses eventos futuros vão reagir a, sem nenhum efeito colateral/publish).
+
+  **`Ingredient.minimumStock`** (novo campo, `BigDecimal`, coluna
+  `minimum_stock NUMERIC(12,3)`, migration
+  `V24__add_ingredient_minimum_stock_column.sql`): **nullable, sem valor
+  default — `NULL` significa "nenhum limite configurado ainda"**, uma
+  decisão de desenho deliberada, não a alternativa mencionada no ticket
+  ("ou defaultar para zero"). Motivo: `NULL` e `0` significam coisas
+  diferentes e ambas são estados legítimos e distinguíveis — um limite
+  configurado como `0` é uma escolha real de um operador ("avise assim que
+  o saldo for negativo"), enquanto `NULL` é "ninguém decidiu um limite para
+  este ingrediente ainda". Defaultar automaticamente para `0` faria todo
+  ingrediente existente (e todo ingrediente novo criado sem o campo)
+  mentir sobre isso — pareceria que alguém escolheu deliberadamente `0`
+  como limite, quando na verdade ninguém configurou nada. Essa escolha lê
+  bem contra o desenho já existente de `InventoryMovementService#getBalance`/
+  `IngredientBalance` (FARELO-095): aquele saldo já usa `0` (nunca `null`)
+  para "sem movimentos ainda" — um estado real e calculado — então usar
+  `NULL` aqui para "sem limite configurado" mantém os dois conceitos
+  claramente distintos em vez de sobrecarregar `0` com dois significados
+  diferentes em dois campos vizinhos. Mesma coluna `NUMERIC(12,3)` de
+  `RecipeItem.quantity`/`InventoryMovement.quantity`, para comparar
+  diretamente contra um saldo calculado sem qualquer mismatch de escala.
+  `CHECK (minimum_stock IS NULL OR minimum_stock >= 0)` no nível do banco
+  (defesa em profundidade — não há uma única DTO de request que cubra todo
+  caminho de escrita futuro desta coluna) mais `@DecimalMin(value =
+  "0.00")` (sem `@NotNull`, já que `null` é um valor válido) nos DTOs de
+  request. Ver javadoc do campo em `Ingredient.java` para o raciocínio
+  completo.
+
+  **Sem `currentStock`**: esse conceito já existe — é o saldo derivado do
+  ledger (`InventoryMovementService#getBalance`, FARELO-095), nunca uma
+  coluna própria armazenada/mutável (prompt mestre seção 13: "O saldo deve
+  ser rastreável... nunca editado diretamente"). Adicionar uma coluna
+  `currentStock` redundante seria reintroduzir exatamente o anti-padrão que
+  o ledger existe para evitar.
+
+  **Endpoint — dobrado em `POST`/`PUT /api/v1/ingredients`, não um endpoint
+  dedicado**: o ticket deu a escolha de desenho em aberto (endpoint próprio,
+  ex: `PATCH .../{id}/minimum-stock`, vs. dobrar no fluxo de update
+  existente) condicionada a checar `IngredientController`/
+  `IngredientUpdateRequest` primeiro. `Ingredient` já usa `PUT
+  /api/v1/ingredients/{id}` como substituição completa de vários campos
+  (`name`/`unit`/`active`) — diferente de `Recipe`/FARELO-091, cujo `PATCH
+  /{id}/deactivate` existe porque `Recipe` só tinha *um* campo mutável
+  (`active`), tornando um endpoint de substituição completa um alias inútil
+  do mesmo campo único. `Ingredient` não está nessa situação: já é dono de
+  um `PUT` de substituição completa genuíno, então adicionar mais um campo
+  a ele é a extensão natural, não uma invenção de endpoint novo. O
+  precedente real e já mergeado para "campo opcional, sem default óbvio,
+  que uma `PUT` de substituição completa precisa poder enviar como `null`
+  para limpar" é `ProductUpdateRequest.productionStation`/
+  `ProductRequest.productionStation` (FARELO-073) — `minimumStock` segue
+  exatamente essa mesma forma em `IngredientUpdateRequest`/
+  `IngredientRequest`: opcional em ambos os DTOs (inclusive na criação, já
+  que também não há um valor default inequívoco para "assumir" quando
+  omitido), sem `@NotNull`, e uma `PUT` que omite o campo o envia como
+  `null` — limpando explicitamente um limite configurado anteriormente, não
+  deixando-o inalterado (mesma semântica de substituição completa que
+  `name`/`unit`/`active` já têm). `IngredientService#create`/`#update`
+  ganham o parâmetro `minimumStock` correspondente; nenhum construtor novo
+  de `Ingredient` foi necessário — o construtor de dois argumentos existente
+  já deixa o campo `null` por padrão, então ambos os métodos do service só
+  chamam `setMinimumStock(...)` depois. `IngredientResponse` também ganha
+  `minimumStock` (o mesmo padrão de "toda outra coluna simples de
+  `Ingredient` aparece na resposta").
+
+  **`GET /api/v1/ingredients/{ingredientId}/balance` ganha `belowMinimum`
+  (boolean)** — a exposição de "este ingrediente está abaixo do limite
+  agora", pedida explicitamente pelo ticket. Lugar natural: este endpoint
+  (FARELO-095) já calcula um saldo ao vivo a partir do ledger, e o limite
+  contra o qual comparar (`Ingredient.minimumStock`) pertence ao mesmo
+  ingrediente que a resposta já é sobre — nenhuma segunda consulta/endpoint
+  é necessária. A computação em si vive em `IngredientBalance` (pacote de
+  domínio `com.farelo.api.inventory`, não `.web`), um novo método
+  `isBelowMinimum()` no record já existente — não em
+  `InventoryMovementService#getBalance` nem em nenhum outro método
+  restrito pelo ticket (`create`/`consumeForOrder`/`recordLoss` não foram
+  tocados). `IngredientBalanceResponse.from` só encaminha
+  `ingredientBalance.isBelowMinimum()` para o novo campo `belowMinimum` da
+  resposta.
+
+  **Semântica exata de `isBelowMinimum()`**: `false` quando
+  `ingredient.getMinimumStock() == null` (sem limite configurado — "nunca é
+  reportado como baixo", exatamente o requisito de teste explícito do
+  ticket, **incluindo saldo negativo**: `InventoryMovementService#
+  consumeForOrder`'s "sem checagem de saldo suficiente" (FARELO-096/097) já
+  permite saldo negativo hoje, e um ingrediente sem limite configurado
+  continua retornando `false` mesmo nesse caso). Quando há limite
+  configurado, comparação estritamente menor (`balance.compareTo(minimumStock)
+  < 0`) — um saldo exatamente **igual** ao limite não é "abaixo" dele (lê
+  como "no limite", não uma violação), mesma leitura natural de "abaixo" em
+  português/inglês cotidiano.
+
+  **Testes**: novos casos em `IngredientControllerIntegrationTests`
+  (`POST`/`PUT` persistindo `minimumStock` corretamente — presente,
+  ausente na criação, limpo para `null` numa atualização subsequente — e
+  `400 VALIDATION_ERROR` para valor negativo em ambos os verbos) e novos
+  casos em `InventoryMovementControllerIntegrationTests` (`GET .../balance`
+  reportando `belowMinimum` corretamente nos três casos — saldo abaixo, no
+  exato limite, e acima — mais um ingrediente sem limite configurado nunca
+  reportando `belowMinimum: true`, mesmo com saldo negativo alcançado via
+  `PURCHASE` seguido de `ORDER_CONSUMPTION` maior, e mais o caso trivial de
+  saldo `0`/sem movimentos/sem limite). Mesmo cuidado de isolamento de
+  teste do restante deste arquivo: nenhuma limpeza cega de tabela
+  compartilhada foi introduzida; a nova sobrecarga do helper
+  `createIngredient(name, unit, minimumStock)` só configura o campo antes
+  de salvar, sem mudar o helper de dois argumentos já usado por todos os
+  outros testes da classe.
+
 ## security
 
 Pacote: `com.farelo.api.security`.
