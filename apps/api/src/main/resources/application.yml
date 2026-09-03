@@ -71,3 +71,13 @@ whatsapp:
 notification:
   worker:
     poll-interval-ms: 5000
+  # FARELO-113: WhatsApp-formatted number that receives internal stock
+  # alerts (STOCK_LOW/OUT_OF_STOCK) — there is no "staff/owner contact"
+  # concept anywhere else in this codebase (no admin-contact entity, no
+  # per-user notification preference) to source this from instead, so a
+  # single, deployment-wide recipient is the only option this ticket can
+  # build against. Empty default, same spirit as whatsapp.api.phone-number-id/
+  # access-token above — no real staff WhatsApp number exists in this dev
+  # environment. See com.farelo.api.notification.StockThresholdNotificationService's
+  # javadoc for the full reasoning and what happens when this is left empty.
+  internal-alert-recipient: ${NOTIFICATION_INTERNAL_ALERT_RECIPIENT:}

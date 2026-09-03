@@ -1,6 +1,8 @@
 package com.farelo.api.outbox;
 
+import com.farelo.api.notification.NotificationType;
 import com.farelo.api.notification.OrderReadyNotificationService;
+import com.farelo.api.notification.StockThresholdNotificationService;
 import com.farelo.api.printing.PrintJobService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,34 +30,71 @@ import java.util.List;
  * created} for that order's customer (or nothing at all, if the order has no
  * {@code customerPhone} — see that class's javadoc) — the {@code ORDER_READY
  * → Notification Worker → WhatsApp} flow from the prompt mestre (seção 19)
- * starts here. Every other event type remains a no-op (see {@link
- * #dispatch(OutboxEvent)}): inventory, the last remaining eventual reader of
- * outbox events named in seção 29, is still a future epic that hasn't
- * started.
+ * starts here.
+ *
+ * <p><strong>Third real consumer (FARELO-113).</strong> A {@code STOCK_LOW}
+ * or {@code OUT_OF_STOCK} event (published by {@code
+ * com.farelo.api.inventory.InventoryMovementService#publishStockThresholdEventIfNeeded})
+ * now results in {@link StockThresholdNotificationService#createForThresholdEvent
+ * a PENDING Notification being created} — of the matching {@link
+ * NotificationType}, addressed to the configured {@code
+ * notification.internal-alert-recipient} — the "notificações internas:
+ * estoque baixo, estoque zerado" flow from the prompt mestre (seção 19)
+ * starts here. See that service's own javadoc for why its content is built
+ * from the event's payload directly rather than a re-fetched {@code
+ * Ingredient}, and why an unconfigured recipient is treated the same way a
+ * missing {@code customerPhone} is above (skip, don't fail the batch).
+ * Every other event type remains a no-op (see {@link #dispatch(OutboxEvent)}).
  *
  * <h2>Dispatch mechanism</h2>
  *
  * {@link #dispatch(OutboxEvent)} is a plain {@code if}/{@code else if} chain
  * on {@code event.getEventType()}, not a pluggable handler registry (e.g. a
  * {@code Map<String, OutboxEventHandler>} looked up by event type). This
- * stayed a YAGNI call even after gaining a second branch here (FARELO-112):
- * two straight-line {@code if} checks, each calling exactly one method on
- * exactly one consumer, is still simpler to read than a registry indirection
- * would be, and neither branch has any behavior in common to factor out (no
- * shared retry policy, no multiple handlers per event type, nothing a
- * registry would actually buy today). The questions a real registry would
- * need to answer — one handler per event type, or several subscribing to the
- * same type? synchronous or queued? how do partial failures across handlers
- * behave, independent of the whole-batch-rollback story below? — still have
- * only one concrete answer each in this codebase's actual usage, not two
- * competing ones to design against. <strong>This should become a real
- * registered-handler mechanism once a third event type or consumer shows
- * up</strong> (e.g. inventory reacting to {@code OrderCreated}, or {@code
- * STOCK_LOW}/{@code STOCK_CRITICAL}/{@code OUT_OF_STOCK} feeding {@code
- * notification} the way {@code OrderReady} does here — both FARELO-113 and
- * beyond) — at that point there would be three real cases (and likely a
- * repeated shape between at least two of them) to design the abstraction
- * against, instead of extrapolating from two.
+ * stayed a YAGNI call after gaining a second branch at FARELO-112, on the
+ * explicit promise that a third event type or consumer would be the point to
+ * revisit it with a real registry. FARELO-113 is that point, materialized
+ * concretely rather than hypothetically — and revisiting it for real (not
+ * just restating the earlier promise) is the honest thing to do here.
+ *
+ * <p>Having actually built it, the concrete shape doesn't change the
+ * conclusion: {@link #dispatch(OutboxEvent)} below is four straight-line
+ * {@code if} branches (one per outbox {@code eventType}, since {@code
+ * STOCK_LOW}/{@code OUT_OF_STOCK} still each get their own branch — see
+ * below), calling into three consumers total. A registry would still need
+ * to answer the same questions this codebase's actual usage still only has
+ * one answer for: exactly one handler per event type (never several
+ * subscribing to the same type), always synchronous, no retry policy shared
+ * across handlers, no partial-failure behavior independent of the
+ * whole-batch-rollback story below. Nothing about crossing from two
+ * consumers to three changed any of that — <strong>the original
+ * heuristic ("revisit at a third consumer") turns out to have been the
+ * wrong trigger to watch</strong>: raw branch count was never actually
+ * predictive of when a registry starts paying for itself; what would
+ * actually justify one is one of those questions above gaining a second,
+ * competing answer (e.g. two handlers legitimately needing to react to the
+ * same event type, or one handler needing real per-event retry/backoff —
+ * which is explicitly FARELO-079's territory, not this one's). That hasn't
+ * happened at three consumers and there's no reason to expect it to happen
+ * at four just because a bigger number was reached. This codebase's own
+ * discipline (see e.g. {@code criticalStock} deferred twice in {@code
+ * inventory}) is to build the abstraction when a second concrete case
+ * actually needs it, not preemptively — the count-based promise above
+ * didn't live up to that discipline as well as it seemed to at the time it
+ * was written, so it's corrected here rather than mechanically honored.
+ *
+ * <p>One thing this ticket's new branch <em>does</em> demonstrate, worth
+ * flagging for whoever eventually does build a registry: {@link
+ * StockThresholdNotificationService#createForThresholdEvent(NotificationType, String)}
+ * needs two arguments derived from the event ({@code NotificationType} and
+ * the raw payload), unlike {@code printJobService.createForOrder(UUID)}/
+ * {@code orderReadyNotificationService.createForOrder(UUID)} which both only
+ * ever need {@code event.getAggregateId()}. A future registry's handler
+ * interface should probably take the whole {@link OutboxEvent}, not just an
+ * aggregate id, so each handler can pull whatever subset of it (id, type,
+ * payload) it actually needs — this ticket didn't design that interface
+ * (see above, still not warranted), but it's a real, concrete data point
+ * for whenever one is.
  *
  * <h2>Failure handling (FARELO-072)</h2>
  *
@@ -156,25 +195,30 @@ public class OutboxWorker {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxWorker.class);
 
-    // The two event types with a real consumer today — see class javadoc,
+    // The event types with a real consumer today — see class javadoc,
     // "Dispatch mechanism", for why this is a plain if/else-if chain rather
     // than a registered-handler lookup.
     private static final String ORDER_CREATED_EVENT_TYPE = "OrderCreated";
     private static final String ORDER_READY_EVENT_TYPE = "OrderReady";
+    private static final String STOCK_LOW_EVENT_TYPE = "STOCK_LOW";
+    private static final String OUT_OF_STOCK_EVENT_TYPE = "OUT_OF_STOCK";
 
     private final OutboxEventRepository outboxEventRepository;
     private final PrintJobService printJobService;
     private final OrderReadyNotificationService orderReadyNotificationService;
+    private final StockThresholdNotificationService stockThresholdNotificationService;
     private final int batchSize;
 
     public OutboxWorker(
             OutboxEventRepository outboxEventRepository,
             PrintJobService printJobService,
             OrderReadyNotificationService orderReadyNotificationService,
+            StockThresholdNotificationService stockThresholdNotificationService,
             @Value("${outbox.worker.batch-size:100}") int batchSize) {
         this.outboxEventRepository = outboxEventRepository;
         this.printJobService = printJobService;
         this.orderReadyNotificationService = orderReadyNotificationService;
+        this.stockThresholdNotificationService = stockThresholdNotificationService;
         this.batchSize = batchSize;
     }
 
@@ -212,13 +256,18 @@ public class OutboxWorker {
 
     // See class javadoc, "Dispatch mechanism", for why this is a plain
     // if/else-if chain instead of a registered-handler lookup. Any event
-    // type other than the two below is a no-op today — there is nothing
+    // type other than the four below is a no-op today — there is nothing
     // else to dispatch to yet.
     private void dispatch(OutboxEvent event) {
         if (ORDER_CREATED_EVENT_TYPE.equals(event.getEventType())) {
             printJobService.createForOrder(event.getAggregateId());
         } else if (ORDER_READY_EVENT_TYPE.equals(event.getEventType())) {
             orderReadyNotificationService.createForOrder(event.getAggregateId());
+        } else if (STOCK_LOW_EVENT_TYPE.equals(event.getEventType())) {
+            stockThresholdNotificationService.createForThresholdEvent(NotificationType.STOCK_LOW, event.getPayload());
+        } else if (OUT_OF_STOCK_EVENT_TYPE.equals(event.getEventType())) {
+            stockThresholdNotificationService.createForThresholdEvent(
+                    NotificationType.OUT_OF_STOCK, event.getPayload());
         }
     }
 
