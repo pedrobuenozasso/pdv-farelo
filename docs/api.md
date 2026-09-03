@@ -1950,4 +1950,54 @@ nenhum que bata com o filtro dado).
 
 Sempre `200 OK` — sem parâmetro de path a validar.
 
+### `GET /api/v1/commands/{number}/payments`
+
+Lista todos os pagamentos registrados contra uma comanda, mais antigo
+primeiro (`createdAt` asc). (FARELO-140)
+
+Somente leitura. **Nenhum produtor real existe ainda** — nada neste ticket
+cria um `Payment` de verdade; registrar pagamento manual (FARELO-141) é um
+ticket futuro e distinto. Sem marca "Requer" — este endpoint não exige
+nenhuma autenticação, mesmo padrão não-protegido de todo endpoint de
+primeiro corte deste projeto até aqui (ver seção "Autenticação/RBAC" acima
+e `docs/domain-model.md`, seção `payment`, para o raciocínio completo dessa
+decisão e da colocação do controller no próprio pacote `payment`, não em
+`command`).
+
+Sem paginação — mesma lógica YAGNI já aplicada em
+`GET /api/v1/commands/{number}/orders`/`GET
+/api/v1/ingredients/{ingredientId}/movements`: o número de pagamentos por
+comanda é naturalmente pequeno (FARELO-142 permite múltiplos, mas não um
+fluxo ilimitado deles).
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+    "commandNumber": 1,
+    "amount": 25.50,
+    "method": "PIX",
+    "createdAt": "2026-09-02T13:00:00Z"
+  }
+]
+```
+
+| Campo | Observações |
+|---|---|
+| `commandNumber` | Número de negócio da comanda (não o `id` técnico) — mesma convenção de `OrderResponse.commandNumber`. |
+| `amount` | `BigDecimal`, sempre positivo — o valor efetivamente pago nesta transação. |
+| `method` | Um de `PIX`/`CREDIT_CARD`/`DEBIT_CARD`/`CASH`/`OTHER`. |
+
+Sem `updatedAt` — este é um registro de ledger, imutável desde a criação
+(ver `docs/domain-model.md`, seção `payment`/`Payment`).
+
+Lista vazia (`[]`) quando a comanda existe mas ainda não tem pagamentos.
+
+**Erros**
+
+- `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
+  `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
+
 _(demais endpoints a preencher conforme implementados)_

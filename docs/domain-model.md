@@ -16,7 +16,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `inventory` | `Ingredient`, `Recipe`, `RecipeItem` (ficha técnica), `InventoryMovement` (ledger) | Em andamento |
 | `recipe` | Ficha técnica de produtos — **implementada dentro do pacote `inventory`** (`Recipe`/`RecipeItem`, FARELO-091/092), não como pacote próprio; linha mantida por rastreabilidade com o roadmap original | Em andamento (ver `inventory`) |
 | `notification` | `Notification`, adapter WhatsApp Cloud API | Em andamento |
-| `payment` | `Payment`, múltiplos pagamentos por comanda | Não iniciado |
+| `payment` | `Payment`, múltiplos pagamentos por comanda | Em andamento |
 | `fiscal` | `FiscalProfile`, `FiscalDocument`, NFC-e (futuro) | Não iniciado |
 | `reporting` | Relatórios e analytics | Não iniciado |
 | `audit` | `AuditLog` de operações sensíveis | Em andamento |
@@ -3371,6 +3371,173 @@ Pacote: `com.farelo.api.notification`.
   eventos nem cria notificação). Mesma convenção anti-flakiness já
   estabelecida — chamadas diretas e determinísticas, nunca `sleep`/espera
   de wall-clock.
+
+## payment
+
+Pacote: `com.farelo.api.payment`.
+
+- **`Payment`** (FARELO-140): entidade JPA — um pagamento registrado contra
+  uma `Command` (comanda), não contra um `Order` individual. Prompt mestre
+  seção 30 modela toda a unidade transacional em torno da comanda (o
+  exemplo de transação ali é sobre *criar um pedido*, mas "COMMIT"/fechar a
+  conta é um evento por comanda, não por pedido isolado), e o próprio Epic
+  10 confirma isso: FARELO-142 ("Permitir múltiplos pagamentos por
+  comanda") e FARELO-143 ("Validar total pago antes de fechar" — antes de
+  `Command` transicionar para `CLOSED`) só fazem sentido se pagamentos são
+  somados por comanda, não por pedido. `id` (UUID, mesma estratégia dos
+  demais domínios), `command` (`@ManyToOne` obrigatório para `Command`),
+  `amount` (`BigDecimal`, coluna `NUMERIC(10,2)` — mesma convenção de
+  dinheiro de `Product.price`/`OrderItem.unitPrice`, nunca `double`/
+  `float`, AGENTS.md), `method` (enum `PaymentMethod`, ver abaixo),
+  `createdAt` (UTC). Tabela criada pela migration
+  `V26__create_payment_table.sql`. Primeira peça do Epic 10 (Pagamentos, ver
+  `docs/PROMPT_MESTRE.md` seção 47) — segue o mesmo padrão "entidade
+  primeiro, produtores/endpoints depois" já usado por `PrintJob`
+  (FARELO-071), `Notification` (FARELO-110), `InventoryMovement`
+  (FARELO-093) e `AuditLog` (FARELO-125) nos seus próprios primeiros
+  tickets.
+
+  **Escopo deste ticket é só a entidade `Payment` em si.** Nada neste
+  código constrói um `Payment` de verdade ainda — FARELO-141 ("Registrar
+  pagamento manual") é quem vai adicionar o primeiro produtor real. Nada
+  soma pagamentos por comanda (FARELO-142) nem valida total pago antes de
+  fechar (FARELO-143) — ambos tickets futuros e distintos. Este ticket não
+  toca `CommandService`/`Command` de forma alguma.
+
+  **Relação com `Command`: `@ManyToOne` unidirecional, espelhando
+  `Order.command`**: `command` é obrigatório, exatamente a mesma forma de
+  `Order#getCommand()` — uma comanda pode ter muitos pagamentos
+  (FARELO-142), todo pagamento pertence a exatamente uma comanda. `Command`
+  não ganhou nenhum `@OneToMany` de volta (checado: o próprio
+  `@ManyToOne` obrigatório de `Order` para `Command` não exigiu nenhuma
+  mudança dentro de `Command` — a relação já é unidirecional lá também). O
+  futuro cálculo de "quanto já foi pago nesta comanda" (FARELO-142/143) vai
+  ler através de `PaymentRepository` (uma consulta derivada/agregada com
+  chave em `command`), do mesmo jeito que
+  `InventoryMovementRepository#sumQuantityByIngredientId` já responde
+  "qual o saldo deste ingrediente" sem `Ingredient` possuir uma coleção
+  própria dos seus movimentos. Um `@OneToMany` bidirecional não traria
+  nada a mais que isso, e adicionaria exatamente o tipo de superfície de
+  gerenciamento de coleção (regras de cascade, orphan removal, armadilhas
+  de coleção lazy) que este código consistentemente evitou para todo outro
+  filho em formato de ledger (`OrderItem`, `InventoryMovement`, `PrintJob`,
+  `AuditLog` — nenhum dos pais deles carrega uma coleção correspondente).
+
+  **`PaymentMethod`**: `PIX`, `CREDIT_CARD`, `DEBIT_CARD`, `CASH`, `OTHER`
+  — a lista **literal e completa** do prompt mestre (seção 47, FARELO-141),
+  usada verbatim. Mesma situação em que `InventoryMovementType`/
+  `NotificationType` já estavam quando viraram enums fechados: o roadmap já
+  nomeia os cinco valores explícita e exaustivamente para esta entidade
+  específica, então é um enum fechado, não uma `String` aberta — não há
+  vocabulário a mais para "adivinhar". Contraste deliberado com
+  `AuditLog.action` (`audit`), que permanece uma `String` aberta
+  especificamente porque *o vocabulário dela* não é conhecido de antemão
+  (cada produtor futuro inventa suas próprias ações) — situação oposta,
+  resposta oposta; ver javadoc de `PaymentMethod` para o raciocínio
+  completo lado a lado.
+
+  **Decisão de desenho — sem campo `status`; append-only, como
+  `InventoryMovement`/`AuditLog`**: prompt mestre seção 30 não dá nenhum
+  vocabulário "pendente"/"confirmado" para um pagamento — o exemplo de
+  transação ali é inteiramente sobre *criar um pedido*, não sobre liquidar
+  uma conta, e nada mais no documento descreve um pagamento passando por
+  estados. FARELO-141 ("Registrar pagamento manual") é explicitamente um
+  humano registrando, depois do fato, que dinheiro/cartão/PIX foi recebido
+  — não um callback assíncrono de gateway de pagamento que começa
+  "pendente" e só depois resolve para "confirmado" ou "falhou", dias
+  depois. No instante em que um pagamento manual é registrado, ele já é um
+  fato completo: o dinheiro trocou de mãos (ou foi decidido que trocou)
+  antes de alguém digitar isso no sistema. É exatamente a situação de
+  `InventoryMovement`/`AuditLog`, não a de `PrintJob` (que tem um ciclo de
+  vida assíncrono genuíno — "enviado a um dispositivo físico, pode falhar"
+  — que de fato justifica um `status`). Por isso `Payment` segue o formato
+  de ledger em vez de um formato com status: toda coluna é
+  `updatable = false`, a classe não expõe setters, e não há uso de
+  `update`/`delete` do repositório em lugar nenhum deste domínio — só
+  `save` para uma linha nova e consultas de leitura (ver
+  `PaymentRepository`). Se um pagamento registrado estiver errado (valor
+  errado, método errado, entrada duplicada), a correção é um novo registro
+  *compensatório*, nunca uma edição do original — mesmo raciocínio já
+  estabelecido no javadoc de `InventoryMovement`, e o mesmo motivo desta
+  classe ter só `createdAt`, sem `updatedAt`: um `updatedAt` que só
+  poderia sempre ser igual a `createdAt` sugeriria que a linha *pode* ser
+  revisada no lugar, exatamente o anti-padrão que um ledger financeiro
+  append-only existe para evitar. Se um caso de uso real de
+  estorno/cancelamento aparecer depois, ele é ele mesmo um fato novo ("este
+  pagamento foi revertido"), não uma mutação da linha original — decisão de
+  um ticket futuro (plausivelmente um `Payment` com método/tipo `REFUND`,
+  ou um campo/entidade dedicado; este ticket não precisa adivinhar qual).
+
+  `PaymentRepository` (Spring Data JPA): `findByCommandOrderByCreatedAtAsc`
+  — consulta com `JOIN FETCH command`, mesmo raciocínio de
+  `OrderRepository#findByCommandOrderByCreatedAtAsc` (a lição do
+  FARELO-055): `open-in-view` é `false` (`application.yml`), e
+  `PaymentResponse#from` lê `payment.getCommand().getNumber()` no
+  controller, depois que a transação (curta) do método do repository já
+  fechou — sem o fetch antecipado, isso seria um proxy lazy não
+  inicializado, `LazyInitializationException` garantido.
+
+  `PaymentService`: só um método, `listByCommand(int)` — resolve o
+  `number` de negócio da comanda via `CommandService#findByNumber` (404
+  `COMMAND_NOT_FOUND`, reaproveitando `CommandNotFoundException` já
+  existente, mesma exceção que `OrderService#listByCommand` já usa) e então
+  lista os pagamentos, mais antigo primeiro. **Sem método `create`**: nada
+  neste ticket produz uma linha de pagamento (ver acima).
+
+  **Endpoint e sua colocação de pacote**: só
+  `GET /api/v1/commands/{number}/payments` (lista os pagamentos da
+  comanda, mais antigo primeiro) — **somente leitura**, mesmo padrão já
+  usado pelo primeiro ticket de `InventoryMovement` (FARELO-093, que
+  construiu um `GET` mínimo antes de qualquer produtor existir — ver essa
+  seção acima para o precedente completo). Implementado em
+  `PaymentController`, **dentro do próprio pacote `payment`**
+  (`com.farelo.api.payment.web`), não em
+  `com.farelo.api.command.web.CommandController` — mesmo raciocínio de
+  direção de dependência que o javadoc de `CommandOrdersController`
+  (`ordering.web`) já documenta para a escolha análoga naquele domínio:
+  `payment` já depende de `command` (`Payment.command` é um `@ManyToOne`
+  obrigatório, e `PaymentService` chama `CommandService` para resolver o
+  `number`), então manter o controller aqui também mantém essa dependência
+  numa direção só. Colocá-lo em `CommandController` faria `command.web`
+  depender de `payment.PaymentService`, uma dependência cross-domain na
+  direção oposta (AGENTS.md: "evitar dependências cruzadas
+  desnecessárias"). Diferente de `CommandOrdersController` — que tinha um
+  precedente irmão existente para seguir (`ordering` já dependia de
+  `command`) — `payment` é um domínio novo em folha, sem nenhuma colocação
+  de controller anterior para reagir; esta é a mesma lógica aplicada do
+  zero, não uma cópia de uma decisão tomada por outro motivo. O caminho da
+  URL é independente de qual classe a atende, então isso não custa nada.
+
+  **Sem `@RequireRole`**: mesmo precedente de "deixar o primeiro endpoint
+  de leitura de um domínio desprotegido" já seguido por `Notification`
+  (FARELO-110) e `AuditLog` (FARELO-125) nos próprios primeiros tickets —
+  não existe ainda um ticket dedicado de aplicação de RBAC para `payment`
+  (contraste com `CommandOrdersController`, protegido só depois, no
+  FARELO-124, um ticket numerado separado).
+
+  **Testes**: `PaymentRepositoryIntegrationTests` (mapeamento JPA contra
+  Postgres real, mesmo formato de
+  `InventoryMovementRepositoryIntegrationTests`/
+  `AuditLogRepositoryIntegrationTests` — cobrindo round-trip contra uma
+  `Command` real, os cinco valores de `PaymentMethod`, e
+  `findByCommandOrderByCreatedAtAsc` ordenado e escopado à comanda certa,
+  sem vazar pagamentos de outra comanda) e
+  `PaymentControllerIntegrationTests` (HTTP real via `MockMvc`, cobrindo
+  lista vazia, `404 COMMAND_NOT_FOUND` para número inexistente, e listagem
+  ordenada/escopada à comanda certa). Usa os números de comanda semeados
+  44-45, 48 (`PaymentRepositoryIntegrationTests`) e 46-47, 49
+  (`PaymentControllerIntegrationTests`) — os próximos livres depois de
+  todos já reservados no restante da suíte (ver javadoc de cada classe
+  para o registro completo). **Nota de isolamento encontrada durante a
+  implementação**: a primeira versão de cada classe reaproveitava o mesmo
+  número de comanda tanto para "não deve vazar pagamento de outra comanda"
+  quanto para "esta comanda não tem nenhum pagamento" — como JUnit não
+  garante ordem entre métodos de teste na mesma classe, o teste que grava
+  um pagamento na "outra comanda" (como fixture do teste de vazamento)
+  podia rodar antes do teste que espera zero pagamentos nela, quebrando a
+  segunda asserção de forma dependente de ordem. Corrigido dedicando um
+  terceiro número de comanda, nunca escrito por nenhum outro teste, só
+  para a asserção de lista vazia.
 
 ## Outbox (infraestrutura cross-cutting)
 
