@@ -21,6 +21,8 @@ import com.farelo.api.printing.PrintJobRetryLimitExceededException;
 import com.farelo.api.security.InvalidCredentialsException;
 import com.farelo.api.security.UserEmailAlreadyExistsException;
 import com.farelo.api.security.UserNotFoundException;
+import com.farelo.api.security.auth.InvalidTokenException;
+import com.farelo.api.security.rbac.InsufficientRoleException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -217,6 +219,30 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     public ErrorResponse handleInvalidCredentials(InvalidCredentialsException ex) {
         return new ErrorResponse("INVALID_CREDENTIALS", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // FARELO-122: com.farelo.api.security.rbac.RoleAuthorizationInterceptor
+    // throws this for a missing/malformed Authorization header or a token
+    // JwtTokenService#parse rejects (bad signature, malformed, expired) —
+    // one generic code/status for every cause, the same "the caller isn't
+    // authenticated, full stop" collapse InvalidTokenException's javadoc
+    // documents. Reachable today only via FARELO-122's dedicated test
+    // controller — no production endpoint requires a token yet (see
+    // RequireRole's javadoc).
+    @ExceptionHandler(InvalidTokenException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ErrorResponse handleInvalidToken(InvalidTokenException ex) {
+        return new ErrorResponse("UNAUTHENTICATED", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // FARELO-122: RoleAuthorizationInterceptor throws this when a caller IS
+    // authenticated (unlike InvalidTokenException above) but their
+    // UserRole isn't one of the handler's @RequireRole-allowed roles — 403,
+    // distinct from the 401 above. Same reachability caveat as above.
+    @ExceptionHandler(InsufficientRoleException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public ErrorResponse handleInsufficientRole(InsufficientRoleException ex) {
+        return new ErrorResponse("FORBIDDEN", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

@@ -1524,8 +1524,13 @@ configurável, sem revogação) e da checagem de credenciais.
 ```
 
 `expiresAt` é UTC. Token de uso futuro como
-`Authorization: Bearer <token>` — nenhum endpoint valida esse header ainda
-(FARELO-123/124).
+`Authorization: Bearer <token>` — o *mecanismo* que valida esse header
+(interceptor + anotação `@RequireRole`) já existe desde FARELO-122, mas
+**nenhum endpoint real o exige ainda**: FARELO-122 é infraestrutura pura,
+provada apenas contra um controller dedicado a teste; decidir quais roles
+podem chamar quais endpoints reais é FARELO-123 (Admin) / FARELO-124 (PDV/
+cozinha). Ver `docs/domain-model.md` (seção `security`, subseção
+FARELO-122) para o desenho completo do mecanismo.
 
 **Erros**
 

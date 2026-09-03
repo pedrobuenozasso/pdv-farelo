@@ -1665,6 +1665,119 @@ Postgres: token emitido é validado de volta para a mesma identidade,
 segredo diferente é rejeitada, token malformado é rejeitado, token já
 expirado é rejeitado).
 
+### FARELO-122 — RBAC (mecanismo de enforcement, ainda não aplicado a nada)
+
+**Este ticket é só o mecanismo, não a política.** Dado um request com um JWT
+(emitido por `POST /api/v1/auth/login`, FARELO-121), este ticket constrói
+(1) como resolver identidade/role do chamador a partir do token e (2) uma
+forma declarativa de um método de controller dizer "só estes `UserRole`
+podem chamar isto" e ter isso de fato aplicado (`401` sem token válido,
+`403` com token válido mas role não permitida). **Nenhum endpoint real
+passa a exigir token depois deste ticket** — decidir *quem* pode chamar
+*qual* endpoint real é explicitamente FARELO-123 (superfície Admin) e
+FARELO-124 (superfície PDV/cozinha), ambos tickets futuros e distintos.
+Pacote: `com.farelo.api.security.rbac`.
+
+**Decisão de mecanismo — `HandlerInterceptor` do Spring MVC puro, ainda sem
+`spring-boot-starter-security`**: mesma restrição já registrada em
+`PasswordEncoderConfig` (FARELO-120) e `JwtTokenService` (FARELO-121) — o
+starter completo autoconfigura, só por estar no classpath, uma cadeia de
+segurança que exige autenticação em toda requisição a menos que um
+`SecurityFilterChain` diga o contrário, o que quebraria instantaneamente
+todo endpoint hoje desprotegido (por desenho, até FARELO-123/124) e
+obrigaria este ticket a pré-decidir a política de `permitAll()` que
+justamente pertence àqueles tickets futuros. Em vez disso: um
+`HandlerInterceptor` (`RoleAuthorizationInterceptor`) registrado via
+`WebMvcConfigurer` (`RbacWebMvcConfig`), sem dependência nova nenhuma —
+`JwtTokenService#parse` (já existente, FARELO-121) faz 100% do trabalho de
+verificação; esta classe é só a fiação HTTP em torno dele (extrair header,
+localizar a anotação, comparar role, converter falha em status HTTP).
+
+**`@RequireRole(UserRole... value)`** — anotação (`RequireRole`,
+`@Target({TYPE, METHOD})`) que marca um método de controller (ou uma classe
+inteira, valendo para todo método sem anotação própria) como restrito a uma
+lista de `UserRole`. **Nível de método tem prioridade sobre nível de
+classe** quando os dois existem — nunca há união das duas listas, sempre a
+anotação mais próxima do método vence. Nenhum controller de produção usa
+esta anotação hoje (ver lista completa abaixo).
+
+**Pipeline do `RoleAuthorizationInterceptor#preHandle`**:
+
+1. Handler não é um `HandlerMethod` (ex.: recurso estático) → passa direto.
+2. Nem o método nem a classe declarante têm `@RequireRole` → passa direto,
+   **sem nunca ler o header `Authorization`** — este é o ponto central da
+   fronteira de escopo deste ticket: qualquer endpoint hoje existente
+   (catálogo, comanda, pedido, impressão, estoque, notificação,
+   usuários/auth) continua acessível exatamente como está, com ou sem
+   header, porque nenhum deles carrega a anotação.
+3. Header `Authorization` ausente ou não no formato `"Bearer <token>"` →
+   `InvalidTokenException` (já existia, FARELO-121, até então não
+   conectada a nenhum handler) → `ApiExceptionHandler` mapeia para `401
+   Unauthorized` / código `UNAUTHENTICATED`.
+4. Header presente mas `JwtTokenService#parse` rejeita o token (assinatura
+   inválida, malformado, expirado) → mesma `InvalidTokenException` → mesmo
+   `401`. Deliberadamente o mesmo resultado de "sem header nenhum": das
+   duas perspectivas o chamador simplesmente não está autenticado.
+5. Token válido, mas `AuthenticatedPrincipal#role()` não está em
+   `@RequireRole#value()` → `InsufficientRoleException` (nova, pacote
+   `security.rbac`) → `ApiExceptionHandler` mapeia para `403 Forbidden` /
+   código `FORBIDDEN`. Diferente do passo 4: aqui a identidade do chamador
+   **é** conhecida, ele só não tem permissão para esta operação.
+6. Sucesso: o `AuthenticatedPrincipal` é guardado como atributo do request
+   e a chamada segue normalmente.
+
+**Tornando o principal disponível ao controller**: um método protegido pode
+simplesmente declarar um parâmetro do tipo `AuthenticatedPrincipal` e
+recebê-lo já resolvido — `AuthenticatedPrincipalArgumentResolver`
+(`HandlerMethodArgumentResolver`, também registrado por `RbacWebMvcConfig`)
+lê o atributo de request deixado pelo interceptor. Mesmo espírito do
+`@AuthenticationPrincipal` do Spring Security, sem precisar da anotação
+(bastou casar pelo tipo, já que nada mais no projeto teria motivo para
+receber um parâmetro `AuthenticatedPrincipal`).
+
+**Nenhum path allowlist/denylist** — o interceptor é registrado sem
+`addPathPatterns`, válido para toda a aplicação; a decisão de agir ou não é
+inteiramente dirigida pela presença de `@RequireRole` no handler resolvido
+pelo Spring MVC, nunca por padrão de URL. Isso evita duas classes de erro
+opostas: esquecer de proteger um endpoint novo sob um prefixo já
+restrito, e — o que mais importa para a fronteira deste ticket — proteger
+sem querer um endpoint existente que nunca deveria ter sido tocado.
+
+**Fronteira de escopo — explicitamente nada está protegido ainda**:
+nenhum controller de produção (`CategoryController`, `ProductController`,
+`CommandController`, `OrderController`, `PrintJobController`,
+`IngredientController`, `RecipeController`, `UserController`,
+`AuthController`, `NotificationController` — todo controller existente
+neste ticket) usa `@RequireRole`. A única prova do mecanismo funcionando é
+via um controller dedicado a teste (`RbacDemoTestController`), que vive em
+`src/test/java` e nunca é empacotado com a aplicação — decidir *quem* pode
+chamar *qual* endpoint real é FARELO-123 (Admin) / FARELO-124 (PDV/cozinha).
+
+Testes:
+
+- `RoleAuthorizationInterceptorTests` — unitário, sem Spring/Postgres:
+  `preHandle` chamado diretamente com `JwtTokenService` mockado e
+  `HandlerMethod`s reais (não mockados — a resolução de anotação faz
+  reflection de verdade) sobre classes fixture locais. Cobre: handler que
+  não é `HandlerMethod`; nem classe nem método anotados; header ausente;
+  header malformado; token rejeitado por `JwtTokenService`; role não
+  permitida; role permitida (e o `AuthenticatedPrincipal` é de fato
+  guardado no atributo do request); anotação de método sobrepondo a de
+  classe (não união).
+- `RoleAuthorizationInterceptorIntegrationTests` — `@SpringBootTest` +
+  `MockMvc` real batendo em `RbacDemoTestController`
+  (`@RequireRole(UserRole.ADMIN)`): sem header → `401`/`UNAUTHENTICATED`;
+  token malformado → `401`; token de usuário com role errada → `403`/
+  `FORBIDDEN`; token de usuário `ADMIN` → `200`, e o corpo da resposta
+  confirma que o `AuthenticatedPrincipal` injetado é o do usuário correto.
+- `RoleAuthorizationInterceptorRegressionIntegrationTests` — **o teste que
+  prova a fronteira de escopo de fato se sustentou**: com o interceptor
+  registrado globalmente, `GET /api/v1/categories` (catálogo),
+  `GET /api/v1/ingredients` (estoque) e `GET /api/v1/notifications`
+  (notificação) — três domínios não relacionados — continuam retornando
+  `200` sem nenhum header `Authorization`, exatamente como antes deste
+  ticket.
+
 ## notification
 
 Pacote: `com.farelo.api.notification`.
