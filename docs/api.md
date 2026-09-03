@@ -976,7 +976,7 @@ com `status: "PENDING"` e `retryCount` incrementado em 1.
 
 ### `POST /api/v1/ingredients`
 
-Cria um ingrediente. (FARELO-090)
+Cria um ingrediente. (FARELO-090; `minimumStock` é FARELO-099)
 
 Primeiro endpoint do domínio `inventory`. Sem `active` no corpo — um
 ingrediente novo sempre começa `true`, mesmo padrão de `Category`/`Product`.
@@ -986,7 +986,8 @@ ingrediente novo sempre começa `true`, mesmo padrão de `Category`/`Product`.
 ```json
 {
   "name": "Leite",
-  "unit": "MILLILITER"
+  "unit": "MILLILITER",
+  "minimumStock": 5000
 }
 ```
 
@@ -994,6 +995,7 @@ ingrediente novo sempre começa `true`, mesmo padrão de `Category`/`Product`.
 |---|---|---|---|
 | `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
 | `unit` | string | sim | Um de `GRAM`/`MILLILITER`/`UNIT` |
+| `minimumStock` | number | não | (FARELO-099) Limite mínimo de estoque, na unidade base do ingrediente. Omitido/`null` = "nenhum limite configurado ainda" (não é o mesmo que um limite `0`). Quando enviado, deve ser `>= 0` (`@DecimalMin`) |
 
 **Response — `201 Created`**
 
@@ -1005,15 +1007,19 @@ Header `Location: /api/v1/ingredients/{id}`.
   "name": "Leite",
   "unit": "MILLILITER",
   "active": true,
+  "minimumStock": 5000,
   "createdAt": "2026-09-02T13:00:00Z",
   "updatedAt": "2026-09-02T13:00:00Z"
 }
 ```
 
+`minimumStock` é `null` quando nenhum limite foi configurado.
+
 **Erros**
 
-- `400 Bad Request` — `name` ausente/em branco ou `unit` ausente/inválido,
-  no formato de erro padrão, com `code: "VALIDATION_ERROR"`.
+- `400 Bad Request` — `name` ausente/em branco, `unit` ausente/inválido, ou
+  `minimumStock` negativo, no formato de erro padrão, com
+  `code: "VALIDATION_ERROR"`.
 
 ### `GET /api/v1/ingredients`
 
@@ -1033,6 +1039,7 @@ futuro se o Admin precisar).
     "name": "Leite",
     "unit": "MILLILITER",
     "active": true,
+    "minimumStock": 5000,
     "createdAt": "2026-09-02T13:00:00Z",
     "updatedAt": "2026-09-02T13:00:00Z"
   }
@@ -1056,7 +1063,8 @@ Mesmo formato de item de `GET /api/v1/ingredients`.
 
 ### `PUT /api/v1/ingredients/{id}`
 
-Atualiza (substituição completa) um ingrediente existente. (FARELO-090)
+Atualiza (substituição completa) um ingrediente existente. (FARELO-090;
+`minimumStock` é FARELO-099)
 
 Fecha o CRUD básico de `Ingredient` — sem `DELETE` por enquanto (fora do
 roadmap atual). Mesmo raciocínio de `PUT /api/v1/products/{id}`: usa um DTO
@@ -1070,7 +1078,8 @@ criação.
 {
   "name": "Leite integral",
   "unit": "MILLILITER",
-  "active": true
+  "active": true,
+  "minimumStock": 5000
 }
 ```
 
@@ -1079,6 +1088,7 @@ criação.
 | `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
 | `unit` | string | sim | Um de `GRAM`/`MILLILITER`/`UNIT` |
 | `active` | boolean | sim | |
+| `minimumStock` | number | não | (FARELO-099) Mesma regra do `POST` acima. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um limite configurado anteriormente de volta para "não configurado" — não deixa o valor anterior inalterado, mesmo comportamento que `Product.productionStation` já tem em `PUT /api/v1/products/{id}` |
 
 **Response — `200 OK`**
 
@@ -1377,7 +1387,7 @@ Lista vazia (`[]`) quando o ingrediente existe mas ainda não tem movimentos.
 Calcula e retorna o saldo atual de estoque de um ingrediente — a soma de
 todas as linhas do seu ledger (`InventoryMovement`), nunca um campo mutável
 armazenado (`docs/domain-model.md`, seção `inventory`, prompt mestre seção
-13). (FARELO-095)
+13). (FARELO-095; `belowMinimum` é FARELO-099)
 
 **Response — `200 OK`**
 
@@ -1385,7 +1395,8 @@ armazenado (`docs/domain-model.md`, seção `inventory`, prompt mestre seção
 {
   "ingredientId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
   "balance": 2200,
-  "unit": "GRAM"
+  "unit": "GRAM",
+  "belowMinimum": false
 }
 ```
 
@@ -1393,6 +1404,7 @@ armazenado (`docs/domain-model.md`, seção `inventory`, prompt mestre seção
 |---|---|
 | `balance` | Soma de todo `quantity` do ledger desse ingrediente, na unidade base do `Ingredient`; `0` (nunca `null`) quando não há nenhum movimento ainda |
 | `unit` | A unidade do próprio ingrediente (`Ingredient.unit`), incluída para o cliente interpretar `balance` sem uma segunda chamada a `GET /api/v1/ingredients/{id}` |
+| `belowMinimum` | (FARELO-099) `true` quando `balance` está **estritamente abaixo** de `Ingredient.minimumStock` — um saldo exatamente igual ao limite não conta como abaixo dele. Sempre `false` quando o ingrediente não tem `minimumStock` configurado (`null`), **mesmo com saldo negativo** — sem limite configurado, este ingrediente nunca é reportado como baixo |
 
 **Erros**
 

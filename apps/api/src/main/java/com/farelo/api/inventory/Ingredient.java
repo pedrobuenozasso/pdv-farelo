@@ -10,6 +10,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.UuidGenerator;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -28,6 +29,18 @@ import java.util.UUID;
  * approach already taken for {@code Printer} (FARELO-070): add fields when a
  * concrete ticket needs them, not speculatively (AGENTS.md: não criar
  * abstrações prematuras).
+ *
+ * <p><b>FARELO-099 ("Criar estoque mínimo", prompt mestre seção 17) added
+ * {@link #minimumStock}</b> — see that field's own javadoc for the full
+ * design (nullable vs. defaulting-to-zero, and how it's read alongside
+ * {@link InventoryMovementService#getBalance}). {@code currentStock} is
+ * deliberately still absent: that concept is already the ledger-derived
+ * balance ({@link InventoryMovementService#getBalance}, FARELO-095), never a
+ * stored/mutable column (prompt mestre seção 13 — "O saldo deve ser
+ * rastreável... nunca editado diretamente"). {@code criticalStock} (also
+ * named in prompt mestre seção 17) remains out of scope too — a distinct,
+ * unscheduled future ticket, not something FARELO-099 anticipates
+ * speculatively.
  *
  * <p>Id generation: same strategy as {@code Category}/{@code Product}/
  * {@code Printer} — Hibernate 6.6's {@code @UuidGenerator} only supports
@@ -52,6 +65,40 @@ public class Ingredient {
 
     @Column(name = "active", nullable = false)
     private boolean active = true;
+
+    /**
+     * FARELO-099 ("Criar estoque mínimo"): the minimum-stock threshold below
+     * which this ingredient is considered low. {@code NULL} — not {@code
+     * ZERO} — means "no threshold configured yet"; a configured threshold of
+     * exactly {@code 0} is itself a legitimate, deliberate choice (e.g. "flag
+     * this ingredient the moment its balance goes negative") and must stay
+     * distinguishable from "nobody has set a threshold for this ingredient at
+     * all". This reads naturally alongside {@link
+     * InventoryMovementService#getBalance}'s existing design: a balance of
+     * {@code 0} already means something specific ("no movements yet", per
+     * {@code IngredientBalance}'s javadoc) distinct from a missing value, so
+     * the same nullable-means-"not set" convention is used here rather than
+     * silently defaulting every ingredient to a {@code 0} threshold (which
+     * would misleadingly claim someone had already decided a real value for
+     * every ingredient, including ones nobody has configured). See {@link
+     * IngredientBalance#isBelowMinimum()} for how this is actually compared
+     * against a computed balance — {@code NULL} always means "never flagged
+     * low", regardless of balance (including a negative one, reachable per
+     * {@code InventoryMovementService#consumeForOrder}'s "no
+     * stock-sufficiency check" design, FARELO-096/097).
+     *
+     * <p>{@code NUMERIC(12,3)} — same precision/scale as {@code
+     * RecipeItem.quantity}/{@code InventoryMovement.quantity}, so it compares
+     * directly against a computed balance without any scale mismatch.
+     * Settable via {@code POST /api/v1/ingredients} (creation, optional) and
+     * {@code PUT /api/v1/ingredients/{id}} (full replace — can also send
+     * {@code null} to explicitly clear a previously-configured threshold),
+     * same "optional field with no unambiguous default, so {@code PUT} must
+     * be able to send {@code null} to clear it" shape already used by {@code
+     * Product.productionStation}/{@code ProductUpdateRequest.productionStation}.
+     */
+    @Column(name = "minimum_stock", precision = 12, scale = 3)
+    private BigDecimal minimumStock;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -106,6 +153,14 @@ public class Ingredient {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public BigDecimal getMinimumStock() {
+        return minimumStock;
+    }
+
+    public void setMinimumStock(BigDecimal minimumStock) {
+        this.minimumStock = minimumStock;
     }
 
     public OffsetDateTime getCreatedAt() {

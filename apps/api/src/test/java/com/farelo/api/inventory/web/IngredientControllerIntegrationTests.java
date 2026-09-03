@@ -15,12 +15,14 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -283,6 +285,128 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
                 {
                   "name": "Leite",
                   "unit": "MILLILITER"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    // --- FARELO-099 ("Criar estoque mínimo") ---
+
+    @Test
+    void createsIngredientWithMinimumStockAndPersistsIt() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/ingredients")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Café em grão", "unit": "GRAM", "minimumStock": 5000}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.minimumStock").value(5000))
+                .andReturn();
+
+        IngredientResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), IngredientResponse.class);
+
+        Optional<Ingredient> persisted = ingredientRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getMinimumStock()).isEqualByComparingTo("5000");
+    }
+
+    @Test
+    void createsIngredientWithoutMinimumStockLeavesItUnconfigured() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/ingredients")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Chocolate em pó", "unit": "GRAM"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.minimumStock").value(nullValue()))
+                .andReturn();
+
+        IngredientResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), IngredientResponse.class);
+
+        Optional<Ingredient> persisted = ingredientRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getMinimumStock()).isNull();
+    }
+
+    @Test
+    void rejectsNegativeMinimumStockOnCreateWithStandardErrorFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/ingredients")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Leite", "unit": "MILLILITER", "minimumStock": -1}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void updateSetsMinimumStockAndPersistsIt() throws Exception {
+        Ingredient ingredient = ingredientRepository.save(new Ingredient("Farinha", IngredientUnit.GRAM));
+
+        String body = """
+                {
+                  "name": "Farinha",
+                  "unit": "GRAM",
+                  "active": true,
+                  "minimumStock": 2000
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.minimumStock").value(2000));
+
+        Optional<Ingredient> persisted = ingredientRepository.findById(ingredient.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getMinimumStock()).isEqualByComparingTo("2000");
+    }
+
+    @Test
+    void updateWithoutMinimumStockClearsPreviouslyConfiguredThreshold() throws Exception {
+        Ingredient ingredient = ingredientRepository.save(new Ingredient("Manteiga", IngredientUnit.GRAM));
+        ingredient.setMinimumStock(new BigDecimal("500"));
+        ingredientRepository.save(ingredient);
+
+        String body = """
+                {
+                  "name": "Manteiga",
+                  "unit": "GRAM",
+                  "active": true
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.minimumStock").value(nullValue()));
+
+        Optional<Ingredient> persisted = ingredientRepository.findById(ingredient.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getMinimumStock()).isNull();
+    }
+
+    @Test
+    void rejectsNegativeMinimumStockOnUpdateWithStandardErrorFormat() throws Exception {
+        Ingredient ingredient = ingredientRepository.save(new Ingredient("Leite", IngredientUnit.MILLILITER));
+
+        String body = """
+                {
+                  "name": "Leite",
+                  "unit": "MILLILITER",
+                  "active": true,
+                  "minimumStock": -100
                 }
                 """;
 
