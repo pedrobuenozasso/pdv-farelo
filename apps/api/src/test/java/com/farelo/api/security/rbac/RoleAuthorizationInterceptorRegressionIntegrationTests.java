@@ -7,6 +7,9 @@ import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductRepository;
 import com.farelo.api.command.CommandRepository;
 import com.farelo.api.command.CommandStatus;
+import com.farelo.api.inventory.Ingredient;
+import com.farelo.api.inventory.IngredientRepository;
+import com.farelo.api.inventory.IngredientUnit;
 import com.farelo.api.ordering.OrderItemRepository;
 import com.farelo.api.ordering.OrderRepository;
 import com.farelo.api.ordering.OrderStatusHistoryRepository;
@@ -28,6 +31,7 @@ import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -83,6 +87,28 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@link #markFailedStillWorksWithNoAuthorizationHeader()}) still work with
  * no token at all, exactly as documented in {@code CommandController}/
  * {@code OrderController}/{@code PrintJobController}'s javadocs.
+ *
+ * <h2>FARELO-127 — the first (and only) two {@code inventory} write
+ * endpoints to gain {@code @RequireRole}</h2>
+ *
+ * Unlike FARELO-122/123/124, this ticket reaches into {@code inventory} —
+ * but narrowly: only {@code InventoryMovementController#create} ({@code
+ * POST .../movements}) and {@code #recordLoss} ({@code POST .../losses})
+ * (see that controller's javadoc, and {@code
+ * InventoryMovementService#recordAudit}'s javadoc, for the full "why RBAC
+ * here" writeup). {@link #stockPurchaseCreationNowRequiresAuthentication()}/
+ * {@link #stockLossRecordingNowRequiresAuthentication()} prove the new
+ * boundary; {@link #inventoryMovementListingStillWorksWithNoAuthorizationHeader()},
+ * {@link #inventoryMovementBalanceStillWorksWithNoAuthorizationHeader()},
+ * {@link #ingredientsListingStillWorksWithNoAuthorizationHeader()} (already
+ * present since FARELO-122), {@link
+ * #ingredientCreationStillWorksWithNoAuthorizationHeader()} and {@link
+ * #ingredientUpdateStillWorksWithNoAuthorizationHeader()} prove this
+ * ticket's blast radius stopped exactly there: the rest of {@code
+ * InventoryMovementController} and the entirety of {@code
+ * IngredientController} remain exactly as unprotected as before this
+ * ticket ({@code RecipeController} was never touched at all, by this ticket
+ * or any earlier one).
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -129,6 +155,9 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private IngredientRepository ingredientRepository;
 
     // orderCreationStillWorksWithNoAuthorizationHeader() below creates a
     // Category/Product/Order/OrderItem (and, once its OrderCreated outbox
@@ -197,6 +226,96 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
     void ingredientsListingStillWorksWithNoAuthorizationHeader() throws Exception {
         mockMvc.perform(get("/api/v1/ingredients"))
                 .andExpect(status().isOk());
+    }
+
+    // FARELO-127: IngredientController itself is still completely untouched
+    // by this ticket — only two InventoryMovementController write endpoints
+    // gained @RequireRole (see this class's own javadoc, "FARELO-127"
+    // section). This is the test that would fail if that boundary were ever
+    // accidentally widened to IngredientController's own writes.
+    @Test
+    void ingredientCreationStillWorksWithNoAuthorizationHeader() throws Exception {
+        String body = """
+                {
+                  "name": "Ingrediente Regressão FARELO-127",
+                  "unit": "GRAM"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/ingredients")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void ingredientUpdateStillWorksWithNoAuthorizationHeader() throws Exception {
+        Ingredient ingredient = ingredientRepository.save(
+                new Ingredient("Ingrediente Regressão FARELO-127 (update)", IngredientUnit.GRAM));
+
+        String body = """
+                {
+                  "name": "Ingrediente Regressão FARELO-127 (renomeado)",
+                  "unit": "GRAM",
+                  "active": true
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+    }
+
+    // FARELO-127: GET .../movements/GET .../balance on the very same
+    // controller as the two now-protected writes stay deliberately
+    // unannotated — see InventoryMovementController's javadoc.
+    @Test
+    void inventoryMovementListingStillWorksWithNoAuthorizationHeader() throws Exception {
+        Ingredient ingredient = ingredientRepository.save(
+                new Ingredient("Ingrediente Regressão FARELO-127 (movements)", IngredientUnit.GRAM));
+
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/movements", ingredient.getId()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void inventoryMovementBalanceStillWorksWithNoAuthorizationHeader() throws Exception {
+        Ingredient ingredient = ingredientRepository.save(
+                new Ingredient("Ingrediente Regressão FARELO-127 (balance)", IngredientUnit.GRAM));
+
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", ingredient.getId()))
+                .andExpect(status().isOk());
+    }
+
+    // FARELO-127: the new boundary itself — POST .../movements now requires
+    // a token, unlike every other endpoint proven "still public" above/below.
+    @Test
+    void stockPurchaseCreationNowRequiresAuthentication() throws Exception {
+        Ingredient ingredient = ingredientRepository.save(
+                new Ingredient("Ingrediente Regressão FARELO-127 (purchase 401)", IngredientUnit.GRAM));
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", ingredient.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 100}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    void stockLossRecordingNowRequiresAuthentication() throws Exception {
+        Ingredient ingredient = ingredientRepository.save(
+                new Ingredient("Ingrediente Regressão FARELO-127 (loss 401)", IngredientUnit.GRAM));
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", ingredient.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 50}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
 
     @Test

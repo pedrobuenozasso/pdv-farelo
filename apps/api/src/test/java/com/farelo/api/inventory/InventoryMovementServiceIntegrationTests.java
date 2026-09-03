@@ -1,6 +1,8 @@
 package com.farelo.api.inventory;
 
 import com.farelo.api.AbstractIntegrationTest;
+import com.farelo.api.audit.AuditLog;
+import com.farelo.api.audit.AuditLogRepository;
 import com.farelo.api.catalog.Category;
 import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
@@ -12,12 +14,17 @@ import com.farelo.api.ordering.OrderRepository;
 import com.farelo.api.outbox.OutboxEvent;
 import com.farelo.api.outbox.OutboxEventRepository;
 import com.farelo.api.outbox.OutboxEventStatus;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -29,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Verifies {@link InventoryMovementService#create(UUID, BigDecimal)}
+ * Verifies {@link InventoryMovementService#create(UUID, BigDecimal, UUID)}
  * (FARELO-094, "Criar entrada manual de estoque") and {@link
  * InventoryMovementService#consumeForOrder(UUID, List)} (FARELO-096,
  * "Consumir receita ao criar pedido") directly, against a real PostgreSQL
@@ -40,6 +47,20 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@code OrderInventoryConsumptionIntegrationTests}' job for FARELO-096
  * (the full HTTP order-creation flow producing these same rows as a side
  * effect).
+ *
+ * <p><b>FARELO-127</b>: {@link InventoryMovementService#create}/{@link
+ * InventoryMovementService#recordLoss} now require an {@code actorId} — see
+ * {@link #actorId} below, a real persisted {@link User} created once per
+ * test in {@link #createActor()} (needed because {@code
+ * InventoryMovementService#recordAudit} resolves it via {@code
+ * UserService#getById}, which 404s for an id with no backing row). Every
+ * pre-existing call to either method in this class was updated to pass it
+ * — this class's own tests are about {@code consumeForOrder}/the
+ * FARELO-100/101 threshold logic, not auditing, so the same actor is reused
+ * everywhere rather than minted per assertion. The {@code *RecordsAuditLog*}
+ * tests below are the ones that actually exercise the FARELO-127 behavior
+ * itself, and {@link #consumeForOrderNeverRecordsAnAuditLog()} proves the
+ * one thing this ticket explicitly does <b>not</b> audit.
  *
  * <p>No {@code @BeforeEach} table cleanup — same reasoning as {@code
  * InventoryMovementRepositoryIntegrationTests}: every test creates its own
@@ -79,12 +100,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <p><b>FARELO-098</b> ("Criar movimento de perda") added the {@code
  * *Loss*}/{@code balanceReflectsRecordedLoss} tests below, covering {@link
- * InventoryMovementService#recordLoss(UUID, BigDecimal)}: a positive input
- * quantity lands as a negative {@code LOSS} row with no {@code orderId},
- * an unknown ingredient 404s the same way {@link
- * InventoryMovementService#create(UUID, BigDecimal)} already does, and the
- * derived balance ({@link InventoryMovementService#getBalance}) goes down
- * accordingly.
+ * InventoryMovementService#recordLoss(UUID, BigDecimal, UUID)}: a positive
+ * input quantity lands as a negative {@code LOSS} row with no {@code
+ * orderId}, an unknown ingredient 404s the same way {@link
+ * InventoryMovementService#create(UUID, BigDecimal, UUID)} already does,
+ * and the derived balance ({@link InventoryMovementService#getBalance})
+ * goes down accordingly.
  *
  * <p><b>FARELO-100/101</b> ("Publicar STOCK_LOW"/"Publicar OUT_OF_STOCK")
  * added the {@code *StockLow*}/{@code *OutOfStock*}/{@code
@@ -161,6 +182,15 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private AuditLogRepository auditLogRepository;
+
     // Tracks every RecipeItem this test class creates, so cleanUpRecipeItems
     // below can delete exactly those rows — see this class's javadoc for
     // why that's necessary here specifically.
@@ -171,6 +201,22 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     // this class itself published (aggregateType "Ingredient", aggregateId
     // in this list) — see this class's javadoc for why targeted, not blind.
     private final List<UUID> stockEventIngredientIds = new ArrayList<>();
+
+    // FARELO-127: a real, persisted User backing every create()/recordLoss()
+    // call in this class — see this class's own javadoc for why this is
+    // needed now that both methods require a real actorId.
+    private User actor;
+    private UUID actorId;
+
+    @BeforeEach
+    void createActor() {
+        actor = userRepository.save(new User(
+                "Test Actor (InventoryMovementServiceIntegrationTests)",
+                "test-actor-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode("senha-forte-123"),
+                UserRole.ADMIN));
+        actorId = actor.getId();
+    }
 
     @AfterEach
     void cleanUpRecipeItems() {
@@ -241,7 +287,7 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void createsPurchaseMovementLinkedToIngredient() {
         Ingredient coffee = createIngredient("Café em grão", IngredientUnit.GRAM);
 
-        InventoryMovement created = inventoryMovementService.create(coffee.getId(), new BigDecimal("2000"));
+        InventoryMovement created = inventoryMovementService.create(coffee.getId(), new BigDecimal("2000"), actorId);
 
         assertThat(created.getId()).isNotNull();
         assertThat(created.getType()).isEqualTo(InventoryMovementType.PURCHASE);
@@ -261,7 +307,7 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void throwsIngredientNotFoundWhenCreatingMovementForUnknownIngredient() {
         UUID missingIngredientId = UUID.randomUUID();
 
-        assertThatThrownBy(() -> inventoryMovementService.create(missingIngredientId, BigDecimal.TEN))
+        assertThatThrownBy(() -> inventoryMovementService.create(missingIngredientId, BigDecimal.TEN, actorId))
                 .isInstanceOf(IngredientNotFoundException.class);
 
         assertThat(inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(missingIngredientId)).isEmpty();
@@ -508,7 +554,8 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void recordsLossMovementWithNegatedQuantityAndNoOrderId() {
         Ingredient coffee = createIngredient("Café em grão (FARELO-098 svc)", IngredientUnit.GRAM);
 
-        InventoryMovement recorded = inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("150"));
+        InventoryMovement recorded = inventoryMovementService.recordLoss(
+                coffee.getId(), new BigDecimal("150"), actorId);
 
         assertThat(recorded.getId()).isNotNull();
         assertThat(recorded.getType()).isEqualTo(InventoryMovementType.LOSS);
@@ -529,7 +576,7 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void throwsIngredientNotFoundWhenRecordingLossForUnknownIngredient() {
         UUID missingIngredientId = UUID.randomUUID();
 
-        assertThatThrownBy(() -> inventoryMovementService.recordLoss(missingIngredientId, BigDecimal.TEN))
+        assertThatThrownBy(() -> inventoryMovementService.recordLoss(missingIngredientId, BigDecimal.TEN, actorId))
                 .isInstanceOf(IngredientNotFoundException.class);
 
         assertThat(inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(missingIngredientId)).isEmpty();
@@ -543,8 +590,8 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void balanceReflectsRecordedLoss() {
         Ingredient cocoa = createIngredient("Cacau em pó (FARELO-098 svc balance)", IngredientUnit.GRAM);
 
-        inventoryMovementService.create(cocoa.getId(), new BigDecimal("2000"));
-        inventoryMovementService.recordLoss(cocoa.getId(), new BigDecimal("300"));
+        inventoryMovementService.create(cocoa.getId(), new BigDecimal("2000"), actorId);
+        inventoryMovementService.recordLoss(cocoa.getId(), new BigDecimal("300"), actorId);
 
         // 2000 - 300 = 1700
         IngredientBalance balance = inventoryMovementService.getBalance(cocoa.getId());
@@ -558,9 +605,9 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void recordLossThatLeavesBalanceBelowMinimumButPositivePublishesOnlyStockLow() throws Exception {
         Ingredient coffee = createIngredientWithMinimumStock(
                 "Café em grão (FARELO-100 svc below-minimum)", IngredientUnit.GRAM, new BigDecimal("500"));
-        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"));
+        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"), actorId);
 
-        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600"));
+        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600"), actorId);
 
         // 1000 - 600 = 400, below the 500 threshold but still positive.
         List<OutboxEvent> stockLowEvents = stockEventsFor(coffee.getId(), "STOCK_LOW");
@@ -584,9 +631,9 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void recordLossThatDrainsBalanceToExactlyZeroPublishesOnlyOutOfStock() {
         Ingredient milk = createIngredientWithMinimumStock(
                 "Leite (FARELO-101 svc zero)", IngredientUnit.MILLILITER, new BigDecimal("500"));
-        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"));
+        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"), actorId);
 
-        inventoryMovementService.recordLoss(milk.getId(), new BigDecimal("1000"));
+        inventoryMovementService.recordLoss(milk.getId(), new BigDecimal("1000"), actorId);
 
         assertThat(stockEventsFor(milk.getId(), "OUT_OF_STOCK")).hasSize(1);
         assertThat(stockEventsFor(milk.getId(), "STOCK_LOW")).isEmpty();
@@ -599,9 +646,9 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void recordLossThatDrainsBalanceNegativePublishesOutOfStock() {
         Ingredient sugar = createIngredientWithMinimumStock(
                 "Açúcar (FARELO-101 svc negative)", IngredientUnit.GRAM, null);
-        inventoryMovementService.create(sugar.getId(), new BigDecimal("200"));
+        inventoryMovementService.create(sugar.getId(), new BigDecimal("200"), actorId);
 
-        inventoryMovementService.recordLoss(sugar.getId(), new BigDecimal("300"));
+        inventoryMovementService.recordLoss(sugar.getId(), new BigDecimal("300"), actorId);
 
         // 200 - 300 = -100.
         List<OutboxEvent> outOfStockEvents = stockEventsFor(sugar.getId(), "OUT_OF_STOCK");
@@ -617,9 +664,9 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void ingredientWithNoThresholdStillPublishesOutOfStockWhenBalanceHitsZero() {
         Ingredient cups = createIngredientWithMinimumStock(
                 "Copo 300ml (FARELO-101 svc no-threshold)", IngredientUnit.UNIT, null);
-        inventoryMovementService.create(cups.getId(), new BigDecimal("50"));
+        inventoryMovementService.create(cups.getId(), new BigDecimal("50"), actorId);
 
-        inventoryMovementService.recordLoss(cups.getId(), new BigDecimal("50"));
+        inventoryMovementService.recordLoss(cups.getId(), new BigDecimal("50"), actorId);
 
         assertThat(stockEventsFor(cups.getId(), "OUT_OF_STOCK")).hasSize(1);
         assertThat(stockEventsFor(cups.getId(), "STOCK_LOW")).isEmpty();
@@ -632,9 +679,9 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void ingredientWithNoThresholdAndPositiveBalanceNeverPublishesAnyStockEvent() {
         Ingredient tea = createIngredientWithMinimumStock(
                 "Chá (FARELO-100 svc no-threshold positive)", IngredientUnit.GRAM, null);
-        inventoryMovementService.create(tea.getId(), new BigDecimal("1000"));
+        inventoryMovementService.create(tea.getId(), new BigDecimal("1000"), actorId);
 
-        inventoryMovementService.recordLoss(tea.getId(), new BigDecimal("200"));
+        inventoryMovementService.recordLoss(tea.getId(), new BigDecimal("200"), actorId);
 
         // 1000 - 200 = 800, positive, no threshold configured at all.
         assertThat(stockEventsFor(tea.getId(), "STOCK_LOW")).isEmpty();
@@ -649,8 +696,8 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void createNeverPublishesStockThresholdEvents() {
         Ingredient coffee = createIngredientWithMinimumStock(
                 "Café em grão (FARELO-100 svc purchase)", IngredientUnit.GRAM, new BigDecimal("500"));
-        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"));
-        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600"));
+        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"), actorId);
+        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600"), actorId);
 
         // Balance now 400, below the 500 threshold — the LOSS above already
         // published one STOCK_LOW event.
@@ -659,7 +706,7 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
         // A PURCHASE that still leaves the balance below the threshold
         // (400 + 10 = 410 < 500) must not publish a second event — create()
         // never even calls the threshold check.
-        inventoryMovementService.create(coffee.getId(), new BigDecimal("10"));
+        inventoryMovementService.create(coffee.getId(), new BigDecimal("10"), actorId);
 
         assertThat(stockEventsFor(coffee.getId(), "STOCK_LOW")).hasSize(1);
         assertThat(stockEventsFor(coffee.getId(), "OUT_OF_STOCK")).isEmpty();
@@ -674,10 +721,10 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void repeatedLossMovementsBelowThresholdEachPublishTheirOwnStockLowEvent() {
         Ingredient coffee = createIngredientWithMinimumStock(
                 "Café em grão (FARELO-100 svc repeated)", IngredientUnit.GRAM, new BigDecimal("500"));
-        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"));
+        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"), actorId);
 
-        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600")); // 400, below 500
-        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("50")); // 350, still below 500
+        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600"), actorId); // 400, below 500
+        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("50"), actorId); // 350, still below 500
 
         assertThat(stockEventsFor(coffee.getId(), "STOCK_LOW")).hasSize(2);
     }
@@ -689,7 +736,7 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void consumeForOrderThatLeavesBalanceBelowMinimumPublishesStockLow() {
         Ingredient milk = createIngredientWithMinimumStock(
                 "Leite (FARELO-100 svc consume)", IngredientUnit.MILLILITER, new BigDecimal("200"));
-        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"));
+        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"), actorId);
 
         Product latte = createActiveProduct("Café com leite (FARELO-100 svc consume)");
         Recipe recipe = createActiveRecipe(latte);
@@ -710,7 +757,7 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void consumeForOrderThatDrainsBalanceToZeroPublishesOutOfStock() {
         Ingredient milk = createIngredientWithMinimumStock(
                 "Leite (FARELO-101 svc consume zero)", IngredientUnit.MILLILITER, new BigDecimal("200"));
-        inventoryMovementService.create(milk.getId(), new BigDecimal("300"));
+        inventoryMovementService.create(milk.getId(), new BigDecimal("300"), actorId);
 
         Product latte = createActiveProduct("Café com leite (FARELO-101 svc consume zero)");
         Recipe recipe = createActiveRecipe(latte);
@@ -732,7 +779,7 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
     void retryOfConsumeForOrderDoesNotPublishAdditionalStockEvent() {
         Ingredient milk = createIngredientWithMinimumStock(
                 "Leite (FARELO-100 svc retry)", IngredientUnit.MILLILITER, new BigDecimal("200"));
-        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"));
+        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"), actorId);
 
         Product latte = createActiveProduct("Café com leite (FARELO-100 svc retry)");
         Recipe recipe = createActiveRecipe(latte);
@@ -748,6 +795,80 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
         // so no new event either.
         inventoryMovementService.consumeForOrder(orderId, items);
         assertThat(stockEventsFor(milk.getId(), "STOCK_LOW")).hasSize(1);
+    }
+
+    // --- FARELO-127: auditing a manual stock adjustment --------------------
+
+    @Test
+    void createRecordsAuditLogWithActorAndPurchaseSnapshot() throws Exception {
+        Ingredient coffee = createIngredient("Café em grão (FARELO-127 svc purchase)", IngredientUnit.GRAM);
+
+        InventoryMovement movement = inventoryMovementService.create(coffee.getId(), new BigDecimal("2000"), actorId);
+
+        List<AuditLog> auditLogs = auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
+                "Ingredient", coffee.getId());
+        assertThat(auditLogs).hasSize(1);
+
+        AuditLog auditLog = auditLogs.get(0);
+        assertThat(auditLog.getAction()).isEqualTo("STOCK_PURCHASE_RECORDED");
+        assertThat(auditLog.getEntityType()).isEqualTo("Ingredient");
+        assertThat(auditLog.getEntityId()).isEqualTo(coffee.getId());
+        assertThat(auditLog.getUserId()).isEqualTo(actor.getId());
+        assertThat(auditLog.getUserName()).isEqualTo(actor.getName());
+        assertThat(auditLog.getUserEmail()).isEqualTo(actor.getEmail());
+        assertThat(auditLog.getPreviousValue()).isNull();
+
+        JsonNode newValue = objectMapper.readTree(auditLog.getNewValue());
+        assertThat(newValue.get("type").asText()).isEqualTo("PURCHASE");
+        assertThat(new BigDecimal(newValue.get("quantity").asText())).isEqualByComparingTo("2000");
+        assertThat(movement.getType()).isEqualTo(InventoryMovementType.PURCHASE);
+    }
+
+    @Test
+    void recordLossRecordsAuditLogWithActorAndLossSnapshot() throws Exception {
+        Ingredient coffee = createIngredient("Café em grão (FARELO-127 svc loss)", IngredientUnit.GRAM);
+
+        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("250"), actorId);
+
+        List<AuditLog> auditLogs = auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
+                "Ingredient", coffee.getId());
+        assertThat(auditLogs).hasSize(1);
+
+        AuditLog auditLog = auditLogs.get(0);
+        assertThat(auditLog.getAction()).isEqualTo("STOCK_LOSS_RECORDED");
+        assertThat(auditLog.getUserId()).isEqualTo(actor.getId());
+        assertThat(auditLog.getPreviousValue()).isNull();
+
+        JsonNode newValue = objectMapper.readTree(auditLog.getNewValue());
+        assertThat(newValue.get("type").asText()).isEqualTo("LOSS");
+        // recordLoss() negates the reported magnitude before writing the
+        // ledger row — the audit snapshot must reflect the signed value
+        // actually persisted (-250), not the 250 the caller passed in.
+        assertThat(new BigDecimal(newValue.get("quantity").asText())).isEqualByComparingTo("-250");
+    }
+
+    // FARELO-127 — consumeForOrder is an automatic, order-driven consequence
+    // of a sale, not a manual human adjustment, and has no meaningful actor
+    // to attribute it to (it's triggered by OrderService#create, never
+    // called directly by a staff member) — see this class's javadoc and
+    // InventoryMovementService's own top-level javadoc for the full
+    // reasoning. It must never produce an AuditLog row, even though it does
+    // write InventoryMovement rows and can trip the FARELO-100/101 stock
+    // threshold events.
+    @Test
+    void consumeForOrderNeverRecordsAnAuditLog() {
+        Ingredient milk = createIngredient("Leite (FARELO-127 svc consumeForOrder)", IngredientUnit.MILLILITER);
+        Product latte = createActiveProduct("Café com leite (FARELO-127 svc consumeForOrder)");
+        Recipe recipe = createActiveRecipe(latte);
+        addRecipeItem(recipe, milk, new BigDecimal("150"));
+
+        UUID orderId = createOrderId();
+        List<InventoryMovement> movements = inventoryMovementService.consumeForOrder(
+                orderId, List.of(new OrderItemConsumption(latte.getId(), 2)));
+        assertThat(movements).hasSize(1);
+
+        assertThat(auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc("Ingredient", milk.getId()))
+                .isEmpty();
     }
 
 }

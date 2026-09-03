@@ -16,7 +16,7 @@ Este documento é preenchido conforme cada endpoint é criado.
 }
 ```
 
-### Autenticação/RBAC (FARELO-121/122/123/124)
+### Autenticação/RBAC (FARELO-121/122/123/124/127)
 
 A maioria dos endpoints abaixo não exige nenhuma autenticação — esse é o
 padrão do projeto até aqui (ver `docs/domain-model.md`, seção `security`).
@@ -50,17 +50,23 @@ mestre). Quando um endpoint marcado assim é chamado:
 
 Um endpoint **sem** a marca "Requer" continua acessível sem nenhum header,
 exatamente como sempre foi — inclusive depois do FARELO-123 (que adicionou
-a marca a alguns endpoints de `categories`/`products`/`users`) e do
+a marca a alguns endpoints de `categories`/`products`/`users`), do
 FARELO-124 (que adicionou a marca a alguns endpoints de `commands`/
-`orders`/`print-jobs` — a superfície PDV/cozinha; ver essas seções abaixo e
-o raciocínio completo em `docs/domain-model.md`, subseções FARELO-123 e
-FARELO-124). Dois casos seguem deliberadamente sem a marca mesmo depois do
-FARELO-124: os dois endpoints que o Cardápio QR (cliente anônimo, sem
-login) depende diretamente (`GET /api/v1/commands/{number}`,
-`POST /api/v1/orders`), e três dos quatro endpoints de `print-jobs`, que
-são chamados só pelo Farelo Edge Agent — uma máquina, não uma pessoa
-logada (ver a subseção FARELO-124 de `docs/domain-model.md` para o porquê
-de RBAC não se aplicar a um endpoint machine-to-machine).
+`orders`/`print-jobs` — a superfície PDV/cozinha) e do FARELO-127 (que
+adicionou a marca a exatamente dois endpoints de `ingredients` — ver essas
+seções abaixo e o raciocínio completo em `docs/domain-model.md`, subseções
+FARELO-123, FARELO-124 e FARELO-127). Dois casos seguem deliberadamente sem
+a marca mesmo depois do FARELO-124: os dois endpoints que o Cardápio QR
+(cliente anônimo, sem login) depende diretamente
+(`GET /api/v1/commands/{number}`, `POST /api/v1/orders`), e três dos quatro
+endpoints de `print-jobs`, que são chamados só pelo Farelo Edge Agent — uma
+máquina, não uma pessoa logada (ver a subseção FARELO-124 de
+`docs/domain-model.md` para o porquê de RBAC não se aplicar a um endpoint
+machine-to-machine). O restante de `ingredients` (todo `GET`, `POST`/`PUT`
+de ingredientes em si) e todo `recipes` seguem sem a marca mesmo depois do
+FARELO-127 — ver a subseção FARELO-127 de `docs/domain-model.md` para por
+que esse ticket protegeu só dois endpoints, não a superfície de estoque
+inteira.
 
 ## Endpoints
 
@@ -1394,6 +1400,14 @@ confirmando que estoque chegou fisicamente (uma compra). Sempre cria uma
 linha `InventoryMovement` do tipo `PURCHASE` com `quantity` positiva.
 (FARELO-094)
 
+**Requer: `ADMIN`, `MANAGER`** (FARELO-127) — ver a seção "Autenticação/RBAC"
+acima para o formato do header e das respostas `401`/`403`. Também grava
+uma linha em `AuditLog` (`action: "STOCK_PURCHASE_RECORDED"`,
+`entityType: "Ingredient"`) com o ator resolvido do token — ver
+`docs/domain-model.md`, seção `inventory`/FARELO-127, para o raciocínio
+completo (por que este endpoint precisou ganhar RBAC, e o formato exato do
+snapshot de auditoria).
+
 **Request body**
 
 ```json
@@ -1511,6 +1525,13 @@ uma quantidade de um ingrediente foi perdida — estragou, quebrou, foi
 roubada — não uma venda. Sempre cria uma linha `InventoryMovement` do tipo
 `LOSS` com `quantity` **negativa** (saída de estoque) e sem `orderId` (não
 tem origem em pedido). (FARELO-098)
+
+**Requer: `ADMIN`, `MANAGER`** (FARELO-127) — ver a seção "Autenticação/RBAC"
+acima para o formato do header e das respostas `401`/`403`. Também grava
+uma linha em `AuditLog` (`action: "STOCK_LOSS_RECORDED"`,
+`entityType: "Ingredient"`) com o ator resolvido do token — mesmo
+raciocínio de `POST .../movements` acima; ver `docs/domain-model.md`, seção
+`inventory`/FARELO-127.
 
 **Request body**
 

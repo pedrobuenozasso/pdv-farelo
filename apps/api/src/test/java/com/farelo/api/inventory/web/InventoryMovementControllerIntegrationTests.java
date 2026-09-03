@@ -1,6 +1,8 @@
 package com.farelo.api.inventory.web;
 
 import com.farelo.api.AbstractIntegrationTest;
+import com.farelo.api.audit.AuditLog;
+import com.farelo.api.audit.AuditLogRepository;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandRepository;
 import com.farelo.api.inventory.Ingredient;
@@ -11,12 +13,18 @@ import com.farelo.api.inventory.InventoryMovementRepository;
 import com.farelo.api.inventory.InventoryMovementType;
 import com.farelo.api.ordering.Order;
 import com.farelo.api.ordering.OrderRepository;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -50,6 +58,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * ingredient and only asserts on data scoped to that specific ingredient's
  * id, so leftover rows from other test classes never affect an assertion
  * here.
+ *
+ * <p><b>FARELO-127</b>: {@code POST .../movements}/{@code POST .../losses}
+ * now require {@link UserRole#ADMIN}/{@link UserRole#MANAGER} (see {@code
+ * InventoryMovementController}'s javadoc), so every {@code POST} here mints
+ * a real token via {@link #tokenFor}/{@link #userAndTokenFor} and sends it
+ * as {@code Authorization: Bearer <token>} — same pattern {@code
+ * ProductControllerIntegrationTests} established for FARELO-123/126. {@code
+ * GET .../movements}/{@code GET .../balance} are deliberately left with
+ * <b>no</b> header anywhere in this class — see the controller javadoc for
+ * why they stay unprotected. The {@code *RecordsAuditLog*}/{@code
+ * *401*}/{@code *403*} tests below are new for FARELO-127; every
+ * pre-existing {@code POST .../movements}/{@code POST .../losses} test was
+ * updated in place to send a token, without otherwise changing what it
+ * asserts.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -77,6 +99,47 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
+    @Autowired
+    private AuditLogRepository auditLogRepository;
+
+    private static final String PASSWORD = "senha-forte-123";
+
+    // FARELO-127: same tokenFor(UserRole)/userAndTokenFor(UserRole, String)
+    // pair ProductControllerIntegrationTests established for FARELO-123/126
+    // — tokenFor() is enough for tests that only need *a* valid caller;
+    // userAndTokenFor() also hands back the persisted User itself, needed by
+    // the audit tests below to assert the AuditLog row's userName/userEmail
+    // snapshot actually matches the caller who made the request.
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Test User",
+                "test-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD),
+                role));
+        return jwtTokenService.issue(user).token();
+    }
+
+    private record AuthenticatedTestUser(User user, String token) {
+    }
+
+    private AuthenticatedTestUser userAndTokenFor(UserRole role, String name) {
+        User user = userRepository.save(new User(
+                name,
+                "test-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD),
+                role));
+        return new AuthenticatedTestUser(user, jwtTokenService.issue(user).token());
+    }
 
     private Ingredient createIngredient(String name, IngredientUnit unit) {
         return ingredientRepository.save(new Ingredient(name, unit));
@@ -106,6 +169,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         Ingredient beans = createIngredient("Feijão", IngredientUnit.GRAM);
 
         MvcResult result = mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", beans.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": 3000}
@@ -134,6 +198,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         UUID missingIngredientId = UUID.randomUUID();
 
         mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", missingIngredientId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": 100}
@@ -149,6 +214,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         Ingredient rice = createIngredient("Arroz", IngredientUnit.GRAM);
 
         mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", rice.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": 0}
@@ -166,6 +232,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         Ingredient salt = createIngredient("Sal", IngredientUnit.GRAM);
 
         mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", salt.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": -50}
@@ -181,6 +248,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         Ingredient pepper = createIngredient("Pimenta", IngredientUnit.GRAM);
 
         mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", pepper.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
@@ -381,6 +449,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         Ingredient beans = createIngredient("Feijão (FARELO-098)", IngredientUnit.GRAM);
 
         MvcResult result = mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", beans.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": 250}
@@ -410,6 +479,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         UUID missingIngredientId = UUID.randomUUID();
 
         mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", missingIngredientId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": 100}
@@ -425,6 +495,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         Ingredient rice = createIngredient("Arroz (FARELO-098)", IngredientUnit.GRAM);
 
         mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", rice.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": 0}
@@ -442,6 +513,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         Ingredient salt = createIngredient("Sal (FARELO-098)", IngredientUnit.GRAM);
 
         mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", salt.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": -50}
@@ -457,6 +529,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         Ingredient pepper = createIngredient("Pimenta (FARELO-098)", IngredientUnit.GRAM);
 
         mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", pepper.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
@@ -473,6 +546,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         Ingredient sugar = createIngredient("Açúcar (FARELO-098 balance)", IngredientUnit.GRAM);
 
         mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", sugar.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": 5000}
@@ -480,6 +554,7 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", sugar.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": 800}
@@ -492,6 +567,168 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                 .andExpect(jsonPath("$.ingredientId").value(sugar.getId().toString()))
                 .andExpect(jsonPath("$.balance").value(4200))
                 .andExpect(jsonPath("$.unit").value("GRAM"));
+    }
+
+    // --- FARELO-127: RBAC on POST .../movements, POST .../losses ----------
+
+    @Test
+    void rejectsCreateMovementWithoutAuthorizationHeader() throws Exception {
+        Ingredient beans = createIngredient("Feijão (FARELO-127 401)", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", beans.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 100}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsCreateMovementWhenCallerRoleIsNotAllowed() throws Exception {
+        Ingredient beans = createIngredient("Feijão (FARELO-127 403)", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", beans.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 100}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsRecordLossWithoutAuthorizationHeader() throws Exception {
+        Ingredient beans = createIngredient("Feijão (FARELO-127 losses 401)", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", beans.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 50}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsRecordLossWhenCallerRoleIsNotAllowed() throws Exception {
+        Ingredient beans = createIngredient("Feijão (FARELO-127 losses 403)", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", beans.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 50}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // Manager, not just Admin, may record purchases/losses — same "back-
+    // office staff, not the top role alone" judgment call FARELO-123 made
+    // for ProductController/CategoryController (see
+    // InventoryMovementService#recordAudit's javadoc for the full role
+    // reasoning).
+    @Test
+    void allowsManagerToCreateMovement() throws Exception {
+        Ingredient beans = createIngredient("Feijão (FARELO-127 manager)", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", beans.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 100}
+                                """))
+                .andExpect(status().isCreated());
+    }
+
+    // --- FARELO-127: auditing a manual stock adjustment --------------------
+
+    @Test
+    void creatingPurchaseMovementRecordsAuditLogWithActorAndSnapshot() throws Exception {
+        Ingredient beans = createIngredient("Feijão (FARELO-127 audit purchase)", IngredientUnit.GRAM);
+        AuthenticatedTestUser actor = userAndTokenFor(UserRole.ADMIN, "Gerente Ana");
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", beans.getId())
+                        .header("Authorization", "Bearer " + actor.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 3000}
+                                """))
+                .andExpect(status().isCreated());
+
+        List<AuditLog> auditLogs = auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
+                "Ingredient", beans.getId());
+        assertThat(auditLogs).hasSize(1);
+
+        AuditLog auditLog = auditLogs.get(0);
+        assertThat(auditLog.getAction()).isEqualTo("STOCK_PURCHASE_RECORDED");
+        assertThat(auditLog.getUserId()).isEqualTo(actor.user().getId());
+        assertThat(auditLog.getUserName()).isEqualTo("Gerente Ana");
+        assertThat(auditLog.getUserEmail()).isEqualTo(actor.user().getEmail());
+        assertThat(auditLog.getPreviousValue()).isNull();
+
+        JsonNode newValue = objectMapper.readTree(auditLog.getNewValue());
+        assertThat(newValue.get("type").asText()).isEqualTo("PURCHASE");
+        assertThat(new BigDecimal(newValue.get("quantity").asText())).isEqualByComparingTo("3000");
+    }
+
+    @Test
+    void recordingLossRecordsAuditLogWithActorAndSnapshot() throws Exception {
+        Ingredient beans = createIngredient("Feijão (FARELO-127 audit loss)", IngredientUnit.GRAM);
+        AuthenticatedTestUser actor = userAndTokenFor(UserRole.MANAGER, "Gerente Bruno");
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", beans.getId())
+                        .header("Authorization", "Bearer " + actor.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 250}
+                                """))
+                .andExpect(status().isCreated());
+
+        List<AuditLog> auditLogs = auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
+                "Ingredient", beans.getId());
+        assertThat(auditLogs).hasSize(1);
+
+        AuditLog auditLog = auditLogs.get(0);
+        assertThat(auditLog.getAction()).isEqualTo("STOCK_LOSS_RECORDED");
+        assertThat(auditLog.getUserId()).isEqualTo(actor.user().getId());
+        assertThat(auditLog.getUserName()).isEqualTo("Gerente Bruno");
+        assertThat(auditLog.getPreviousValue()).isNull();
+
+        JsonNode newValue = objectMapper.readTree(auditLog.getNewValue());
+        assertThat(newValue.get("type").asText()).isEqualTo("LOSS");
+        assertThat(new BigDecimal(newValue.get("quantity").asText())).isEqualByComparingTo("-250");
+    }
+
+    @Test
+    void auditLogForStockAdjustmentIsQueryableViaAuditLogsEndpoint() throws Exception {
+        Ingredient beans = createIngredient("Feijão (FARELO-127 audit query)", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", beans.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 500}
+                                """))
+                .andExpect(status().isCreated());
+
+        // GET /api/v1/audit-logs stays unprotected at its own first ticket
+        // (FARELO-125) — no Authorization header here on purpose, same as
+        // every other test exercising that endpoint.
+        mockMvc.perform(get("/api/v1/audit-logs")
+                        .param("entityType", "Ingredient")
+                        .param("entityId", beans.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].action").value("STOCK_PURCHASE_RECORDED"))
+                .andExpect(jsonPath("$[0].entityType").value("Ingredient"))
+                .andExpect(jsonPath("$[0].entityId").value(beans.getId().toString()));
     }
 
 }

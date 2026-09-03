@@ -2,6 +2,9 @@ package com.farelo.api.inventory.web;
 
 import com.farelo.api.inventory.InventoryMovement;
 import com.farelo.api.inventory.InventoryMovementService;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.AuthenticatedPrincipal;
+import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,6 +35,24 @@ import java.util.UUID;
  * recording that stock physically arrived), always creating a {@code
  * PURCHASE} row. It is deliberately not a generic "create any movement
  * type" endpoint — see {@link InventoryMovementRequest}'s javadoc.
+ *
+ * <p><b>FARELO-127</b>: {@link #create} and {@link #recordLoss} now require
+ * {@link UserRole#ADMIN}/{@link UserRole#MANAGER} and declare an {@link
+ * AuthenticatedPrincipal} parameter — the first {@code @RequireRole} usage
+ * anywhere in this controller (or in {@code IngredientController}/{@code
+ * RecipeController}, which remain completely untouched). This is a
+ * narrow, deliberate exception to {@code RequireRole}'s own javadoc, which
+ * had listed the whole {@code inventory} write surface as "out of scope for
+ * both FARELO-123 and FARELO-124... a distinct future ticket": auditing a
+ * stock adjustment (this ticket) requires knowing who performed it, and
+ * there is no reliable "who" without a real, server-verified caller
+ * identity — see {@code InventoryMovementService#recordAudit}'s javadoc for
+ * the full three-option writeup (why a client-supplied actor id was
+ * rejected, and why this is scoped to exactly these two endpoints, not the
+ * whole controller or the sibling {@code Ingredient}/{@code Recipe}
+ * controllers). {@link #list}/{@link #getBalance} below stay deliberately
+ * <b>unannotated</b> — read access to the ledger/balance carries none of
+ * this ticket's actor-attribution requirement and was never in scope.
  *
  * <p><b>{@code GET .../balance} (FARELO-095)</b>: class-level {@code
  * @RequestMapping} was widened from {@code .../movements} to just {@code
@@ -74,12 +95,22 @@ public class InventoryMovementController {
         this.inventoryMovementService = inventoryMovementService;
     }
 
+    // AuthenticatedPrincipal (FARELO-127): this method is @RequireRole-
+    // protected, so RoleAuthorizationInterceptor always populates one before
+    // this handler runs (see AuthenticatedPrincipalArgumentResolver's
+    // javadoc). Only principal.userId() is forwarded — InventoryMovementService
+    // resolves it to a real User and records the audit entry itself; see
+    // InventoryMovementService#recordAudit's javadoc for why that decision
+    // lives there, not here.
     @PostMapping("/movements")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
     public ResponseEntity<InventoryMovementResponse> create(
             @PathVariable UUID ingredientId,
             @Valid @RequestBody InventoryMovementRequest request,
-            UriComponentsBuilder uriComponentsBuilder) {
-        InventoryMovement movement = inventoryMovementService.create(ingredientId, request.quantity());
+            UriComponentsBuilder uriComponentsBuilder,
+            AuthenticatedPrincipal principal) {
+        InventoryMovement movement = inventoryMovementService.create(
+                ingredientId, request.quantity(), principal.userId());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/ingredients/{ingredientId}/movements/{id}")
@@ -111,12 +142,19 @@ public class InventoryMovementController {
     // its own, it's only recoverable via the ledger listing endpoint above
     // (which lists every type, LOSS included), so that's the URL that
     // actually resolves.
+    //
+    // AuthenticatedPrincipal (FARELO-127): same reasoning as create() above
+    // — this method is @RequireRole-protected, so a principal is always
+    // populated; only principal.userId() is forwarded.
     @PostMapping("/losses")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
     public ResponseEntity<InventoryMovementResponse> recordLoss(
             @PathVariable UUID ingredientId,
             @Valid @RequestBody InventoryLossRequest request,
-            UriComponentsBuilder uriComponentsBuilder) {
-        InventoryMovement movement = inventoryMovementService.recordLoss(ingredientId, request.quantity());
+            UriComponentsBuilder uriComponentsBuilder,
+            AuthenticatedPrincipal principal) {
+        InventoryMovement movement = inventoryMovementService.recordLoss(
+                ingredientId, request.quantity(), principal.userId());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/ingredients/{ingredientId}/movements/{id}")

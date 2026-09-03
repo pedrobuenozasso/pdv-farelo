@@ -10,12 +10,16 @@ import com.farelo.api.notification.NotificationRepository;
 import com.farelo.api.notification.NotificationStatus;
 import com.farelo.api.notification.NotificationType;
 import com.farelo.api.notification.NotificationWorker;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -99,11 +103,33 @@ class OutboxWorkerStockThresholdIntegrationTests extends AbstractIntegrationTest
     @Autowired
     private NotificationWorker notificationWorker;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
     private UUID createdIngredientId;
+
+    // FARELO-127: InventoryMovementService#create/#recordLoss now require a
+    // real actorId (see InventoryMovementServiceIntegrationTests' javadoc
+    // for why) — this class's own tests are about the outbox/notification
+    // pipeline, not auditing, so a single reused actor is enough.
+    private UUID actorId;
 
     @BeforeEach
     void resetStubToSucceed() {
         nextResponseStatus.set(200);
+    }
+
+    @BeforeEach
+    void createActor() {
+        User actor = userRepository.save(new User(
+                "Test Actor (OutboxWorkerStockThresholdIntegrationTests)",
+                "test-actor-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode("senha-forte-123"),
+                UserRole.ADMIN));
+        actorId = actor.getId();
     }
 
     @AfterEach
@@ -130,7 +156,7 @@ class OutboxWorkerStockThresholdIntegrationTests extends AbstractIntegrationTest
     void stockLowEventuallyResultsInASentInternalNotification() {
         Ingredient coffee = createIngredientWithMinimumStock(
                 "Café em grão (FARELO-113 outbox stock-low)", IngredientUnit.GRAM, new BigDecimal("500"));
-        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"));
+        inventoryMovementService.create(coffee.getId(), new BigDecimal("1000"), actorId);
 
         // Drains the PURCHASE-caused OrderCreated/other events, if any —
         // none expected here (create() never publishes a stock-threshold
@@ -142,7 +168,7 @@ class OutboxWorkerStockThresholdIntegrationTests extends AbstractIntegrationTest
         // 1000 - 600 = 400, below the 500 threshold but still positive —
         // publishes STOCK_LOW (see InventoryMovementServiceIntegrationTests'
         // equivalent unit-level test for the payload shape itself).
-        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600"));
+        inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("600"), actorId);
 
         List<OutboxEvent> processed = outboxWorker.processPendingEvents();
         assertThat(processed).anySatisfy(event -> assertThat(event.getEventType()).isEqualTo("STOCK_LOW"));
@@ -168,13 +194,13 @@ class OutboxWorkerStockThresholdIntegrationTests extends AbstractIntegrationTest
     void outOfStockEventuallyResultsInASentInternalNotification() {
         Ingredient milk = createIngredientWithMinimumStock(
                 "Leite (FARELO-113 outbox out-of-stock)", IngredientUnit.MILLILITER, new BigDecimal("500"));
-        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"));
+        inventoryMovementService.create(milk.getId(), new BigDecimal("1000"), actorId);
         outboxWorker.processPendingEvents();
 
         // Drains the balance to exactly 0 — OUT_OF_STOCK, not STOCK_LOW
         // (precedence already proven at the service-level test; this test's
         // job is only the outbox-to-notification wiring).
-        inventoryMovementService.recordLoss(milk.getId(), new BigDecimal("1000"));
+        inventoryMovementService.recordLoss(milk.getId(), new BigDecimal("1000"), actorId);
 
         List<OutboxEvent> processed = outboxWorker.processPendingEvents();
         assertThat(processed).anySatisfy(event -> assertThat(event.getEventType()).isEqualTo("OUT_OF_STOCK"));
@@ -200,7 +226,7 @@ class OutboxWorkerStockThresholdIntegrationTests extends AbstractIntegrationTest
         // A PURCHASE only ever increases stock — can never cross into
         // low/out-of-stock territory (see publishStockThresholdEventIfNeeded's
         // javadoc: create() deliberately never calls it).
-        inventoryMovementService.create(tea.getId(), new BigDecimal("100"));
+        inventoryMovementService.create(tea.getId(), new BigDecimal("100"), actorId);
 
         List<OutboxEvent> processed = outboxWorker.processPendingEvents();
         assertThat(processed).noneSatisfy(
