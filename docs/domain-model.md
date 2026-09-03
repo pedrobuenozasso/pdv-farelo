@@ -2117,6 +2117,175 @@ Pacote: `com.farelo.api.inventory`.
   (`cleanUpStockEvents`) remove só os `OutboxEvent`s publicados para esses
   ingredientes especificamente — sem `deleteAll()` cego em `outbox_event`.
 
+  ### FARELO-127 — Auditar ajuste de estoque
+
+  Liga `AuditLogService#record` (`com.farelo.api.audit`, FARELO-125) a
+  `InventoryMovementService`'s dois produtores *manuais* de
+  `InventoryMovement`: `create` (FARELO-094, entrada manual/`PURCHASE`) e
+  `recordLoss` (FARELO-098, perda/`LOSS`). Mesmo padrão "entidade primeiro,
+  produtores depois" já usado por `AuditLog` (FARELO-125) e o precedente
+  direto FARELO-126 ("Auditar alteração de preço", `ProductService#update`),
+  agora aplicado ao segundo dos dois produtores que o próprio javadoc de
+  `AuditLog` já antecipava por nome.
+
+  **Escopo — `create`/`recordLoss`, explicitamente não `consumeForOrder`**:
+  `consumeForOrder` (FARELO-096/097) é uma consequência automática e
+  disparada pelo sistema de uma venda — chamado por `OrderService#create`,
+  nunca diretamente por um funcionário — não um "alguém ajustou o estoque"
+  manual. Auditá-lo também não teria um ator humano significativo para
+  atribuir a linha (é disparado por dentro da criação de um pedido, não por
+  uma chamada de um funcionário logado). `InventoryMovementService`'s
+  javadoc de topo e o de `recordAudit` documentam essa fronteira
+  explicitamente; um teste dedicado
+  (`consumeForOrderNeverRecordsAnAuditLog`, em
+  `InventoryMovementServiceIntegrationTests`) prova que nenhuma linha de
+  auditoria é criada mesmo quando `consumeForOrder` grava movimentos de
+  estoque de verdade.
+
+  #### A decisão real deste ticket — resolvendo "quem" fez o ajuste
+
+  Diferente de `ProductController#update` (já protegido por `@RequireRole`
+  desde o FARELO-123, então sempre tinha um `AuthenticatedPrincipal`
+  disponível), nem `IngredientController` nem `InventoryMovementController`
+  carregavam RBAC antes deste ticket — o próprio javadoc de `RequireRole`
+  listava os dois explicitamente como fora do escopo de FARELO-123 *e*
+  FARELO-124 ("uma superfície... fora de escopo para os dois... um ticket
+  futuro e distinto"). Sem um ator autenticado de verdade, não existe "quem"
+  confiável para uma linha de auditoria registrar. Três opções foram
+  avaliadas:
+
+  1. **Adicionar `@RequireRole` só aos dois endpoints que este ticket audita**
+     (`POST /api/v1/ingredients/{id}/movements` e
+     `POST /api/v1/ingredients/{id}/losses` — não o restante de
+     `InventoryMovementController`, nem uma vírgula de
+     `IngredientController`/`RecipeController`) — **escolhida**. É a única
+     opção que produz um "quem" digno de confiança: `actorId` vem de um
+     `AuthenticatedPrincipal` real, verificado pelo servidor (mesmo
+     mecanismo JWT/`RoleAuthorizationInterceptor` já em produção desde
+     FARELO-122/123), exatamente como `ProductController#update` já faz.
+  2. **Aceitar um id de ator como parâmetro/campo do corpo da requisição, sem
+     adicionar RBAC** — considerada e **rejeitada**. Qualquer chamador
+     poderia se declarar qualquer usuário; nada verificaria que o id
+     informado é de fato quem está chamando. Um audit log existe
+     especificamente para responder "quem realmente fez isto" — um que
+     confia numa identidade autodeclarada e não verificada não responde essa
+     pergunta, só registra o que o cliente digitou. Isso seria pior que não
+     ter auditoria nenhuma: uma coluna "quem" que parece confiável mas não é
+     engana mais do que a ausência dela.
+  3. Deixar os dois endpoints sem autenticação e não auditar `create`/
+     `recordLoss` até um hipotético ticket futuro "proteger endpoints de
+     Ingredient" existir — considerada e **rejeitada**: FARELO-127 pede
+     explicitamente para auditar esses dois métodos agora; adiar para um
+     ticket não agendado seria simplesmente não fazer o ticket em questão.
+     Nada sugere que "Estoque"/"Compras"/"Perdas" (seção 21 do prompt
+     mestre, módulos Admin nomeados ao lado de "Produtos"/"Categorias"/
+     "Usuários") devessem continuar em aberto por mais tempo que esses
+     últimos.
+
+  A opção 1 foi escolhida, e aplicada de forma cirúrgica: só
+  `InventoryMovementController#create`/`#recordLoss` ganharam
+  `@RequireRole` — os `GET`s do mesmo controller (`.../movements`,
+  `.../balance`) e todo `IngredientController`/`RecipeController`
+  continuam exatamente tão desprotegidos quanto antes. Mesma restrição
+  "só o necessário" já aplicada por FARELO-123/124 (`GET
+  /api/v1/categories`/`GET /api/v1/products`/`GET
+  /api/v1/commands/{number}`/`POST /api/v1/orders` continuaram públicos
+  mesmo quando o resto do controller ganhou RBAC). Este é o ticket que
+  acaba adicionando RBAC a `inventory` — mas só a duas rotas específicas,
+  não "proteger Ingredient/Recipe" como um todo (que continua sem dono,
+  exatamente como o javadoc de `RequireRole` já registrava).
+
+  **Papéis — `ADMIN`, `MANAGER`** (mesmo par do FARELO-123 para
+  `ProductController`/`CategoryController`): "Estoque"/"Compras"/"Perdas"
+  são módulos Admin nomeados ao lado de "Produtos"/"Categorias" (seção 21
+  do prompt mestre), então o mesmo raciocínio "um gerente de turno precisa
+  fazer isso rotineiramente sem depender da conta do dono/admin" se aplica
+  aqui igualmente. Diferente de `UserController` (FARELO-123, que restringe
+  escrita a `ADMIN` sozinho por causa do risco de escalonamento de
+  privilégio via o campo `role`), nenhum dos dois endpoints aqui pode ser
+  usado para conceder mais acesso a ninguém — não há razão para restringir
+  além de `ADMIN`+`MANAGER`.
+
+  #### Naming — `action`/`entityType`
+
+  `entityType = "Ingredient"` (o mesmo `entityType` que
+  `GET /api/v1/audit-logs?entityType=Ingredient&entityId=...` já espera,
+  seguindo a convenção "nome de entidade simples" documentada no javadoc de
+  `AuditLog`). `action`: `"STOCK_PURCHASE_RECORDED"` (de `create`) e
+  `"STOCK_LOSS_RECORDED"` (de `recordLoss`) — nomeados a partir dos próprios
+  valores de `InventoryMovementType` (`PURCHASE`/`LOSS`) em vez de um único
+  `"STOCK_ADJUSTED"` genérico, para que um revisor da trilha de auditoria
+  distinga uma compra de uma perda sem precisar abrir
+  `previousValue`/`newValue`. Constantes `String` simples na classe (mesmo
+  padrão de `AUDIT_ACTION_PRICE_CHANGED` em `ProductService`), não um enum
+  compartilhado — mesmo raciocínio "vocabulário aberto, definido por
+  produtor" do próprio javadoc de `AuditLog` ("Design decision 3").
+
+  #### Formato do snapshot — sem `previousValue`, `newValue` descreve o movimento
+
+  Diferente de uma alteração de preço (um escalar com "antes"/"depois"
+  genuínos — o mesmo campo `Product.price` em dois momentos),
+  `InventoryMovement` é ele mesmo um ledger append-only (ver seu próprio
+  javadoc, "Append-only, never mutated") — nada em `Ingredient` é
+  sobrescrito quando `create`/`recordLoss` roda; um fato novo é anexado a um
+  ledger que nunca teve um "valor atual" mutável para servir de "antes".
+  **Decisão: `previousValue` é sempre `null`** para as duas ações — não há
+  nada análogo a "o preço antigo" para capturar aqui. `newValue` é um
+  snapshot pequeno, `InventoryMovementSnapshot(type, quantity)` —
+  serializado (mesmo padrão "record + `writeValueAsString`" de
+  `ProductPriceSnapshot`/FARELO-126) para exatamente
+  `{"type": "PURCHASE", "quantity": 3000}` (ou `{"type": "LOSS", "quantity":
+  -250}` — o `quantity` assinado exatamente como gravado na linha do
+  ledger, não renormalizado para uma magnitude).
+
+  **Por que `resultingBalance` foi deixado de fora, deliberadamente**:
+  considerado e rejeitado. Incluí-lo exigiria uma consulta `SUM(quantity)`
+  extra a cada chamada auditada — para `create()` especificamente, uma
+  consulta que esse método hoje não tem nenhum outro motivo para rodar
+  (diferente de `recordLoss()`, que já calcula o saldo resultante
+  internamente para a checagem de limite do FARELO-100/101,
+  `publishStockThresholdEventIfNeeded` nunca é chamado por `create()` — ver
+  seu próprio javadoc: uma `PURCHASE` nunca pode cruzar para dentro do
+  território baixo/zerado). Pagar esse custo em toda escrita auditada (não
+  só na rara leitura da trilha de auditoria) para economizar uma consulta a
+  mais de um revisor não é uma troca que o texto deste ticket pediu — e
+  incluí-lo só em `recordLoss()` (onde seria quase de graça) deixaria os
+  snapshots dos dois produtores com formatos inconsistentes sem motivo
+  real. Mesma disciplina YAGNI já estabelecida no restante deste domínio
+  (ex: `Ingredient.criticalStock` deliberadamente não adicionado junto de
+  `minimumStock`, FARELO-099). Um consumidor futuro que queira "o saldo no
+  momento deste ajuste auditado" ainda consegue obtê-lo — não deste
+  snapshot, mas lendo o ledger até (e incluindo) `AuditLog.createdAt`,
+  continuando totalmente derivável como a seção 13 do prompt mestre exige.
+  Ver o javadoc de `InventoryMovementSnapshot` para o raciocínio completo.
+
+  **Testes**: novos casos em `InventoryMovementServiceIntegrationTests`
+  (`createRecordsAuditLogWithActorAndPurchaseSnapshot`,
+  `recordLossRecordsAuditLogWithActorAndLossSnapshot`,
+  `consumeForOrderNeverRecordsAnAuditLog`) chamando o serviço diretamente,
+  e em `InventoryMovementControllerIntegrationTests` (HTTP real via
+  `MockMvc`, mesmo template de `ProductControllerIntegrationTests`'
+  seção FARELO-126): `401`/`403`/sucesso para os dois endpoints agora
+  protegidos, `ADMIN` e `MANAGER` ambos aceitos, uma linha de auditoria com
+  ator/ação/snapshot corretos para cada produtor, e a trilha consultável
+  via `GET /api/v1/audit-logs?entityType=Ingredient&entityId=...`. Como
+  `create`/`recordLoss` passaram a exigir um `actorId` real (`UserService#getById`
+  404 para um id sem `User` correspondente), todo teste pré-existente que
+  chamava esses dois métodos diretamente — em
+  `InventoryMovementServiceIntegrationTests` e
+  `OutboxWorkerStockThresholdIntegrationTests` — foi atualizado para passar
+  um `actorId` de um `User` real persistido num `@BeforeEach` dedicado,
+  reaproveitado por todos os testes daquela classe (essas duas classes
+  testam `consumeForOrder`/a pipeline de threshold/outbox, não a auditoria
+  em si, então um único ator reutilizado é suficiente). `RoleAuthorizationInterceptorRegressionIntegrationTests`
+  ganhou seis novos testes provando a fronteira exata deste ticket: `POST
+  .../movements`/`POST .../losses` agora exigem token
+  (`stockPurchaseCreationNowRequiresAuthentication`/
+  `stockLossRecordingNowRequiresAuthentication`), enquanto `GET
+  .../movements`, `GET .../balance`, `POST /api/v1/ingredients` e `PUT
+  /api/v1/ingredients/{id}` continuam funcionando sem nenhum header — nada
+  além dos dois endpoints pretendidos foi protegido "por acidente".
+
 ## security
 
 Pacote: `com.farelo.api.security`.
@@ -2730,6 +2899,25 @@ header: `commandLookupStillWorksWithNoAuthorizationHeader`,
 `markFailedStillWorksWithNoAuthorizationHeader`.
 
 Ver `docs/api.md` para o detalhe "Requer" em cada um dos endpoints acima.
+
+### FARELO-127 — RBAC chega a `inventory`, mas só a dois endpoints
+
+Terceiro ticket a de fato restringir acesso, depois do FARELO-123 (Admin) e
+FARELO-124 (PDV/cozinha) — mas não é um ticket de RBAC por si só: é
+"Auditar ajuste de estoque" adicionando `@RequireRole(ADMIN, MANAGER)` a
+`InventoryMovementController#create`/`#recordLoss`
+(`POST /api/v1/ingredients/{id}/movements`/`.../losses`) como pré-requisito
+estrito para ter um ator confiável a auditar — não uma decisão de "proteger
+a superfície de estoque" pedida por um ticket dedicado. `IngredientController`/
+`RecipeController` continuam inteiramente fora de escopo, exatamente como o
+javadoc de `RequireRole` já registrava desde o FARELO-122 ("inventory/
+notification RBAC, se algum dia necessário, é um ticket futuro e
+distinto"). Ver a subseção FARELO-127 da seção `inventory` acima para o
+raciocínio completo (as três opções avaliadas para resolver "quem" fez o
+ajuste, e por que a opção de aceitar um id de ator via request foi
+rejeitada).
+
+Ver `docs/api.md` para o detalhe "Requer" dos dois endpoints.
 
 ## audit
 

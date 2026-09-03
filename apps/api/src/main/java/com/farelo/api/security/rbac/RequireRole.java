@@ -45,11 +45,26 @@ import java.lang.annotation.Target;
  * Edge Agent, a machine with no user login, so {@code @RequireRole} doesn't
  * apply to them (see that class's javadoc for the full reasoning). See the
  * FARELO-124 subsection of {@code docs/domain-model.md} for exactly which
- * methods and roles. Still deliberately untouched: {@code
+ * methods and roles. Still deliberately untouched by FARELO-123/124: {@code
  * IngredientController}, {@code RecipeController}, {@code AuthController},
- * {@code NotificationController} — out of scope for both FARELO-123 and
- * FARELO-124 (inventory/notification RBAC, if ever needed, is a distinct
- * future ticket).
+ * {@code NotificationController} — out of scope for both (inventory/
+ * notification RBAC, if ever needed, is a distinct future ticket).
+ *
+ * <p><b>FARELO-127 ("Auditar ajuste de estoque") is that distinct future
+ * ticket, but only for two endpoints, not the whole {@code inventory}
+ * surface</b>: {@code InventoryMovementController#create} ({@code POST
+ * .../movements}) and {@code #recordLoss} ({@code POST .../losses}) gained
+ * {@code @RequireRole(ADMIN, MANAGER)} — the two manual, human-initiated
+ * producers of {@code InventoryMovement} rows this ticket also audits (see
+ * {@code InventoryMovementService#recordAudit}'s javadoc for the full
+ * "why RBAC here, and why now" writeup: auditing requires a real, verified
+ * actor, and there was no other source of that fact for these two
+ * endpoints). Everything else stays exactly as untouched as the paragraph
+ * above already established: {@code GET .../movements}/{@code GET
+ * .../balance} on the very same controller, and the entirety of {@code
+ * IngredientController}/{@code RecipeController} — this ticket's own scope
+ * was narrowly "the two writes it audits need an actor", never "protect
+ * Ingredient/Recipe endpoints wholesale".
  */
 @Target({ElementType.TYPE, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)

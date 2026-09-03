@@ -1,6 +1,11 @@
 package com.farelo.api.inventory;
 
+import com.farelo.api.audit.AuditLogService;
 import com.farelo.api.outbox.OutboxPublisher;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,32 +39,65 @@ import java.util.UUID;
  * STOCK_LOW"/"Publicar OUT_OF_STOCK") do not add a new method either — they
  * add a threshold check, {@link #publishStockThresholdEventIfNeeded(Ingredient)},
  * called after every stock-<em>reducing</em> movement this class writes
- * ({@link #recordLoss(UUID, BigDecimal)} and {@link #consumeForOrder(UUID, List)}
- * — deliberately <b>not</b> {@link #create(UUID, BigDecimal)}, since a
+ * ({@link #recordLoss(UUID, BigDecimal, UUID)} and {@link #consumeForOrder(UUID, List)}
+ * — deliberately <b>not</b> {@link #create(UUID, BigDecimal, UUID)}, since a
  * {@code PURCHASE} only ever increases stock and can never newly cross into
  * low/out-of-stock territory). See that method's own javadoc for the full
- * STOCK_LOW-vs-OUT_OF_STOCK design.
+ * STOCK_LOW-vs-OUT_OF_STOCK design. <b>FARELO-127</b> ("Auditar ajuste de
+ * estoque") does not add a new method either — it adds an {@code actorId}
+ * parameter to {@link #create(UUID, BigDecimal, UUID)} and {@link
+ * #recordLoss(UUID, BigDecimal, UUID)}, the two <em>manual, human-initiated</em>
+ * producers, and has each record an {@code AuditLog} row via {@code
+ * AuditLogService#record} after writing its ledger row — deliberately
+ * <b>not</b> {@link #consumeForOrder(UUID, List)}, an automatic consequence
+ * of a sale with no human actor to attribute it to. See {@link
+ * #recordAudit(UUID, String, InventoryMovement)}'s javadoc for the full
+ * actor-resolution and RBAC design (including why {@code
+ * InventoryMovementController}'s two write endpoints — previously
+ * unprotected — now require {@code @RequireRole}).
  */
 @Service
 public class InventoryMovementService {
+
+    // FARELO-127: action constants for the AuditLogService#record calls in
+    // create()/recordLoss() below — plain String constants, not a shared
+    // enum, same "open, producer-defined vocabulary" reasoning AuditLog's
+    // own javadoc ("Design decision 3") gives, and the same pattern
+    // ProductService already established (AUDIT_ACTION_PRICE_CHANGED) for
+    // FARELO-126. Named after InventoryMovementType's own PURCHASE/LOSS
+    // values (see that enum's javadoc) rather than a single generic
+    // "STOCK_ADJUSTED" — a reviewer scanning the audit trail can tell a
+    // purchase from a loss without opening previousValue/newValue.
+    private static final String AUDIT_ACTION_PURCHASE_RECORDED = "STOCK_PURCHASE_RECORDED";
+    private static final String AUDIT_ACTION_LOSS_RECORDED = "STOCK_LOSS_RECORDED";
+    private static final String AUDIT_ENTITY_TYPE = "Ingredient";
 
     private final InventoryMovementRepository inventoryMovementRepository;
     private final IngredientService ingredientService;
     private final RecipeRepository recipeRepository;
     private final RecipeItemRepository recipeItemRepository;
     private final OutboxPublisher outboxPublisher;
+    private final UserService userService;
+    private final AuditLogService auditLogService;
+    private final ObjectMapper objectMapper;
 
     public InventoryMovementService(
             InventoryMovementRepository inventoryMovementRepository,
             IngredientService ingredientService,
             RecipeRepository recipeRepository,
             RecipeItemRepository recipeItemRepository,
-            OutboxPublisher outboxPublisher) {
+            OutboxPublisher outboxPublisher,
+            UserService userService,
+            AuditLogService auditLogService,
+            ObjectMapper objectMapper) {
         this.inventoryMovementRepository = inventoryMovementRepository;
         this.ingredientService = ingredientService;
         this.recipeRepository = recipeRepository;
         this.recipeItemRepository = recipeItemRepository;
         this.outboxPublisher = outboxPublisher;
+        this.userService = userService;
+        this.auditLogService = auditLogService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -82,12 +120,27 @@ public class InventoryMovementService {
      * than relying on Spring Data's own per-method transaction, so a future
      * addition here (e.g. touching a running balance) doesn't silently need
      * a second annotation added.
+     *
+     * <p><b>FARELO-127</b>: {@code actorId} identifies who is recording this
+     * entry — always resolved by {@code InventoryMovementController#create}
+     * from {@code AuthenticatedPrincipal#userId()}, since that endpoint is
+     * now {@code @RequireRole}-protected (see {@link #recordAudit(UUID,
+     * String, InventoryMovement)}'s javadoc for the full actor-resolution
+     * design). After writing the ledger row, unconditionally records an
+     * {@code AuditLog} entry — unlike {@code ProductService#update}
+     * (FARELO-126), which only audits when the price actually changed,
+     * every call here already represents a real, human-confirmed stock
+     * entry with nothing to compare against (see {@link
+     * InventoryMovementSnapshot}'s javadoc for why there is no delta to
+     * detect the way a price update has one).
      */
     @Transactional
-    public InventoryMovement create(UUID ingredientId, BigDecimal quantity) {
+    public InventoryMovement create(UUID ingredientId, BigDecimal quantity, UUID actorId) {
         Ingredient ingredient = ingredientService.getById(ingredientId);
-        return inventoryMovementRepository.save(
+        InventoryMovement movement = inventoryMovementRepository.save(
                 new InventoryMovement(ingredient, quantity, InventoryMovementType.PURCHASE));
+        recordAudit(actorId, AUDIT_ACTION_PURCHASE_RECORDED, movement);
+        return movement;
     }
 
     /**
@@ -106,22 +159,23 @@ public class InventoryMovementService {
      * InventoryMovement#getQuantity()}.
      *
      * <p>Same "ingredient exists first" validation and ordering as {@link
-     * #create(UUID, BigDecimal)} (404 {@link IngredientNotFoundException}
+     * #create(UUID, BigDecimal, UUID)} (404 {@link IngredientNotFoundException}
      * before anything else). {@code quantity > 0} is enforced by {@code
      * @Positive} on the request DTO before this method ever runs, not
      * re-checked here — same division of labor as {@link #create(UUID,
-     * BigDecimal)}.
+     * BigDecimal, UUID)}.
      *
      * <p>No {@code orderId}: a loss is never order-sourced — see {@link
      * InventoryMovement}'s javadoc ("orderId" section) for why only {@code
      * ORDER_CONSUMPTION} (and plausibly {@code RETURN}/{@code
      * CANCELLATION}) are expected to ever set that column. Uses the
      * three-argument {@link InventoryMovement} constructor, same as {@link
-     * #create(UUID, BigDecimal)}.
+     * #create(UUID, BigDecimal, UUID)}.
      *
      * <p>{@code @Transactional}: same reasoning as {@link #create(UUID,
-     * BigDecimal)} — matches every other mutating method in this domain
-     * rather than relying on Spring Data's own per-method transaction.
+     * BigDecimal, UUID)} — matches every other mutating method in this
+     * domain rather than relying on Spring Data's own per-method
+     * transaction.
      *
      * <p><b>FARELO-100/101</b>: after writing the row, checks whether {@code
      * ingredient}'s resulting balance is now low/out of stock and, if so,
@@ -131,13 +185,23 @@ public class InventoryMovementService {
      * above), same "one more thing happens after the domain write, same
      * transaction" shape already established by {@code OutboxPublisher}'s
      * other integrations ({@code OrderService#create}/{@code #markAsReady}).
+     *
+     * <p><b>FARELO-127</b>: {@code actorId} identifies who is recording this
+     * loss — always resolved by {@code InventoryMovementController#recordLoss}
+     * from {@code AuthenticatedPrincipal#userId()} (see {@link
+     * #recordAudit(UUID, String, InventoryMovement)}'s javadoc for the full
+     * actor-resolution design). Unconditionally records an {@code AuditLog}
+     * entry after writing the ledger row, same "no delta to detect, every
+     * call is already a real event" reasoning as {@link #create(UUID,
+     * BigDecimal, UUID)} above.
      */
     @Transactional
-    public InventoryMovement recordLoss(UUID ingredientId, BigDecimal quantity) {
+    public InventoryMovement recordLoss(UUID ingredientId, BigDecimal quantity, UUID actorId) {
         Ingredient ingredient = ingredientService.getById(ingredientId);
         InventoryMovement movement = inventoryMovementRepository.save(
                 new InventoryMovement(ingredient, quantity.negate(), InventoryMovementType.LOSS));
         publishStockThresholdEventIfNeeded(ingredient);
+        recordAudit(actorId, AUDIT_ACTION_LOSS_RECORDED, movement);
         return movement;
     }
 
@@ -484,6 +548,118 @@ public class InventoryMovementService {
         } else if (ingredientBalance.isBelowMinimum()) {
             outboxPublisher.publish(
                     "Ingredient", ingredient.getId(), "STOCK_LOW", StockThresholdEvent.from(ingredient, balance));
+        }
+    }
+
+    /**
+     * FARELO-127 ("Auditar ajuste de estoque"): records one {@code AuditLog}
+     * row (via {@code AuditLogService#record}) for a just-written manual
+     * stock movement — called by {@link #create(UUID, BigDecimal, UUID)}
+     * and {@link #recordLoss(UUID, BigDecimal, UUID)}, never by {@link
+     * #consumeForOrder(UUID, List)} (see this class's own top-level javadoc
+     * for why an automatic, order-driven consequence of a sale isn't
+     * audited the same way a human-initiated adjustment is — there is no
+     * staff member to attribute it to).
+     *
+     * <h2>Resolving "who" — why {@code InventoryMovementController}'s two
+     * write endpoints now require {@code @RequireRole}</h2>
+     *
+     * Auditing requires knowing who acted, and — unlike {@code
+     * ProductController#update} (FARELO-126), already {@code @RequireRole}-
+     * protected since FARELO-123 — neither {@code IngredientController} nor
+     * {@code InventoryMovementController} carried any RBAC before this
+     * ticket ({@link com.farelo.api.security.rbac.RequireRole}'s own javadoc
+     * explicitly listed both as untouched by FARELO-123 <em>and</em>
+     * FARELO-124, "a distinct future ticket"). Three options were weighed
+     * for this ticket specifically:
+     *
+     * <ol>
+     *   <li><b>Add {@code @RequireRole} to exactly the two endpoints this
+     *       ticket audits</b> ({@code POST .../movements}, {@code POST
+     *       .../losses} — not {@code GET .../movements}, {@code GET
+     *       .../balance}, nor anything in {@code IngredientController},
+     *       which stays completely untouched) — <b>chosen</b>. This is the
+     *       only option that produces a trustworthy "who" at all: {@code
+     *       actorId} comes from a real, server-verified {@code
+     *       AuthenticatedPrincipal}, resolved the exact same way {@code
+     *       ProductController#update} already does it, not from anything
+     *       the client asserts about itself.</li>
+     *   <li><b>Accept an actor id as a request parameter/body field
+     *       instead, leaving these two endpoints unauthenticated</b> —
+     *       considered and rejected. A caller could claim to be any user id
+     *       it likes; nothing would verify that the id it supplies is who
+     *       is actually calling. An audit trail exists specifically to
+     *       answer "who really did this" — one that trusts a
+     *       self-reported, unverified identity isn't answering that
+     *       question, it's just recording whatever the client typed. This
+     *       would also be strictly worse than doing nothing: a "who"
+     *       column that looks authoritative but isn't is more misleading
+     *       than an audit log that (correctly) doesn't exist yet.</li>
+     *   <li>Leave both endpoints unauthenticated and skip auditing them
+     *       until a hypothetical future "protect Ingredient endpoints"
+     *       ticket exists — considered and rejected: FARELO-127 explicitly
+     *       asks for these two methods to be audited now, and deferring to
+     *       an unscheduled ticket would mean simply not doing the ticket in
+     *       front of us. Nothing about "Estoque"/"Compras"/"Perdas" being
+     *       named as their own Admin modules (prompt mestre seção 21,
+     *       alongside "Produtos"/"Categorias"/"Usuários") suggests they
+     *       should stay open-ended longer than those did.</li>
+     * </ol>
+     *
+     * <p>Option 1 was chosen — narrowly: only the two endpoints this
+     * ticket's audited methods back gain {@code @RequireRole}, mirroring
+     * the "only what's necessary" restraint {@code ProductController}/
+     * {@code CategoryController} already applied at FARELO-123 (their own
+     * {@code GET}s stayed open). {@code GET .../movements}/{@code
+     * GET .../balance} on this same controller, and every endpoint on
+     * {@code IngredientController}/{@code RecipeController}, remain exactly
+     * as unprotected as before this ticket — "protect Ingredient/Recipe
+     * endpoints wholesale" is still not this ticket's job, only "this
+     * ticket's two audited writes need a real actor to audit against" is.
+     * See {@code RequireRole}'s own javadoc (updated by this ticket) and
+     * docs/domain-model.md's FARELO-127 subsection for the complete
+     * writeup, including the role choice ({@link
+     * com.farelo.api.security.UserRole#ADMIN}/{@link
+     * com.farelo.api.security.UserRole#MANAGER}, the same pair FARELO-123
+     * chose for {@code ProductController}'s writes — "Compras"/"Perdas" are
+     * Admin-panel modules exactly like "Produtos"/"Categorias" (prompt
+     * mestre seção 21), and neither endpoint here can be used to escalate
+     * privilege the way {@code UserController}'s writes can, so there's no
+     * reason to restrict further to {@code ADMIN} alone).
+     *
+     * <p><b>Why this lookup/audit-recording lives here, not in {@code
+     * InventoryMovementController}</b>: same "thin controller, business
+     * decisions in the service" split {@code ProductService#update}'s
+     * javadoc already documents for FARELO-126 — the controller only
+     * extracts {@code principal.userId()} and forwards it.
+     *
+     * <p>{@code previousValue} is always {@code null}, {@code newValue} is
+     * {@link InventoryMovementSnapshot} — see that record's javadoc for the
+     * full snapshot-shape reasoning (why there is no "before" to capture
+     * here the way {@code ProductPriceSnapshot} captures one, and why the
+     * resulting balance is deliberately left out).
+     */
+    private void recordAudit(UUID actorId, String action, InventoryMovement movement) {
+        User actor = userService.getById(actorId);
+        auditLogService.record(
+                actor,
+                action,
+                AUDIT_ENTITY_TYPE,
+                movement.getIngredient().getId(),
+                null,
+                serializeMovement(movement));
+    }
+
+    // Same serialize-and-wrap pattern as ProductService#serializePrice:
+    // InventoryMovementSnapshot is a simple record built from an
+    // already-persisted InventoryMovement, so a JsonProcessingException
+    // here would mean Jackson genuinely can't serialize it — an invariant
+    // violation, not an expected runtime condition.
+    private String serializeMovement(InventoryMovement movement) {
+        try {
+            return objectMapper.writeValueAsString(InventoryMovementSnapshot.from(movement));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize inventory movement snapshot", e);
         }
     }
 
