@@ -1438,6 +1438,123 @@ Pacote: `com.farelo.api.inventory`.
   arquivo: nenhum `@BeforeEach` limpa `ingredient`/`inventory_movement` —
   cada teste cria seus próprios ingredientes com nome único.
 
+  ### FARELO-096 — Consumir receita ao criar pedido
+
+  Segundo *produtor* real de `InventoryMovement` (o primeiro foi FARELO-094,
+  `PURCHASE`): `InventoryMovementService` ganha
+  `consumeForOrder(UUID orderId, List<OrderItemConsumption> items)`, que
+  materializa o exemplo literal do prompt mestre seção 15/16 — "vender 10
+  unidades desconta os ingredientes proporcionalmente" — como uma linha
+  `ORDER_CONSUMPTION` (quantidade negativa) por `RecipeItem` de cada
+  produto vendido que tenha receita ativa.
+
+  **Ponto de disparo — dentro de `OrderService#create`, não um endpoint
+  próprio.** Este ticket não expõe nenhuma rota nova: `POST
+  /api/v1/orders` (FARELO-052/053, o único caminho de criação de pedido —
+  `CommandOrdersController` só lista, nunca cria) continua sendo a única
+  porta de entrada. `OrderService#create` chama
+  `inventoryMovementService.consumeForOrder(order.getId(), consumption)`
+  logo depois que todo `OrderItem` já foi persistido (assim `order.getId()`
+  existe) e antes do publish do evento outbox `OrderCreated` (FARELO-060) —
+  ambos dentro da mesma `@Transactional`. Isso segue o mesmo desenho
+  "mais uma coisa acontece depois da criação do pedido, mesma transação"
+  que o próprio outbox publish já estabeleceu: se a baixa de estoque
+  falhar, a criação do pedido inteira sofre rollback junto — não fica um
+  pedido "órfão" sem o movimento de estoque correspondente. `@Transactional`
+  em `consumeForOrder` documenta esse requisito explicitamente (propagação
+  padrão do Spring, `REQUIRED`, entra na transação já aberta pelo
+  chamador em vez de abrir uma nova).
+
+  **`OrderItemConsumption`** (novo record, pacote `com.farelo.api.inventory`):
+  `(UUID productId, int quantity)` — a entrada mínima de `consumeForOrder`
+  para "um produto foi vendido N vezes". Deliberadamente não é
+  `com.farelo.api.ordering.OrderItem` em si: a direção de dependência já
+  estabelecida no projeto é `ordering` depende de `inventory` (e de
+  `catalog`), nunca o contrário (mesmo raciocínio de "manter a dependência
+  unidirecional" que o javadoc de `CommandOrdersController` já documenta
+  para um par diferente de pacotes) — usar o tipo `OrderItem` de `ordering`
+  aqui criaria uma dependência circular entre os dois domínios. Mesmo
+  padrão que `ordering.NewOrderItem` já usa para desacoplar a entrada de
+  um serviço do tipo de outro domínio.
+
+  **Matemática da quantidade**: `RecipeItem.quantity` é "quanto desse
+  ingrediente para UMA unidade do produto" (javadoc de `RecipeItem`). O
+  movimento gravado é essa quantidade multiplicada por quantas unidades do
+  produto foram pedidas (`OrderItemConsumption.quantity()`), negada — saída
+  de estoque, mesma convenção de sinal já documentada em
+  `InventoryMovement.getQuantity()`. `BigDecimal` do início ao fim
+  (AGENTS.md): `RecipeItem.quantity` (escala 3) é multiplicado por um
+  inteiro exato via `BigDecimal.valueOf(long)`, então o produto mantém a
+  mesma escala — sem arredondamento, sem `double` em nenhum ponto. Exemplo
+  do próprio prompt mestre: "pão com ovos e bacon" (3 UN ovos, 80 G bacon,
+  10 G manteiga) vendido em quantidade 4 gera `-12` UN ovos, `-320` G
+  bacon, `-40` G manteiga.
+
+  **Produto sem receita ativa: nenhum movimento, sem erro.** Nem todo
+  produto tem receita ainda (`Recipe` é opcional por produto, por design —
+  ver javadoc de `Recipe`/`RecipeItem`, que já antecipavam este ticket
+  exatamente). `RecipeRepository#findByProductIdAndActiveTrue` retornando
+  vazio para um item do pedido é simplesmente "nada a consumir nessa
+  linha" — `consumeForOrder` pula esse item silenciosamente e segue para o
+  próximo. Uma receita desativada (`active = false`) conta como "sem
+  receita" também, pelo mesmo motivo (a chave natural da entidade,
+  documentada no javadoc de `Recipe`).
+
+  **Sem checagem de saldo suficiente** — a seção 16 do prompt mestre não
+  pede uma aqui; ficar negativo é permitido por ora (plausivelmente
+  preocupação de FARELO-099, "estoque mínimo", não deste ticket). **Sem
+  idempotência** — `InventoryMovement` já teria uma chave natural conceitual
+  `(type, orderId, ingredientId)` (seção 16: "`ORDER_CONSUMPTION
+  orderId=123 ingredientId=5` não deve conseguir ser processado duas
+  vezes"), mas nenhuma constraint/checagem contra reprocessamento é
+  adicionada aqui — deliberadamente adiado para FARELO-097, exatamente como
+  o javadoc de `InventoryMovement` ("orderId" section) já antecipava desde
+  FARELO-093. Este ticket só adiciona o produtor, não a garantia de "não
+  processar duas vezes".
+
+  `InventoryMovementRepository` ganha `findByOrderId(UUID orderId)` —
+  consulta derivada simples sobre a coluna `order_id` (já indexada desde
+  FARELO-093), usada pelos testes para verificar todo movimento que um
+  pedido específico produziu.
+
+  **Testes**: novos casos em `InventoryMovementServiceIntegrationTests`
+  (chamando `consumeForOrder` diretamente: matemática de quantidade com
+  pedido de quantidade > 1, produto sem receita ativa, receita desativada,
+  múltiplos produtos cada um com sua própria receita escopados
+  corretamente) e um novo arquivo,
+  `OrderInventoryConsumptionIntegrationTests` (pacote
+  `com.farelo.api.ordering.web`), cobrindo o fluxo HTTP completo
+  (`POST /api/v1/orders`) end-to-end: cria o pedido de verdade e confirma
+  via `InventoryMovementRepository#findByOrderId` que os movimentos
+  `ORDER_CONSUMPTION` corretos foram persistidos com o `orderId` real —
+  prova a fiação (`OrderService#create` realmente chama
+  `consumeForOrder`), não só a lógica isolada do serviço.
+
+  **Nota de isolamento de teste, encontrada em revisão**: `RecipeItem` não
+  tem nenhum teste que limpe a tabela em `@BeforeEach` em lugar nenhum do
+  domínio (ver notas de FARELO-092/093 acima), mas três classes *fora*
+  desse domínio fazem limpeza cega de tabelas relacionadas em
+  `@BeforeEach` — `RecipeRepositoryIntegrationTests`/
+  `RecipeControllerIntegrationTests` (`recipeRepository.deleteAll()`) e
+  `IngredientControllerIntegrationTests`
+  (`inventoryMovementRepository.deleteAll(); ingredientRepository.deleteAll();`).
+  A ordem real de execução dos testes sob a suíte completa (definida pelo
+  Surefire, **não** alfabética por pacote/classe) determinou que tanto
+  `InventoryMovementServiceIntegrationTests` quanto
+  `OrderInventoryConsumptionIntegrationTests` (ambas novas deste ticket, e
+  ambas agora criando `Recipe`/`RecipeItem`) rodam *antes* dessas três
+  classes na mesma execução — qualquer `RecipeItem` deixado para trás por
+  elas faz um desses `deleteAll()` cegos falhar com violação de FK
+  (`recipe_item` ainda referenciando a `recipe`/`ingredient` sendo
+  deletada). Isso foi encontrado rodando a suíte completa, não só as
+  classes novas isoladamente — reforça o próprio aviso deste ticket sobre
+  "não limpar cegamente tabelas compartilhadas em `@BeforeEach`". A
+  correção: ambas as classes novas agora têm um `@AfterEach` *segmentado*
+  (não uma limpeza cega) que deleta só os `RecipeItem`s que a própria
+  classe criou — resolve sem reintroduzir um `deleteAll()` genérico que
+  outras classes (ex: `RecipeItemRepositoryIntegrationTests`) ainda
+  dependem de não sofrer.
+
 ## security
 
 Pacote: `com.farelo.api.security`.

@@ -5,6 +5,8 @@ import com.farelo.api.catalog.ProductNotAvailableException;
 import com.farelo.api.catalog.ProductService;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandService;
+import com.farelo.api.inventory.InventoryMovementService;
+import com.farelo.api.inventory.OrderItemConsumption;
 import com.farelo.api.outbox.OutboxPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +44,7 @@ public class OrderService {
     private final CommandService commandService;
     private final ProductService productService;
     private final OutboxPublisher outboxPublisher;
+    private final InventoryMovementService inventoryMovementService;
 
     public OrderService(
             OrderRepository orderRepository,
@@ -49,13 +52,15 @@ public class OrderService {
             OrderStatusHistoryRepository orderStatusHistoryRepository,
             CommandService commandService,
             ProductService productService,
-            OutboxPublisher outboxPublisher) {
+            OutboxPublisher outboxPublisher,
+            InventoryMovementService inventoryMovementService) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.orderStatusHistoryRepository = orderStatusHistoryRepository;
         this.commandService = commandService;
         this.productService = productService;
         this.outboxPublisher = outboxPublisher;
+        this.inventoryMovementService = inventoryMovementService;
     }
 
     /**
@@ -73,6 +78,19 @@ public class OrderService {
      * — FARELO-060, the first real Transactional Outbox integration — in
      * this same transaction, so it commits or rolls back together with
      * everything above.
+     *
+     * <p>Once every item is persisted (so {@code order.getId()} is
+     * available), also consumes each sold product's active recipe via
+     * {@link InventoryMovementService#consumeForOrder(java.util.UUID,
+     * List)} (FARELO-096, prompt mestre seção 16) — still inside this same
+     * {@code @Transactional} method, the same "one more thing after order
+     * creation" shape already established by the outbox publish below: if
+     * writing a stock movement fails, order creation rolls back with it
+     * rather than leaving an order whose stock was never deducted. A
+     * product with no active recipe simply produces no movement for that
+     * item — not every product needs one yet (see {@link
+     * InventoryMovementService#consumeForOrder(java.util.UUID, List)}'s own
+     * javadoc for the full quantity-math/idempotency-deferral reasoning).
      *
      * <p>{@code customerName}/{@code customerPhone} are optional
      * (nullable) — a plain snapshot on the order itself, not a
@@ -101,6 +119,15 @@ public class OrderService {
             OrderItem item = new OrderItem(order, product, newItem.quantity(), product.getPrice());
             items.add(orderItemRepository.save(item));
         }
+
+        // FARELO-096: consume each sold product's active recipe (if any)
+        // now that every OrderItem is persisted and order.getId() is
+        // available — see this method's javadoc and
+        // InventoryMovementService#consumeForOrder's own javadoc.
+        List<OrderItemConsumption> consumption = items.stream()
+                .map(item -> new OrderItemConsumption(item.getProduct().getId(), item.getQuantity()))
+                .toList();
+        inventoryMovementService.consumeForOrder(order.getId(), consumption);
 
         OrderWithItems result = new OrderWithItems(order, items);
         outboxPublisher.publish("Order", order.getId(), "OrderCreated", OrderCreatedEvent.from(result));
