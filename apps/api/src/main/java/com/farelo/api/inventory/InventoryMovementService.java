@@ -25,7 +25,11 @@ import java.util.UUID;
  * ("Implementar idempotência da baixa de estoque") does not add a new
  * method — it changes {@link #consumeForOrder(UUID, List)} itself to be
  * safe to call more than once for the same order; see that method's own
- * javadoc for the full design. Loss (FARELO-098) remains future work.
+ * javadoc for the full design. FARELO-098 ("Criar movimento de perda")
+ * adds {@link #recordLoss(UUID, BigDecimal)}, the third real producer:
+ * a human recording that stock was lost (spoilage/breakage/theft — not a
+ * sale), mirroring {@link #create(UUID, BigDecimal)}'s validation shape
+ * with a different type and a negated sign.
  */
 @Service
 public class InventoryMovementService {
@@ -72,6 +76,46 @@ public class InventoryMovementService {
         Ingredient ingredient = ingredientService.getById(ingredientId);
         return inventoryMovementRepository.save(
                 new InventoryMovement(ingredient, quantity, InventoryMovementType.PURCHASE));
+    }
+
+    /**
+     * FARELO-098 ("Criar movimento de perda"): records a stock LOSS —
+     * spoilage, breakage, theft, or any other stock reduction that isn't a
+     * sale (see {@link InventoryMovementType}'s javadoc for {@code LOSS}'s
+     * own description). A human (e.g. a manager) reports {@code quantity}
+     * as a POSITIVE magnitude — "how much was lost" — and this method is
+     * the one place that negates it before constructing the row; the
+     * request DTO never encodes the sign itself (see {@code
+     * com.farelo.api.inventory.web.InventoryLossRequest}'s javadoc for the
+     * full reasoning, which mirrors why {@link InventoryMovementRequest}
+     * doesn't let a client encode {@code PURCHASE}'s sign either). Same
+     * "each producer decides its own sign when constructing the row"
+     * division of labor documented on {@link
+     * InventoryMovement#getQuantity()}.
+     *
+     * <p>Same "ingredient exists first" validation and ordering as {@link
+     * #create(UUID, BigDecimal)} (404 {@link IngredientNotFoundException}
+     * before anything else). {@code quantity > 0} is enforced by {@code
+     * @Positive} on the request DTO before this method ever runs, not
+     * re-checked here — same division of labor as {@link #create(UUID,
+     * BigDecimal)}.
+     *
+     * <p>No {@code orderId}: a loss is never order-sourced — see {@link
+     * InventoryMovement}'s javadoc ("orderId" section) for why only {@code
+     * ORDER_CONSUMPTION} (and plausibly {@code RETURN}/{@code
+     * CANCELLATION}) are expected to ever set that column. Uses the
+     * three-argument {@link InventoryMovement} constructor, same as {@link
+     * #create(UUID, BigDecimal)}.
+     *
+     * <p>{@code @Transactional}: same reasoning as {@link #create(UUID,
+     * BigDecimal)} — matches every other mutating method in this domain
+     * rather than relying on Spring Data's own per-method transaction.
+     */
+    @Transactional
+    public InventoryMovement recordLoss(UUID ingredientId, BigDecimal quantity) {
+        Ingredient ingredient = ingredientService.getById(ingredientId);
+        return inventoryMovementRepository.save(
+                new InventoryMovement(ingredient, quantity.negate(), InventoryMovementType.LOSS));
     }
 
     // Validates the ingredient exists first (404 INGREDIENT_NOT_FOUND) so

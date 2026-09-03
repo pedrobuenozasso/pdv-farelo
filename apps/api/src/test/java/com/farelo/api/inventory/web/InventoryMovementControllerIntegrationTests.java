@@ -35,13 +35,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Integration test for {@code POST}/{@code GET
- * /api/v1/ingredients/{ingredientId}/movements} and {@code GET
- * /api/v1/ingredients/{ingredientId}/balance}, against a real PostgreSQL
+ * /api/v1/ingredients/{ingredientId}/movements}, {@code GET
+ * /api/v1/ingredients/{ingredientId}/balance}, and {@code POST
+ * /api/v1/ingredients/{ingredientId}/losses}, against a real PostgreSQL
  * instance (Testcontainers). {@code POST .../movements} is FARELO-094
  * ("Criar entrada manual de estoque"); {@code GET .../movements} is
  * FARELO-093; {@code GET .../balance} is FARELO-095 ("Calcular saldo do
- * ingrediente") (see the class javadoc history above/git log for that
- * original scope).
+ * ingrediente"); {@code POST .../losses} is FARELO-098 ("Criar movimento de
+ * perda") (see the class javadoc history above/git log for that original
+ * scope).
  *
  * <p>No {@code @BeforeEach} table cleanup — same reasoning as {@code
  * RecipeItemControllerIntegrationTests}: every test creates its own fresh
@@ -277,6 +279,127 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                 .andExpect(jsonPath("$.code").value("INGREDIENT_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
                 .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // FARELO-098 — "Criar movimento de perda". POST .../losses takes a
+    // POSITIVE quantity (how much was lost) and must persist a LOSS row
+    // with that quantity negated, no orderId.
+    @Test
+    void createsLossMovementWithNegatedQuantityAndNoOrderId() throws Exception {
+        Ingredient beans = createIngredient("Feijão (FARELO-098)", IngredientUnit.GRAM);
+
+        MvcResult result = mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", beans.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 250}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").exists())
+                .andExpect(jsonPath("$.ingredientId").value(beans.getId().toString()))
+                .andExpect(jsonPath("$.quantity").value(-250))
+                .andExpect(jsonPath("$.type").value("LOSS"))
+                .andExpect(jsonPath("$.orderId").value(nullValue()))
+                .andExpect(jsonPath("$.createdAt").exists())
+                .andReturn();
+
+        InventoryMovementResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), InventoryMovementResponse.class);
+
+        Optional<InventoryMovement> persisted = inventoryMovementRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getType()).isEqualTo(InventoryMovementType.LOSS);
+        assertThat(persisted.get().getIngredient().getId()).isEqualTo(beans.getId());
+        assertThat(persisted.get().getQuantity()).isEqualByComparingTo("-250.000");
+        assertThat(persisted.get().getOrderId()).isNull();
+    }
+
+    @Test
+    void returnsIngredientNotFoundWhenRecordingLossForUnknownIngredient() throws Exception {
+        UUID missingIngredientId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", missingIngredientId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 100}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("INGREDIENT_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsNonPositiveQuantityWhenRecordingLossWithStandardErrorFormat() throws Exception {
+        Ingredient rice = createIngredient("Arroz (FARELO-098)", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", rice.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 0}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+
+        assertThat(inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(rice.getId())).isEmpty();
+    }
+
+    @Test
+    void rejectsNegativeQuantityWhenRecordingLossWithStandardErrorFormat() throws Exception {
+        Ingredient salt = createIngredient("Sal (FARELO-098)", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", salt.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": -50}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsMissingQuantityWhenRecordingLossWithStandardErrorFormat() throws Exception {
+        Ingredient pepper = createIngredient("Pimenta (FARELO-098)", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", pepper.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // Confirms the balance endpoint (FARELO-095) correctly reflects a
+    // recorded loss — it must go down, since balance is a plain
+    // SUM(quantity) over the ledger and a LOSS row is negative.
+    @Test
+    void balanceReflectsRecordedLoss() throws Exception {
+        Ingredient sugar = createIngredient("Açúcar (FARELO-098 balance)", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", sugar.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 5000}
+                                """))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/losses", sugar.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 800}
+                                """))
+                .andExpect(status().isCreated());
+
+        // 5000 - 800 = 4200
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", sugar.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ingredientId").value(sugar.getId().toString()))
+                .andExpect(jsonPath("$.balance").value(4200))
+                .andExpect(jsonPath("$.unit").value("GRAM"));
     }
 
 }

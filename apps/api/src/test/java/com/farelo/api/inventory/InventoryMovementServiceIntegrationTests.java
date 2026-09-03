@@ -71,6 +71,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * still-missing ingredient, and two products sharing an ingredient in the
  * same order are aggregated into a single ledger row rather than two. See
  * that method's own javadoc for the full design reasoning.
+ *
+ * <p><b>FARELO-098</b> ("Criar movimento de perda") added the {@code
+ * *Loss*}/{@code balanceReflectsRecordedLoss} tests below, covering {@link
+ * InventoryMovementService#recordLoss(UUID, BigDecimal)}: a positive input
+ * quantity lands as a negative {@code LOSS} row with no {@code orderId},
+ * an unknown ingredient 404s the same way {@link
+ * InventoryMovementService#create(UUID, BigDecimal)} already does, and the
+ * derived balance ({@link InventoryMovementService#getBalance}) goes down
+ * accordingly.
  */
 @SpringBootTest
 class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
@@ -410,6 +419,56 @@ class InventoryMovementServiceIntegrationTests extends AbstractIntegrationTest {
 
         // Persisted as a single ledger row too, not two.
         assertThat(inventoryMovementRepository.findByOrderId(orderId)).hasSize(1);
+    }
+
+    // FARELO-098 — "Criar movimento de perda". recordLoss takes a POSITIVE
+    // quantity ("how much was lost") and must persist a LOSS row with that
+    // quantity negated and no orderId.
+    @Test
+    void recordsLossMovementWithNegatedQuantityAndNoOrderId() {
+        Ingredient coffee = createIngredient("Café em grão (FARELO-098 svc)", IngredientUnit.GRAM);
+
+        InventoryMovement recorded = inventoryMovementService.recordLoss(coffee.getId(), new BigDecimal("150"));
+
+        assertThat(recorded.getId()).isNotNull();
+        assertThat(recorded.getType()).isEqualTo(InventoryMovementType.LOSS);
+        assertThat(recorded.getQuantity()).isEqualByComparingTo("-150");
+        assertThat(recorded.getIngredient().getId()).isEqualTo(coffee.getId());
+        assertThat(recorded.getOrderId()).isNull();
+        assertThat(recorded.getCreatedAt()).isNotNull();
+
+        Optional<InventoryMovement> persisted = inventoryMovementRepository.findById(recorded.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getType()).isEqualTo(InventoryMovementType.LOSS);
+        assertThat(persisted.get().getQuantity()).isEqualByComparingTo("-150.000");
+        assertThat(persisted.get().getIngredient().getId()).isEqualTo(coffee.getId());
+        assertThat(persisted.get().getOrderId()).isNull();
+    }
+
+    @Test
+    void throwsIngredientNotFoundWhenRecordingLossForUnknownIngredient() {
+        UUID missingIngredientId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> inventoryMovementService.recordLoss(missingIngredientId, BigDecimal.TEN))
+                .isInstanceOf(IngredientNotFoundException.class);
+
+        assertThat(inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(missingIngredientId)).isEmpty();
+    }
+
+    // Confirms the balance (a plain SUM(quantity) over the ledger, see
+    // InventoryMovementService#getBalance) correctly reflects a loss going
+    // down, exercising create()/recordLoss() together the way a real
+    // purchase-then-loss sequence would.
+    @Test
+    void balanceReflectsRecordedLoss() {
+        Ingredient cocoa = createIngredient("Cacau em pó (FARELO-098 svc balance)", IngredientUnit.GRAM);
+
+        inventoryMovementService.create(cocoa.getId(), new BigDecimal("2000"));
+        inventoryMovementService.recordLoss(cocoa.getId(), new BigDecimal("300"));
+
+        // 2000 - 300 = 1700
+        IngredientBalance balance = inventoryMovementService.getBalance(cocoa.getId());
+        assertThat(balance.balance()).isEqualByComparingTo("1700");
     }
 
 }
