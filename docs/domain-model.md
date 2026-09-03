@@ -3051,6 +3051,100 @@ Pacote: `com.farelo.api.notification`.
   (`notification.worker.poll-interval-ms`), mesmo raciocínio já aplicado a
   `outbox.worker.poll-interval-ms`.
 
+- **`StockThresholdNotificationService`** (FARELO-113, "Alertar estoque
+  baixo"): terceiro consumidor real do outbox, mesma forma de
+  `OrderReadyNotificationService` — um `@Service` pequeno que
+  `OutboxWorker#dispatch` chama para os eventos `STOCK_LOW`/`OUT_OF_STOCK`
+  (publicados por `InventoryMovementService#publishStockThresholdEventIfNeeded`,
+  FARELO-100/101), criando uma `Notification` `PENDING` do tipo
+  correspondente (`NotificationType.STOCK_LOW`/`OUT_OF_STOCK`, mapeamento
+  1:1 sem ambiguidade). Nunca envia a notificação em si — isso continua
+  sendo trabalho do `NotificationWorker`, sem nenhuma mudança.
+
+  **Destinatário — nova propriedade de configuração**: diferente de
+  `ORDER_READY` (endereçado ao `Order.customerPhone` de um cliente real), um
+  alerta de estoque é interno, voltado à equipe — não existe em nenhum
+  lugar deste código o conceito de "número de WhatsApp da equipe/dono" (nem
+  entidade de contato admin, nem preferência de notificação por usuário).
+  Esta é uma decisão que o ticket precisa tomar, não algo que já estava
+  decidido: `notification.internal-alert-recipient` (`application.yml`,
+  mesmo padrão `${ENV_VAR:default}` de `whatsapp.api.access-token`, vazio
+  por padrão — nenhum número real de equipe existe neste ambiente de dev).
+  Um destinatário único e fixo por deployment é o menor recorte que
+  realmente entrega `STOCK_LOW`/`OUT_OF_STOCK` a um humano hoje — uma
+  lista por papel/usuário ou política de escalonamento são formas futuras
+  plausíveis, sem ticket numerado pedindo por elas ainda (mesma disciplina
+  YAGNI já aplicada a `criticalStock` em `inventory`).
+
+  Uma propriedade não configurada é tratada exatamente como
+  `OrderReadyNotificationService` trata um `customerPhone` ausente: não é
+  uma falha. `createForThresholdEvent` retorna `Optional.empty()` e não
+  cria nenhuma `Notification`, em vez de lançar — lançar aqui reverteria o
+  lote inteiro do outbox sendo drenado (ver javadoc de `OutboxWorker`,
+  "Failure handling"), para uma condição de configuração/deploy, não um
+  erro no movimento de estoque que disparou o evento (cuja própria
+  transação já foi commitada antes, em `InventoryMovementService`). Log em
+  `WARN`, não `INFO` (diferente do caso `customerPhone`) — um cliente sem
+  telefone é rotineiro; um deployment sem destinatário de alerta
+  configurado é uma lacuna de configuração que vale a pena ser barulhenta,
+  mesmo sem bloquear nada.
+
+  **Conteúdo vem do payload do evento, não de um `Ingredient` re-buscado**
+  — divergência deliberada do padrão de `OrderReadyNotificationService`
+  (que re-busca `Order` de propósito, para refletir o telefone/nome do
+  cliente no momento do disparo, não uma cópia potencialmente desatualizada
+  do payload). Aqui o raciocínio não se aplica: um alerta de estoque existe
+  para descrever *o saldo que disparou aquele evento específico* —
+  `StockThresholdEvent.balance()` já é o snapshot exato calculado por
+  `publishStockThresholdEventIfNeeded` logo após escrever o movimento que
+  cruzou o limite. Re-buscar o `Ingredient` e recalcular o saldo no momento
+  do dispatch não seria "mais fresco" — poderia mostrar um número
+  *diferente*, se outros movimentos ocorreram entre a publicação e o
+  dispatch (o outbox é drenado por polling, não instantaneamente),
+  produzindo uma mensagem que já não descreve o evento que alega descrever.
+  Usar o snapshot do próprio evento é a escolha mais correta aqui, não um
+  atalho.
+
+  **Mapeamento 1:1**: `STOCK_LOW`/`OUT_OF_STOCK` (tipo do evento outbox) →
+  `NotificationType.STOCK_LOW`/`OUT_OF_STOCK` — sem ambiguidade, os nomes
+  são idênticos. `OutboxWorker` decide qual dos dois com base em
+  `event.getEventType()` e passa para este serviço; `StockThresholdEvent`
+  em si não carrega um campo de severidade próprio (a severidade já foi
+  decidida uma vez, em `publishStockThresholdEventIfNeeded`).
+
+  **Mecanismo de dispatch — reavaliado, não apenas estendido**: FARELO-112
+  havia deixado a promessa explícita de "revisitar o `if`/`else if` quando
+  um terceiro tipo de evento aparecer". FARELO-113 é esse terceiro (na
+  verdade, quarto — `STOCK_LOW` e `OUT_OF_STOCK` ganharam ramos próprios
+  cada um) ponto, e a reavaliação honesta é: nada mudou o suficiente para
+  justificar um registry de verdade. As perguntas que um registry real
+  precisaria responder — um handler por tipo de evento ou vários podem
+  assinar o mesmo tipo? síncrono ou enfileirado? como falhas parciais entre
+  handlers se comportam, independente da história de rollback do lote
+  inteiro? — continuam tendo só uma resposta concreta cada uma no uso real
+  deste código, não duas concorrentes. A contagem bruta de ramos nunca foi
+  o gatilho certo para essa decisão — o que de fato justificaria um
+  registry é uma dessas perguntas ganhar uma segunda resposta concorrente
+  (dois handlers precisando reagir ao mesmo tipo de evento, ou um handler
+  precisando de retry/backoff por evento — território de FARELO-079, não
+  deste). Ver javadoc de `OutboxWorker` para o raciocínio completo,
+  corrigindo a heurística anterior em vez de segui-la mecanicamente.
+
+  **Testes**: `StockThresholdNotificationServiceIntegrationTests` (pacote
+  `notification`, chama `createForThresholdEvent(...)` diretamente — cobre
+  especificamente o caso "nenhum destinatário configurado", que o teste de
+  pipeline completo não consegue exercitar já que ele sempre sobrescreve a
+  propriedade via `@DynamicPropertySource`) e
+  `OutboxWorkerStockThresholdIntegrationTests` (pacote `outbox`, ponta a
+  ponta: `recordLoss` que cruza o limite → drena `STOCK_LOW`/`OUT_OF_STOCK`
+  via `outboxWorker.processPendingEvents()` → confirma `Notification`
+  `PENDING` com destinatário/conteúdo corretos → drena via
+  `notificationWorker.processPendingNotifications()` → confirma `SENT`;
+  mais o caso negativo de que uma `PURCHASE` nunca publica nenhum dos dois
+  eventos nem cria notificação). Mesma convenção anti-flakiness já
+  estabelecida — chamadas diretas e determinísticas, nunca `sleep`/espera
+  de wall-clock.
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —
