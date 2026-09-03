@@ -122,6 +122,34 @@ import java.util.List;
  * trigger firing mid-test and racing the explicit call over the same rows
  * — see {@code OutboxWorkerBatchSizeIntegrationTests}, which needs an
  * exact count of what one direct call processed.
+ *
+ * <p><strong>{@code initialDelayString}, same property — found in review, a
+ * genuine bug, not part of any numbered ticket's original scope</strong>:
+ * {@code @Scheduled(fixedDelayString = ...)} with no explicit initial delay
+ * fires its <em>first</em> execution immediately on scheduler startup,
+ * before the configured interval ever applies — the "disabled" 3600000ms
+ * override from {@code AbstractIntegrationTest} only bounded the gap
+ * <em>between</em> executions, not the first one. Every fresh Spring
+ * context created during a test run (and this suite creates many — each
+ * unique {@code @DynamicPropertySource} value combination, e.g. a
+ * per-test-class local HTTP stub port, forces its own context) therefore
+ * ran one real, un-suppressed {@code processPendingEvents()} call the
+ * instant that context finished starting up, draining whatever was
+ * {@code PENDING} in the shared singleton Postgres container at that exact
+ * moment — including rows a still-running test in a <em>different</em>
+ * context had just inserted. Reproduced concretely against {@code
+ * OutboxMetricsIntegrationTests}: its own event, inserted and backdated by
+ * the test body, was found already {@code PROCESSED} — by a thread named
+ * {@code scheduling-1}, i.e. a background scheduler, not the test's own
+ * thread — before the test read the gauge, only under the full suite
+ * (never in isolation, where this same race resolves too fast after
+ * context startup to matter). Setting {@code initialDelayString} to the
+ * same property closes the gap: the first execution now waits just as long
+ * as every subsequent one, so the 3600000ms test override actually
+ * suppresses <em>every</em> execution for the lifetime of a test JVM, not
+ * just the second one onward. {@link
+ * com.farelo.api.notification.NotificationWorker} carries the identical
+ * fix for the identical reason — see its own javadoc.
  */
 @Component
 public class OutboxWorker {
@@ -156,7 +184,9 @@ public class OutboxWorker {
      * exactly what one call touched; production code (the {@code
      * @Scheduled} trigger) ignores the return value.
      */
-    @Scheduled(fixedDelayString = "${outbox.worker.poll-interval-ms:5000}")
+    @Scheduled(
+            fixedDelayString = "${outbox.worker.poll-interval-ms:5000}",
+            initialDelayString = "${outbox.worker.poll-interval-ms:5000}")
     @Transactional
     public List<OutboxEvent> processPendingEvents() {
         List<OutboxEvent> pending = outboxEventRepository.findPendingForUpdateSkipLocked(

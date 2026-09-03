@@ -89,6 +89,15 @@ import java.util.List;
  * wall-clock timing. See {@code AbstractIntegrationTest}, which disables
  * this trigger suite-wide for the exact same reason it already disables
  * {@code OutboxWorker}'s.
+ *
+ * <p><strong>{@code initialDelayString}, same property</strong> — carries
+ * {@code OutboxWorker}'s own fix for the identical bug (found in review
+ * while verifying this ticket, not part of its original scope): {@code
+ * @Scheduled(fixedDelayString = ...)} alone fires its first execution
+ * immediately on scheduler startup, before the configured interval — and
+ * therefore before {@code AbstractIntegrationTest}'s 3600000ms
+ * "disabled" override — has any effect. See {@code OutboxWorker}'s javadoc
+ * for the full reasoning and the concrete failure this caused.
  */
 @Component
 public class NotificationWorker {
@@ -111,7 +120,9 @@ public class NotificationWorker {
      * one call touched; production code (the {@code @Scheduled} trigger)
      * ignores the return value.
      */
-    @Scheduled(fixedDelayString = "${notification.worker.poll-interval-ms:5000}")
+    @Scheduled(
+            fixedDelayString = "${notification.worker.poll-interval-ms:5000}",
+            initialDelayString = "${notification.worker.poll-interval-ms:5000}")
     public List<Notification> processPendingNotifications() {
         List<Notification> pending = notificationService.listPending();
 
