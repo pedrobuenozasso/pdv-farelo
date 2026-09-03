@@ -1364,6 +1364,80 @@ Pacote: `com.farelo.api.inventory`.
   `Recipe`/`RecipeItem` sobre `OrderControllerIntegrationTests` deixar
   linhas em `order_item`).
 
+  ### FARELO-095 — Calcular saldo do ingrediente
+
+  Primeiro *consumidor* real de `InventoryMovementRepository#sumQuantityByIngredientId`
+  — a query `@Query` com `COALESCE(SUM(quantity), 0)` que FARELO-093 já
+  deixou pronta especificamente para este ticket (ver comentário em
+  `InventoryMovementRepository`, que dizia explicitamente "não usada por
+  nenhum endpoint ainda... existe como a infraestrutura de consulta que o
+  cálculo de saldo 'de verdade'... vai reusar em vez de reimplementar"). Este
+  ticket só conecta essa query já existente a um endpoint — nenhuma soma é
+  reimplementada em Java, reforçando a regra do prompt mestre (seção 13): "O
+  saldo deve ser rastreável (derivado do ledger, nunca editado
+  diretamente)".
+
+  **`IngredientBalance`** (novo, pacote `com.farelo.api.inventory`): um
+  record simples — não uma entidade JPA, nunca persistido — carregando o
+  `Ingredient` e o `balance` (`BigDecimal`) calculado. Existe para que
+  `InventoryMovementService#getBalance` tenha um tipo de retorno único que já
+  inclua a unidade do ingrediente (via `ingredient.getUnit()`), em vez de o
+  controller precisar buscar o ingrediente separadamente só para montar a
+  resposta.
+
+  **`InventoryMovementService#getBalance(UUID ingredientId)`**: mesma ordem
+  de validação de `listByIngredient` — valida que o ingrediente existe
+  primeiro (reusa `IngredientService#getById`, 404 `INGREDIENT_NOT_FOUND` se
+  não existir), pelo mesmo motivo já documentado ali: um saldo `0` porque o
+  ingrediente genuinamente não tem movimentos ainda precisa continuar
+  distinguível de um id de ingrediente inexistente. Em seguida chama
+  `sumQuantityByIngredientId` diretamente — sem nenhuma lógica adicional — e
+  embrulha o resultado em `IngredientBalance` junto com o `Ingredient` já
+  carregado pela validação.
+
+  **Decisão de design — endpoint fica em `InventoryMovementController`, não
+  em `IngredientController`**: a rota nova, `GET
+  /api/v1/ingredients/{ingredientId}/balance`, poderia viver em qualquer um
+  dos dois controllers do pacote `inventory.web` que já respondem sob
+  `/api/v1/ingredients/{ingredientId}/...`. Decisão: `InventoryMovementController`,
+  cujo `@RequestMapping` de classe foi generalizado de
+  `/api/v1/ingredients/{ingredientId}/movements` para
+  `/api/v1/ingredients/{ingredientId}` (com `/movements` movido para os dois
+  `@GetMapping`/`@PostMapping` existentes) especificamente para abrir espaço
+  para esta rota irmã, `.../balance` — um saldo não é mais um tipo de linha
+  do ledger, é um valor *derivado* dele, então não faz sentido aninhá-lo sob
+  `.../movements` também. Motivo de manter no mesmo controller do ledger em
+  vez de mover para `IngredientController`: o cálculo em si
+  (`InventoryMovementService#getBalance`) já vive no serviço que este
+  controller já usa exclusivamente; colocar o endpoint em
+  `IngredientController` faria dele o primeiro controller do projeto a
+  depender de dois serviços, sem nenhum ganho — mesmo raciocínio de "manter
+  a dependência unidirecional" que o javadoc de `CommandOrdersController` já
+  documenta para uma escolha parecida (lá, entre dois domínios cruzados;
+  aqui, dentro do mesmo pacote).
+
+  **`IngredientBalanceResponse`** (novo DTO, pacote `com.farelo.api.inventory.web`):
+  `ingredientId`, `balance` (`BigDecimal`), `unit` (`IngredientUnit`). O
+  campo `unit` é incluído por exigência explícita deste ticket: um número
+  isolado é ambíguo (`500` do quê?), então a resposta já carrega a unidade
+  do ingrediente para o cliente não precisar de uma segunda chamada a `GET
+  /api/v1/ingredients/{id}` só para interpretar o valor.
+
+  **Endpoint**: `GET /api/v1/ingredients/{ingredientId}/balance` — só
+  leitura, mesmo padrão minimalista do restante deste domínio. Ver
+  `docs/api.md` para o endpoint completo.
+
+  **Testes**: novos casos em `InventoryMovementControllerIntegrationTests`
+  (HTTP real via `MockMvc`, mesmo arquivo/template dos testes de
+  `movements`): saldo `0` para ingrediente sem nenhum movimento, saldo
+  correto como soma de múltiplos movimentos (incluindo um `PURCHASE`
+  positivo e um `ORDER_CONSUMPTION` negativo, com um movimento de outro
+  ingrediente presente na mesma tabela para provar que não vaza para o
+  saldo calculado), e `404 INGREDIENT_NOT_FOUND` para ingrediente
+  inexistente. Mesmo cuidado de isolamento de teste do restante deste
+  arquivo: nenhum `@BeforeEach` limpa `ingredient`/`inventory_movement` —
+  cada teste cria seus próprios ingredientes com nome único.
+
 ## security
 
 Pacote: `com.farelo.api.security`.

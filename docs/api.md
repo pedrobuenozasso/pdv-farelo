@@ -1295,6 +1295,34 @@ Lista vazia (`[]`) quando o ingrediente existe mas ainda não tem movimentos.
   movimentos" de "ingrediente inexistente" — ambas retornariam a mesma lista
   vazia sem essa checagem).
 
+### `GET /api/v1/ingredients/{ingredientId}/balance`
+
+Calcula e retorna o saldo atual de estoque de um ingrediente — a soma de
+todas as linhas do seu ledger (`InventoryMovement`), nunca um campo mutável
+armazenado (`docs/domain-model.md`, seção `inventory`, prompt mestre seção
+13). (FARELO-095)
+
+**Response — `200 OK`**
+
+```json
+{
+  "ingredientId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "balance": 2200,
+  "unit": "GRAM"
+}
+```
+
+| Campo | Observações |
+|---|---|
+| `balance` | Soma de todo `quantity` do ledger desse ingrediente, na unidade base do `Ingredient`; `0` (nunca `null`) quando não há nenhum movimento ainda |
+| `unit` | A unidade do próprio ingrediente (`Ingredient.unit`), incluída para o cliente interpretar `balance` sem uma segunda chamada a `GET /api/v1/ingredients/{id}` |
+
+**Erros**
+
+- `404 Not Found` — `{ingredientId}` não corresponde a nenhum ingrediente
+  existente, `code: "INGREDIENT_NOT_FOUND"` (mesma checagem/motivo de
+  `GET /api/v1/ingredients/{ingredientId}/movements` acima).
+
 ### `POST /api/v1/users`
 
 Cria um usuário (uma conta de quem pode operar o sistema — funcionário do
