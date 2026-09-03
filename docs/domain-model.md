@@ -2131,7 +2131,111 @@ Testes:
   `GET /api/v1/ingredients` (estoque) e `GET /api/v1/notifications`
   (notificação) — três domínios não relacionados — continuam retornando
   `200` sem nenhum header `Authorization`, exatamente como antes deste
-  ticket.
+  ticket. **Estendida pelo FARELO-123** (ver subseção abaixo) com
+  `GET /api/v1/products` (prova que a fronteira dentro do próprio
+  `ProductController` — `create`/`update` protegidos, `list` não — se
+  sustenta) e `GET /api/v1/orders` (prova que o escopo de três controllers
+  do FARELO-123 não vazou para `ordering`).
+
+### FARELO-123 — Proteger Admin (aplicação do RBAC à superfície Admin)
+
+**Primeiro ticket a de fato restringir acesso**: FARELO-122 construiu só o
+mecanismo (`@RequireRole`/`RoleAuthorizationInterceptor`), aplicado a zero
+endpoints de produção. Este ticket decide *quem* pode chamar *qual*
+endpoint real, para exatamente três controllers — `CategoryController`,
+`ProductController` (`catalog.web`) e `UserController` (`security.web`) —
+os módulos "Produtos", "Categorias" e "Usuários" da seção 21 do prompt
+mestre (Admin). Fora de escopo, explicitamente: qualquer outro controller
+(`CommandController`, `OrderController`, `PrintJobController`,
+`IngredientController`, `RecipeController`, `NotificationController`,
+`AuthController`) — a superfície PDV/cozinha é FARELO-124, um ticket
+futuro e distinto.
+
+**Perfis usados**: dos cinco definidos em `UserRole` (FARELO-120) —
+`ADMIN`, `MANAGER`, `CASHIER`, `KITCHEN`, `ATTENDANT` — só `ADMIN` e
+`MANAGER` aparecem em algum `@RequireRole` abaixo. `CASHIER`/`KITCHEN`/
+`ATTENDANT` são perfis operacionais de PDV/cozinha (FARELO-124, ainda não
+decidido) e não têm hoje nenhum endpoint que os exija — eles só aparecem
+neste ticket como o "papel errado" nos testes de `403`.
+
+**`CategoryController`/`ProductController` — o achado central: `GET` fica
+público, só `POST`/`PUT` viram Admin**. A primeira leitura óbvia do
+ticket ("catálogo é Admin") sugeriria proteger o controller inteiro, mas
+o prompt mestre (EPIC 3, FARELO-042/043; seção 2, domínio
+`pedido.farelo.com.br`) já documenta que `GET /api/v1/categories` e
+`GET /api/v1/products` são consumidos pelo **Cardápio QR — um cliente
+anônimo, sem login/conta de qualquer tipo, escaneando o QR da mesa**.
+Proteger esses dois `GET`s não os restringiria a um papel interno mais
+adequado; quebraria esse fluxo público por completo, que está totalmente
+fora do que "superfície Admin" significa. A superfície Admin de
+catálogo é *autorá-lo* (criar/editar categorias e produtos), não
+*lê-lo* — então:
+
+- `POST /api/v1/categories` (criar categoria) → `ADMIN`, `MANAGER`.
+- `POST /api/v1/products` / `PUT /api/v1/products/{id}` (criar/editar
+  produto) → `ADMIN`, `MANAGER`.
+- `GET /api/v1/categories` / `GET /api/v1/products` → **sem
+  `@RequireRole`, deliberadamente** — continuam exatamente como antes
+  deste ticket (nenhum header `Authorization` sequer é lido, mesmo
+  comportamento de qualquer endpoint não anotado, ver
+  `RoleAuthorizationInterceptor`).
+
+`ADMIN`+`MANAGER` (não só `ADMIN`) nos dois `POST`/`PUT`: um gerente de
+turno precisa rotineiramente tirar um item de cardápio, mudar
+`availableOnMenu`/`availableOnPos` ou ajustar um preço sem depender da
+conta do dono/admin — e, diferente de `UserController` (ver abaixo), esses
+dois controllers nunca permitem que um chamador conceda a si mesmo mais
+acesso do que já tem, então não há risco de escalonamento de privilégio em
+incluir `MANAGER`.
+
+**`UserController` — `ADMIN` para tudo, exceto leitura que também permite
+`MANAGER`**: anotação de classe `@RequireRole(UserRole.ADMIN)` é o default
+para todo método; `list()` e `getById()` têm override de método
+alargando para `ADMIN`+`MANAGER` — prova real (não só o teste unitário de
+FARELO-122) de que anotação de método vence a de classe sem união (ver
+javadoc de `RequireRole`).
+
+- `POST /api/v1/users`, `PUT /api/v1/users/{id}`,
+  `PATCH /api/v1/users/{id}/password` → `ADMIN` **somente**.
+- `GET /api/v1/users`, `GET /api/v1/users/{id}` → `ADMIN`, `MANAGER`.
+
+Por que os três endpoints de escrita ficam `ADMIN`-only, diferente do
+catálogo (que aceita `MANAGER`): `@RequireRole` não tem como inspecionar o
+corpo da requisição — só decide por papel do chamador, endpoint inteiro.
+`create`/`update` recebem um campo `role` livre no payload; permitir
+`MANAGER` ali deixaria um gerente criar ou promover uma conta `ADMIN`
+(escalonamento de privilégio). `updatePassword` ainda não confirma a
+senha atual (decisão original do FARELO-120, não revisitada aqui — ver
+javadoc de `UserService#updatePassword`), então permitir `MANAGER`
+significaria um gerente conseguir sequestrar a senha de **qualquer**
+conta, inclusive de outro `ADMIN`. Administração de contas é
+deliberadamente mantida mais restrita que edição de cardápio — a seção 21
+do prompt mestre já trata "Usuários"/"Permissões" como módulos Admin à
+parte. Ler a lista/detalhe de um usuário, por outro lado, não pode ser
+usado para escalonar privilégio nenhum (e `UserResponse` nunca inclui
+`passwordHash` — ver FARELO-120), daí o alargamento para `MANAGER` só ali.
+
+**Testes**: `CategoryControllerIntegrationTests`/
+`ProductControllerIntegrationTests`/`UserControllerIntegrationTests` foram
+atualizados — todo teste que bate em um endpoint agora protegido passou a
+mintar um token real (`JwtTokenService#issue`, mesmo padrão de
+`RoleAuthorizationInterceptorIntegrationTests`, FARELO-122) e enviá-lo via
+`Authorization: Bearer <token>`; os `GET`s de categoria/produto
+continuam sem header nenhum, provando que eles de fato ficaram de fora.
+Cada uma das três classes ganhou testes dedicados por endpoint protegido:
+sem header → `401`/`UNAUTHENTICATED`; papel errado (ex:
+`CASHIER`/`ATTENDANT`/`KITCHEN`, conforme o endpoint) → `403`/`FORBIDDEN`;
+papel certo → sucesso como antes. `UserControllerIntegrationTests` ganhou
+ainda um par de testes provando que o alargamento de `list()`/`getById()`
+para `MANAGER` não vaza para `create()`/`update()`/`updatePassword()`
+(`rejectsCreateWhenCallerRoleIsNotAllowed`,
+`rejectsUpdateWhenCallerRoleIsNotAllowed`,
+`rejectsPasswordChangeWhenCallerRoleIsNotAllowed` — todos usando um token
+`MANAGER` de propósito, não um papel operacional qualquer, exatamente para
+testar essa fronteira fina). Ver também a extensão de
+`RoleAuthorizationInterceptorRegressionIntegrationTests` acima.
+
+Ver `docs/api.md` para o detalhe "Requer" em cada um dos endpoints acima.
 
 ## notification
 

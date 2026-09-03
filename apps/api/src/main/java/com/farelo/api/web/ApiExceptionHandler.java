@@ -226,9 +226,9 @@ public class ApiExceptionHandler {
     // JwtTokenService#parse rejects (bad signature, malformed, expired) —
     // one generic code/status for every cause, the same "the caller isn't
     // authenticated, full stop" collapse InvalidTokenException's javadoc
-    // documents. Reachable today only via FARELO-122's dedicated test
-    // controller — no production endpoint requires a token yet (see
-    // RequireRole's javadoc).
+    // documents. Reachable only via FARELO-122's dedicated test controller
+    // until FARELO-123, which is the first ticket to require a token on any
+    // production endpoint (the Admin surface — see RequireRole's javadoc).
     @ExceptionHandler(InvalidTokenException.class)
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     public ErrorResponse handleInvalidToken(InvalidTokenException ex) {
@@ -238,7 +238,8 @@ public class ApiExceptionHandler {
     // FARELO-122: RoleAuthorizationInterceptor throws this when a caller IS
     // authenticated (unlike InvalidTokenException above) but their
     // UserRole isn't one of the handler's @RequireRole-allowed roles — 403,
-    // distinct from the 401 above. Same reachability caveat as above.
+    // distinct from the 401 above. Same reachability caveat as above (only
+    // a real production path since FARELO-123).
     @ExceptionHandler(InsufficientRoleException.class)
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public ErrorResponse handleInsufficientRole(InsufficientRoleException ex) {

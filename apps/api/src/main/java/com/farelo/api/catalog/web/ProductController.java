@@ -2,6 +2,8 @@ package com.farelo.api.catalog.web;
 
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductService;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +19,25 @@ import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * {@code /api/v1/products} — {@code POST}/{@code PUT} (FARELO-014/016)
+ * require {@link UserRole#ADMIN}/{@link UserRole#MANAGER} as of FARELO-123:
+ * creating/editing a sellable product (price, category, availability,
+ * production station) is the textbook "Admin → Produtos" module (prompt
+ * mestre seção 21). {@code ADMIN}+{@code MANAGER} rather than {@code ADMIN}
+ * alone: a shift manager routinely needs to 86 an item, flip
+ * {@code availableOnMenu}/{@code availableOnPos}, or adjust a price without
+ * waiting on the owner/admin account — the same "back-office staff, not the
+ * top role alone" judgment call {@code UserController} makes differently
+ * (see its javadoc) precisely because that controller can grant/escalate
+ * roles and this one cannot. Not split further between {@code POST} and
+ * {@code PUT} (unlike {@code UserController}'s read/write split) — both are
+ * the same "author the menu" operation, just create vs. edit of the same
+ * resource, so there is no natural narrower role for one but not the other.
+ *
+ * <p>{@link #list()} is deliberately left <b>unannotated</b> — see its own
+ * javadoc.
+ */
 @RestController
 @RequestMapping("/api/v1/products")
 public class ProductController {
@@ -28,6 +49,7 @@ public class ProductController {
     }
 
     @PostMapping
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
     public ResponseEntity<ProductResponse> create(
             @Valid @RequestBody ProductRequest request,
             UriComponentsBuilder uriComponentsBuilder) {
@@ -51,6 +73,12 @@ public class ProductController {
 
     // No categoryId (or other) filter yet — YAGNI, no consumer (Admin/PDV)
     // asking for it yet. Add a query param here if/when one does.
+    //
+    // FARELO-123: deliberately NOT @RequireRole-protected, same reasoning
+    // as CategoryController#list() — GET /api/v1/products is a direct
+    // dependency of the anonymous customer-facing "Cardápio QR"
+    // (FARELO-043), which has no login of any kind. The Admin surface for
+    // products is authoring them (create()/update()), not reading them.
     @GetMapping
     public List<ProductResponse> list() {
         return productService.listAll().stream()
@@ -59,6 +87,7 @@ public class ProductController {
     }
 
     @PutMapping("/{id}")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
     public ProductResponse update(@PathVariable UUID id, @Valid @RequestBody ProductUpdateRequest request) {
         Product product = productService.update(
                 id,

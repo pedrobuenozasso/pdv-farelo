@@ -16,10 +16,12 @@ package com.farelo.api.security.auth;
  * {@code Authorization} header is presented at all (the interceptor throws
  * this same type for "no token"; see that class's javadoc for the full
  * pipeline). This exception type itself is unchanged from FARELO-121 — only
- * where it's caught changed. <b>Still reachable today only through
- * FARELO-122's own dedicated test controller</b>: no production endpoint is
- * annotated with {@code @RequireRole} yet (that's FARELO-123/124's job), so
- * no real request can trigger this path until one of those tickets lands.
+ * where it's caught changed. Reachable only through FARELO-122's own
+ * dedicated test controller until FARELO-123, the first ticket to annotate
+ * a real production controller with {@code @RequireRole} (the Admin
+ * surface — {@code CategoryController}/{@code ProductController}/
+ * {@code UserController}); FARELO-124 (PDV/kitchen) is still a future
+ * ticket.
  */
 public class InvalidTokenException extends RuntimeException {
 
