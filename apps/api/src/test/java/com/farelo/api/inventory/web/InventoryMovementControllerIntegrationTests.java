@@ -16,23 +16,29 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Integration test for {@code GET /api/v1/ingredients/{ingredientId}/movements},
- * against a real PostgreSQL instance (Testcontainers).
+ * Integration test for {@code POST}/{@code GET
+ * /api/v1/ingredients/{ingredientId}/movements}, against a real PostgreSQL
+ * instance (Testcontainers). {@code POST} is FARELO-094 ("Criar entrada
+ * manual de estoque"); {@code GET} is FARELO-093 (see the class javadoc
+ * history above/git log for that original scope).
  *
  * <p>No {@code @BeforeEach} table cleanup — same reasoning as {@code
  * RecipeItemControllerIntegrationTests}: every test creates its own fresh
@@ -77,6 +83,94 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
     private Order createOrder() {
         Command command = commandRepository.findByNumber(SEEDED_COMMAND_NUMBER).orElseThrow();
         return orderRepository.save(new Order(command));
+    }
+
+    @Test
+    void createsPurchaseMovementAndPersistsIt() throws Exception {
+        Ingredient beans = createIngredient("Feijão", IngredientUnit.GRAM);
+
+        MvcResult result = mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", beans.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 3000}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").exists())
+                .andExpect(jsonPath("$.ingredientId").value(beans.getId().toString()))
+                .andExpect(jsonPath("$.quantity").value(3000))
+                .andExpect(jsonPath("$.type").value("PURCHASE"))
+                .andExpect(jsonPath("$.orderId").value(nullValue()))
+                .andExpect(jsonPath("$.createdAt").exists())
+                .andReturn();
+
+        InventoryMovementResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), InventoryMovementResponse.class);
+
+        Optional<InventoryMovement> persisted = inventoryMovementRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getType()).isEqualTo(InventoryMovementType.PURCHASE);
+        assertThat(persisted.get().getIngredient().getId()).isEqualTo(beans.getId());
+        assertThat(persisted.get().getQuantity()).isEqualByComparingTo("3000.000");
+    }
+
+    @Test
+    void returnsIngredientNotFoundWhenCreatingMovementForUnknownIngredient() throws Exception {
+        UUID missingIngredientId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", missingIngredientId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 100}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("INGREDIENT_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsNonPositiveQuantityWithStandardErrorFormat() throws Exception {
+        Ingredient rice = createIngredient("Arroz", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", rice.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": 0}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+
+        assertThat(inventoryMovementRepository.findByIngredientIdOrderByCreatedAtAsc(rice.getId())).isEmpty();
+    }
+
+    @Test
+    void rejectsNegativeQuantityWithStandardErrorFormat() throws Exception {
+        Ingredient salt = createIngredient("Sal", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", salt.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity": -50}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsMissingQuantityWithStandardErrorFormat() throws Exception {
+        Ingredient pepper = createIngredient("Pimenta", IngredientUnit.GRAM);
+
+        mockMvc.perform(post("/api/v1/ingredients/{ingredientId}/movements", pepper.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
     }
 
     @Test

@@ -1288,6 +1288,82 @@ Pacote: `com.farelo.api.inventory`.
   filtrados por aquele `ingredientId` específico, então nenhuma asserção
   depende dessas tabelas compartilhadas estarem vazias.
 
+  ### FARELO-094 — Criar entrada manual de estoque
+
+  Primeiro *produtor* real de `InventoryMovement`: `InventoryMovementService`
+  ganha um método `create(UUID ingredientId, BigDecimal quantity)`, e
+  `InventoryMovementController` ganha `POST
+  /api/v1/ingredients/{ingredientId}/movements` — antes deste ticket a
+  única forma de uma linha existir era `InventoryMovementRepository.save(...)`
+  chamado diretamente pelos testes (ver seção FARELO-093 acima). Isso muda
+  agora: um humano (ex: um gerente) confirma que estoque chegou fisicamente
+  (uma compra), e o sistema grava uma linha `PURCHASE` com `quantity`
+  positiva.
+
+  **Sem campo `type` no request — de propósito.** O request body
+  (`InventoryMovementRequest`, em `com.farelo.api.inventory.web`) só recebe
+  `quantity`; o `type` é fixado como `PURCHASE` no lado do servidor, dentro
+  de `InventoryMovementService#create`, nunca escolhido pelo cliente. Este
+  endpoint é especificamente o fluxo de *entrada manual* — "como um humano
+  registra que estoque chegou" — não um endpoint genérico de "criar
+  qualquer tipo de movimento". Deixar o cliente escolher `type` permitiria
+  submeter `ORDER_CONSUMPTION`/`LOSS`/etc. por uma URL que não tem nada a
+  ver com pedidos ou perdas, pulando por cima da validação que esses fluxos
+  ainda vão precisar quando FARELO-096/098 os implementarem de fato (ex:
+  `ORDER_CONSUMPTION` plausivelmente vai exigir um `orderId` real e a
+  checagem de idempotência de FARELO-097; nada disso existe para uma
+  entrada manual). Quando um desses tickets futuros precisar de seu próprio
+  endpoint de criação, ele ganha o seu — este aqui continua dono só de
+  `PURCHASE`.
+
+  **`quantity` estritamente positiva (`@Positive`, mesmo padrão de
+  `RecipeItemRequest#quantity()`)**: zero ou negativo não é o que
+  `PURCHASE` significa (ver javadoc de `InventoryMovement`: o sinal
+  codifica direção, e `PURCHASE` é sempre entrada de estoque). Um valor
+  negativo de entrada seria uma saída disfarçada de compra — se um dia for
+  necessário registrar uma correção negativa manual, esse é o escopo de
+  `ADJUSTMENT` (ainda sem ticket dedicado), não deste.
+
+  **Sem exceção nova.** As únicas falhas possíveis já tinham tratamento
+  pronto em `ApiExceptionHandler`: `400`/`VALIDATION_ERROR` via
+  `MethodArgumentNotValidException` (a mesma infraestrutura de validação
+  Bean Validation usada em todo o resto da API) e `404`/
+  `INGREDIENT_NOT_FOUND` via `IngredientNotFoundException`, reusando
+  `IngredientService#getById` (mesma ordem de validação — ingrediente
+  existe primeiro — já usada por `listByIngredient` e por
+  `RecipeItemService#create`).
+
+  **`@Transactional` em `create`**, mesmo sendo um único `save`: alinha com
+  todo outro método mutante do domínio (`RecipeItemService#create`,
+  `IngredientService#update`) em vez de depender da transação implícita
+  por método do Spring Data — assim uma futura extensão aqui (ex: tocar um
+  saldo corrente, se FARELO-095 algum dia decidir manter um agregado
+  redundante) não precisaria adicionar a anotação retroativamente.
+
+  **Endpoint**: `POST /api/v1/ingredients/{ingredientId}/movements`
+  responde `201 Created` com `Location:
+  /api/v1/ingredients/{ingredientId}/movements/{id}` (mesmo padrão de
+  `POST /api/v1/recipes/{recipeId}/items`, incluindo o mesmo detalhe: não
+  existe um `GET` de item único nesse path — o `Location` aponta para um
+  recurso que só é recuperável via o `GET` de lista já existente, mesma
+  forma de `RecipeItemController`) e corpo `InventoryMovementResponse`
+  (reusado sem alteração — já expunha todos os campos necessários). Ver
+  `docs/api.md` para o endpoint completo.
+
+  **Testes**: `InventoryMovementServiceIntegrationTests` (novo — chama
+  `InventoryMovementService#create` diretamente contra Postgres real,
+  cobrindo criação com sucesso — tipo/quantidade/vínculo com o ingrediente
+  corretos — e `IngredientNotFoundException` para ingrediente
+  inexistente) e novos testes em `InventoryMovementControllerIntegrationTests`
+  (HTTP real via `MockMvc`: criação com sucesso e persistência confirmada
+  via repository, `404 INGREDIENT_NOT_FOUND`, e `400 VALIDATION_ERROR`
+  para quantidade zero, negativa e ausente). Mesmo cuidado de isolamento
+  de teste do restante desta seção: nenhum `@BeforeEach` limpa
+  `ingredient`/`inventory_movement`, e nenhum teste toca
+  `product`/`category` (ver nota de isolamento já documentada acima para
+  `Recipe`/`RecipeItem` sobre `OrderControllerIntegrationTests` deixar
+  linhas em `order_item`).
+
 ## security
 
 Pacote: `com.farelo.api.security`.

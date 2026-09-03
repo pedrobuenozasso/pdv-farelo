@@ -1208,18 +1208,59 @@ completa dessa divergência do padrão de `Recipe`. Sem corpo de requisição.
   receita — um delete cross-recipe é tratado como 404, não executado),
   `code: "RECIPE_ITEM_NOT_FOUND"`.
 
+### `POST /api/v1/ingredients/{ingredientId}/movements`
+
+Registra uma entrada manual de estoque: um humano (ex: um gerente)
+confirmando que estoque chegou fisicamente (uma compra). Sempre cria uma
+linha `InventoryMovement` do tipo `PURCHASE` com `quantity` positiva.
+(FARELO-094)
+
+**Request body**
+
+```json
+{
+  "quantity": 3000
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `quantity` | number | sim | Estritamente positivo (`@Positive`) — zero ou negativo não é o que `PURCHASE` significa. Sempre na unidade base do `Ingredient` referenciado (ver `Ingredient.unit`) — sem conversão de unidade de compra |
+
+Sem campo `type`: é sempre `PURCHASE`, fixado no servidor — este endpoint é
+especificamente o fluxo de entrada manual, não uma criação genérica de
+qualquer tipo de movimento. Ver `docs/domain-model.md`, seção
+`inventory`/`InventoryMovement`/FARELO-094, para a justificativa completa.
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/ingredients/{ingredientId}/movements/{id}` (esse
+recurso não tem um `GET` de item único — só é recuperável via o `GET` de
+lista abaixo, mesmo padrão de `POST /api/v1/recipes/{recipeId}/items`).
+
+```json
+{
+  "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+  "ingredientId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "quantity": 3000,
+  "type": "PURCHASE",
+  "orderId": null,
+  "createdAt": "2026-09-02T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `quantity` ausente, zero ou negativa,
+  `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `{ingredientId}` não corresponde a nenhum ingrediente
+  existente, `code: "INGREDIENT_NOT_FOUND"`.
+
 ### `GET /api/v1/ingredients/{ingredientId}/movements`
 
 Lista os movimentos do ledger de estoque (`InventoryMovement`) de um
 ingrediente, ordenados por `createdAt` (asc — mais antigo primeiro).
 (FARELO-093)
-
-Único endpoint deste ticket — **somente leitura**. Não há `POST` aqui: nada
-neste ticket produz um `InventoryMovement` ainda (ver
-`docs/domain-model.md`, seção `inventory`/`InventoryMovement`); um endpoint
-de criação genérico agora anteciparia o desenho de FARELO-094 ("Criar
-entrada manual de estoque"). Hoje só é possível popular a tabela via
-testes/acesso direto ao repository.
 
 **Response — `200 OK`**
 
