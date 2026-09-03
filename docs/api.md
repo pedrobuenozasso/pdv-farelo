@@ -1374,4 +1374,53 @@ um chamador autenticado.
   `code: "VALIDATION_ERROR"`.
 - `404 Not Found` — `{id}` do usuário não existe, `code: "USER_NOT_FOUND"`.
 
+### `GET /api/v1/notifications`
+
+Lista notificações (`Notification`) — registros de algo que precisa ser
+(ou já foi) enviado a um destinatário, hoje sempre uma mensagem de
+WhatsApp. (FARELO-110)
+
+Único endpoint deste ticket — **somente leitura**. Não há `POST` nem
+endpoints de transição (`/sent`, `/failed`) aqui: nada neste ticket
+constrói ou transiciona uma `Notification` real (ver
+`docs/domain-model.md`, seção `notification`); isso é responsabilidade de
+FARELO-111 (adapter WhatsApp) e FARELO-112/113 (gatilhos automáticos).
+
+**Query parameter opcional**
+
+| Parâmetro | Observações |
+|---|---|
+| `status` | Um de `PENDING`/`SENT`/`FAILED`. Omitido: lista todas as notificações, independente de status. |
+
+**Response — `200 OK`**
+
+Lista ordenada por `createdAt` (asc — mais antiga primeiro), com ou sem o
+filtro de `status`.
+
+```json
+[
+  {
+    "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+    "type": "ORDER_READY",
+    "recipient": "5511999999999",
+    "content": "Seu pedido está pronto!",
+    "status": "PENDING",
+    "createdAt": "2026-09-02T13:00:00Z",
+    "updatedAt": "2026-09-02T13:00:00Z"
+  }
+]
+```
+
+| Campo | Observações |
+|---|---|
+| `type` | Um de `ORDER_READY`/`STOCK_LOW`/`STOCK_CRITICAL`/`OUT_OF_STOCK`/`PRINT_FAILED` |
+| `recipient` | Número de WhatsApp formatado do destinatário |
+| `content` | Texto já formatado, congelado no momento da criação |
+| `status` | Um de `PENDING`/`SENT`/`FAILED` |
+
+Lista vazia (`[]`) quando não existe nenhuma notificação (ou nenhuma com o
+`status` filtrado).
+
+Sempre `200 OK` — sem parâmetro de path a validar.
+
 _(demais endpoints a preencher conforme implementados)_
