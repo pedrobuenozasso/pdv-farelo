@@ -16,7 +16,7 @@ Este documento é preenchido conforme cada endpoint é criado.
 }
 ```
 
-### Autenticação/RBAC (FARELO-121/122/123)
+### Autenticação/RBAC (FARELO-121/122/123/124)
 
 A maioria dos endpoints abaixo não exige nenhuma autenticação — esse é o
 padrão do projeto até aqui (ver `docs/domain-model.md`, seção `security`).
@@ -49,10 +49,18 @@ mestre). Quando um endpoint marcado assim é chamado:
   ```
 
 Um endpoint **sem** a marca "Requer" continua acessível sem nenhum header,
-exatamente como sempre foi — inclusive depois do FARELO-123, que só
-adicionou a marca a alguns endpoints de `categories`/`products`/`users`
-(ver essas seções abaixo e o raciocínio completo em
-`docs/domain-model.md`, subseção FARELO-123).
+exatamente como sempre foi — inclusive depois do FARELO-123 (que adicionou
+a marca a alguns endpoints de `categories`/`products`/`users`) e do
+FARELO-124 (que adicionou a marca a alguns endpoints de `commands`/
+`orders`/`print-jobs` — a superfície PDV/cozinha; ver essas seções abaixo e
+o raciocínio completo em `docs/domain-model.md`, subseções FARELO-123 e
+FARELO-124). Dois casos seguem deliberadamente sem a marca mesmo depois do
+FARELO-124: os dois endpoints que o Cardápio QR (cliente anônimo, sem
+login) depende diretamente (`GET /api/v1/commands/{number}`,
+`POST /api/v1/orders`), e três dos quatro endpoints de `print-jobs`, que
+são chamados só pelo Farelo Edge Agent — uma máquina, não uma pessoa
+logada (ver a subseção FARELO-124 de `docs/domain-model.md` para o porquê
+de RBAC não se aplicar a um endpoint machine-to-machine).
 
 ## Endpoints
 
@@ -330,6 +338,12 @@ humano de negócio (1-100, ver seed FARELO-031) — **não** o `id` técnico
 (UUID); o `id` nunca é usado como identificador na URL/negócio (prompt
 mestre seção 41).
 
+**Sem marca "Requer"** (FARELO-124) — deliberadamente público: é
+dependência direta do Cardápio QR (`apps/web/src/app/c/[commandNumber]`,
+sem login algum), que valida o número da comanda através deste endpoint.
+Ver a subseção FARELO-124 de `docs/domain-model.md` para o raciocínio
+completo.
+
 **Response — `200 OK`**
 
 ```json
@@ -361,6 +375,13 @@ mestre seção 41).
 
 Abre uma comanda: transição de status `AVAILABLE` → `OPEN`, quando um
 cliente começa a usá-la. (FARELO-033)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT`** (FARELO-124) — ação
+de frente de loja sem implicação de dinheiro ainda; ver a seção
+"Autenticação/RBAC" acima para o formato do header e das respostas
+`401`/`403`, e a subseção FARELO-124 de `docs/domain-model.md` para o
+raciocínio completo (inclusive por que `close()` abaixo usa uma lista
+diferente).
 
 **Por que `POST`, não `PATCH`**: `/open` é uma ação ("abra esta comanda"),
 não uma atualização parcial da representação do recurso — convenção comum
@@ -395,6 +416,11 @@ recebe corpo algum.
 
 Fecha uma comanda: transição de status `OPEN`/`PAYMENT_REQUESTED` →
 `CLOSED`. (FARELO-034)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`** (FARELO-124) — tratado como ação
+de manuseio de caixa (mesmo sem validação de pagamento real ainda);
+deliberadamente **sem** `ATTENDANT`, diferente do `open()` acima — ver a
+subseção FARELO-124 de `docs/domain-model.md` para o raciocínio completo.
 
 **Sem validação de pagamento/fiscal ainda** — por enquanto é só a
 transição de estado; validar que o total foi pago antes de fechar é o
@@ -441,6 +467,15 @@ lado do backend por enquanto.
 
 Cria um pedido, com snapshot de preço, dentro de uma comanda.
 (FARELO-052/053)
+
+**Sem marca "Requer"** (FARELO-124) — deliberadamente público: é o
+endpoint que o checkout do Cardápio QR
+(`apps/web/src/app/c/[commandNumber]/menu.tsx`, sem login algum) chama
+diretamente para finalizar o pedido do cliente (prompt mestre seção 6).
+Verificado contra o código-fonte do front, não assumido a partir do método
+HTTP — protegê-lo quebraria o fluxo de pedido do cliente por completo. Ver
+a subseção FARELO-124 de `docs/domain-model.md` para o raciocínio
+completo.
 
 **Nome/telefone do cliente**: aceita `customerName`/`customerPhone`
 opcionais no corpo, persistidos como snapshot simples no próprio pedido
@@ -574,6 +609,13 @@ criado sem esses campos.
 Lista todos os pedidos de uma comanda, cada um com seus itens, do mais
 antigo para o mais novo (`createdAt` asc). (FARELO-055)
 
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT`** (FARELO-124) — não é
+dependência do Cardápio QR (verificado contra o código-fonte de
+`apps/web`: só a tela interna `/pdv` chama este endpoint); `KITCHEN` fica
+de fora — a cozinha tem sua própria fila (`GET /api/v1/orders` abaixo). Ver
+a subseção FARELO-124 de `docs/domain-model.md` para o raciocínio
+completo.
+
 Sem paginação — mesma lógica YAGNI já aplicada em
 `GET /api/v1/categories`/`GET /api/v1/products`: o número de pedidos por
 comanda é naturalmente pequeno.
@@ -617,6 +659,12 @@ Lista vazia (`[]`) quando a comanda ainda não tem pedidos.
 Marca um pedido como em preparo: transição de status `CREATED` →
 `PREPARING`. (FARELO-057)
 
+**Requer: `ADMIN`, `MANAGER`, `KITCHEN`, `CASHIER`** (FARELO-124) — ação de
+cozinha, mas `Order` não é segmentado por estação de produção (diferente
+de `PrintJob`), então um cashier preparando itens `BAR` do mesmo pedido
+também precisa poder chamar isto; `ATTENDANT` fica de fora. Ver a
+subseção FARELO-124 de `docs/domain-model.md` para o raciocínio completo.
+
 Mesma razão para `POST` em vez de `PATCH` do `open`/`close` de comanda —
 é uma ação, não uma atualização parcial da representação do recurso.
 
@@ -649,6 +697,10 @@ Grava uma entrada em `OrderStatusHistory` (`fromStatus: "CREATED"`,
 
 Marca um pedido como pronto: transição de status `PREPARING` → `READY`.
 (FARELO-058)
+
+**Requer: `ADMIN`, `MANAGER`, `KITCHEN`, `CASHIER`** (FARELO-124) — mesma
+lista e raciocínio de `/preparing` acima: quem pode iniciar o preparo
+também pode marcar como pronto.
 
 **Estado de origem válido**: apenas `PREPARING` — pular direto de
 `CREATED` para `READY` (sem passar pela cozinha) é rejeitado como
@@ -687,6 +739,11 @@ Fecha o ciclo de vida normal do pedido (follow-up sem número FARELO
 explícito no roadmap original — ver nota no topo da seção `ordering` em
 `docs/domain-model.md`).
 
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT`** (FARELO-124) — ação
+de frente de loja (entregar ao cliente); `KITCHEN` fica de fora, oposto de
+`/preparing`/`/ready` acima. Ver a subseção FARELO-124 de
+`docs/domain-model.md` para o raciocínio completo.
+
 Mesma razão para `POST` em vez de `PATCH` dos demais endpoints de
 transição acima.
 
@@ -720,6 +777,10 @@ Cancela um pedido: transição de status para `CANCELLED`, a partir de
 origem cada), cancelamento faz sentido em qualquer ponto do ciclo de vida
 até o pedido ser entregue — por isso múltiplos estados de origem são
 aceitos aqui.
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT`** (FARELO-124) — mesma
+lista e mesma tela/persona de `/deliver` acima
+(`apps/web/src/app/pdv/page.tsx`, `OrderCard`).
 
 Mesma razão para `POST` em vez de `PATCH` dos demais endpoints de
 transição acima.
@@ -759,6 +820,13 @@ Lista a fila de pedidos da cozinha: todo pedido, de **todas** as comandas,
 que ainda precisa de atenção da cozinha — status `CREATED`, `CONFIRMED`
 ou `PREPARING` (tudo antes de `READY`) — do mais antigo para o mais novo
 (`createdAt` asc, fila FIFO). (FARELO-059)
+
+**Requer: `ADMIN`, `MANAGER`, `KITCHEN`** (FARELO-124) — único consumidor
+real hoje é o KDS (`apps/web/src/app/kds/page.tsx`); `CASHIER`/`ATTENDANT`
+ficam de fora deste endpoint de leitura por não haver hoje nenhuma tela de
+frente de loja que o consuma (diferente de `/preparing`/`/ready`, que
+também permitem `CASHIER`). Ver a subseção FARELO-124 de
+`docs/domain-model.md` para o raciocínio completo.
 
 Pensado para o KDS (tela da cozinha, ticket de frontend futuro): mostra
 tudo que ainda não chegou em `READY`. Pedidos `READY`, `DELIVERED` ou
@@ -815,6 +883,13 @@ Farelo Edge Agent (FARELO-075, `apps/edge-agent`) para saber o que ainda
 precisa ser impresso: `Order criado → PrintJob PENDING → Edge Agent →
 impressora → PRINTED` (prompt mestre seção 10).
 
+**Sem marca "Requer"** (FARELO-124) — deliberadamente sem RBAC: chamado
+exclusivamente pelo Farelo Edge Agent, um processo de máquina sem login
+(verificado contra `apps/edge-agent/src/printJobsClient.ts`), nunca por
+uma pessoa. Ver a subseção FARELO-124 de `docs/domain-model.md` para o
+raciocínio completo sobre por que RBAC não se aplica a um endpoint
+machine-to-machine.
+
 Sem query param de status: mesma lógica de `GET /api/v1/orders` (a fila da
 cozinha) — o propósito inteiro deste endpoint já é "o que está pendente",
 então filtrar por outro status não faz sentido aqui. Sem paginação — mesma
@@ -870,6 +945,10 @@ Fecha o ciclo aberto pelo FARELO-076 (`GET /api/v1/print-jobs`): o Edge
 Agent consultava os `PrintJob`s pendentes, mas nunca reportava de volta o
 resultado — os jobs ficavam `PENDING` para sempre.
 
+**Sem marca "Requer"** (FARELO-124) — mesmo raciocínio de
+`GET /api/v1/print-jobs` acima: endpoint machine-to-machine chamado só
+pelo Edge Agent.
+
 Mesma razão para `POST` em vez de `PATCH` dos demais endpoints de ação
 deste projeto (ex: `/api/v1/orders/{id}/deliver`/`/cancel`): é uma ação,
 não uma atualização parcial de representação. Sem corpo de requisição —
@@ -902,6 +981,10 @@ com `status: "PRINTED"`.
 Reporta que o Edge Agent falhou ao imprimir o ticket: transição de status
 `PENDING` → `FAILED`. (FARELO-077)
 
+**Sem marca "Requer"** (FARELO-124) — mesmo raciocínio de
+`GET /api/v1/print-jobs`/`.../printed` acima: endpoint machine-to-machine
+chamado só pelo Edge Agent.
+
 Mesma razão para `POST` em vez de `PATCH`, e mesmo formato de resposta/erros
 de `/printed` acima. Sem corpo de requisição: nenhum motivo estruturado da
 falha é aceito por enquanto — YAGNI, não existe nenhum consumidor para esse
@@ -933,6 +1016,15 @@ status `FAILED` → `PENDING`. (FARELO-079)
 Implementa a última lacuna da seção 10 do prompt mestre — "Falha: `FAILED`,
 permitindo retry" — deixada em aberto desde o FARELO-071/077: até este
 ticket, um job `FAILED` ficava `FAILED` para sempre.
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`, `KITCHEN`, `ATTENDANT`**
+(FARELO-124, todos os cinco papéis operacionais) — diferente dos três
+endpoints acima, este é um endpoint **manual** (ver abaixo), acionado por
+uma pessoa, não pelo Edge Agent — verificado contra o código-fonte de
+`apps/edge-agent` e `apps/web`, nenhum dos dois chama este endpoint hoje.
+Um `PrintJob` com falha não pertence a um único papel/estação, então
+qualquer funcionário autenticado pode reenviá-lo; ver a subseção
+FARELO-124 de `docs/domain-model.md` para o raciocínio completo.
 
 Endpoint manual — não existe (ainda) nenhum retry automático agendado; ver
 `docs/domain-model.md`, seção `printing`, entrada FARELO-079, para a

@@ -18,6 +18,10 @@ import com.farelo.api.ordering.OrderStatusHistoryRepository;
 import com.farelo.api.outbox.OutboxEvent;
 import com.farelo.api.outbox.OutboxEventRepository;
 import com.farelo.api.outbox.OutboxEventStatus;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -26,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -43,16 +48,29 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Integration test for {@code POST /api/v1/orders}, against a real
- * PostgreSQL instance (Testcontainers).
+ * Integration test for {@code POST /api/v1/orders} and the order-lifecycle
+ * transition endpoints, against a real PostgreSQL instance (Testcontainers).
  *
  * <p>Uses dedicated seeded command numbers (10-13) — distinct from every
  * number already spoken for by other test classes sharing the singleton
  * Postgres container (see {@code CommandControllerIntegrationTests}: 1-7,
- * 999; {@code CommandRepositoryIntegrationTests}: 101;
+ * 91-92, 999; {@code CommandRepositoryIntegrationTests}: 101;
  * {@code OrderRepositoryIntegrationTests}: 8;
  * {@code OrderItemRepositoryIntegrationTests}: 9) — and resets them back to
  * {@code AVAILABLE} in {@code @AfterEach}.
+ *
+ * <p><b>FARELO-124</b>: every method here except {@code create} now
+ * requires a caller role (see {@code OrderController}'s javadoc for exactly
+ * which). {@code POST /api/v1/orders} itself stays <b>without</b> a header
+ * anywhere in this class — it's the public "Cardápio QR" checkout
+ * dependency (see the controller's javadoc). Every call to
+ * {@code /preparing}/{@code /ready}/{@code /deliver}/{@code /cancel} below
+ * uses a {@code CASHIER} token (the one role allowed on all four — see
+ * {@code OrderController}'s javadoc), minted via {@link #tokenFor}, same
+ * pattern {@code ProductControllerIntegrationTests}/
+ * {@code UserControllerIntegrationTests} established at FARELO-123; the
+ * kitchen queue ({@code GET}) uses a {@code KITCHEN} token instead, since
+ * {@code CASHIER} isn't allowed there.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -61,6 +79,8 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     private static final int COMMAND_AVAILABLE = 10;
     private static final int COMMAND_OPEN = 11;
     private static final int COMMAND_CLOSED = 12;
+
+    private static final String PASSWORD = "senha-forte-123";
 
     @Autowired
     private MockMvc mockMvc;
@@ -85,6 +105,15 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Autowired
     private OutboxEventRepository outboxEventRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -123,10 +152,29 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         return productRepository.save(new Product("Café Espresso", price, category));
     }
 
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Test User",
+                "test-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD),
+                role));
+        return jwtTokenService.issue(user).token();
+    }
+
+    // FARELO-124: CASHIER is the one role allowed on every one of
+    // preparing/ready/deliver/cancel (see OrderController's javadoc) — used
+    // throughout this class for setup/assertion calls that aren't
+    // themselves testing the RBAC boundary (those live in their own
+    // dedicated tests below).
+    private String cashierToken() {
+        return tokenFor(UserRole.CASHIER);
+    }
+
     // Creates a real order (status CREATED) through the actual creation
     // endpoint, so its first OrderStatusHistory entry (FARELO-056) is
     // written the normal way — used as setup for the FARELO-057/058
-    // transition tests below.
+    // transition tests below. POST /api/v1/orders stays unprotected
+    // (FARELO-124), so no Authorization header here.
     private UUID createOrder(Product product) throws Exception {
         String body = """
                 {
@@ -470,7 +518,8 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     void marksOrderAsPreparingAndRecordsHistory() throws Exception {
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
 
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + cashierToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(orderId.toString()))
                 .andExpect(jsonPath("$.status").value("PREPARING"));
@@ -488,10 +537,14 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void returnsConflictWhenMarkingNonCreatedOrderAsPreparing() throws Exception {
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
+        String token = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
 
         // already PREPARING — marking it as preparing again is invalid.
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ORDER_INVALID_TRANSITION"))
                 .andExpect(jsonPath("$.message").exists())
@@ -500,7 +553,8 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsOrderNotFoundWhenMarkingUnknownOrderAsPreparing() throws Exception {
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", UUID.randomUUID()))
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + cashierToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
     }
@@ -508,9 +562,13 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void marksOrderAsReadyAndRecordsHistory() throws Exception {
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
+        String token = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(orderId.toString()))
                 .andExpect(jsonPath("$.status").value("READY"));
@@ -528,7 +586,8 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         // skips PREPARING entirely — still CREATED.
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
 
-        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)
+                        .header("Authorization", "Bearer " + cashierToken()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ORDER_INVALID_TRANSITION"))
                 .andExpect(jsonPath("$.message").exists())
@@ -537,7 +596,8 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsOrderNotFoundWhenMarkingUnknownOrderAsReady() throws Exception {
-        mockMvc.perform(post("/api/v1/orders/{id}/ready", UUID.randomUUID()))
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + cashierToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
     }
@@ -545,10 +605,16 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void marksOrderAsDeliveredAndRecordsHistory() throws Exception {
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)).andExpect(status().isOk());
+        String token = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(orderId.toString()))
                 .andExpect(jsonPath("$.status").value("DELIVERED"));
@@ -566,7 +632,8 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         // still CREATED — skips PREPARING/READY entirely.
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
 
-        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId)
+                        .header("Authorization", "Bearer " + cashierToken()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ORDER_INVALID_TRANSITION"))
                 .andExpect(jsonPath("$.message").exists())
@@ -575,7 +642,8 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsOrderNotFoundWhenMarkingUnknownOrderAsDelivered() throws Exception {
-        mockMvc.perform(post("/api/v1/orders/{id}/deliver", UUID.randomUUID()))
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + cashierToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
     }
@@ -584,7 +652,8 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     void cancelsOrderFromCreatedAndRecordsHistory() throws Exception {
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
 
-        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + cashierToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(orderId.toString()))
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
@@ -607,7 +676,8 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
         setOrderStatus(orderId, OrderStatus.CONFIRMED);
 
-        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + cashierToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
 
@@ -623,9 +693,13 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void cancelsOrderFromPreparingAndRecordsHistory() throws Exception {
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
+        String token = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
 
@@ -640,10 +714,16 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void cancelsOrderFromReadyAndRecordsHistory() throws Exception {
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)).andExpect(status().isOk());
+        String token = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
 
@@ -658,11 +738,19 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void returnsConflictWhenCancellingDeliveredOrder() throws Exception {
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId)).andExpect(status().isOk());
+        String token = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ORDER_INVALID_TRANSITION"))
                 .andExpect(jsonPath("$.message").exists())
@@ -672,9 +760,13 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void returnsConflictWhenCancellingAlreadyCancelledOrder() throws Exception {
         UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
-        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)).andExpect(status().isOk());
+        String token = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ORDER_INVALID_TRANSITION"))
                 .andExpect(jsonPath("$.message").exists())
@@ -683,7 +775,8 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsOrderNotFoundWhenCancellingUnknownOrder() throws Exception {
-        mockMvc.perform(post("/api/v1/orders/{id}/cancel", UUID.randomUUID()))
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + cashierToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
     }
@@ -695,16 +788,26 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void kitchenQueueExcludesDeliveredAndCancelledOrders() throws Exception {
         Product product = createActiveProduct(new BigDecimal("6.00"));
+        String cashierToken = cashierToken();
 
         UUID deliveredOrderId = createOrder(product);
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", deliveredOrderId)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/orders/{id}/ready", deliveredOrderId)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/orders/{id}/deliver", deliveredOrderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", deliveredOrderId)
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", deliveredOrderId)
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", deliveredOrderId)
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isOk());
 
         UUID cancelledOrderId = createOrder(product);
-        mockMvc.perform(post("/api/v1/orders/{id}/cancel", cancelledOrderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", cancelledOrderId)
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isOk());
 
-        MvcResult result = mockMvc.perform(get("/api/v1/orders"))
+        MvcResult result = mockMvc.perform(get("/api/v1/orders")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -726,6 +829,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void listsKitchenQueueOrderedByCreatedAtAscExcludingReadyOrders() throws Exception {
         Product product = createActiveProduct(new BigDecimal("6.00"));
+        String cashierToken = cashierToken();
 
         UUID createdOrderId = createOrder(product);
 
@@ -733,13 +837,20 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         // assertion (same pattern as CommandOrdersControllerIntegrationTests).
         Thread.sleep(10);
         UUID preparingOrderId = createOrder(product);
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", preparingOrderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", preparingOrderId)
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isOk());
 
         UUID readyOrderId = createOrder(product);
-        mockMvc.perform(post("/api/v1/orders/{id}/preparing", readyOrderId)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/orders/{id}/ready", readyOrderId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", readyOrderId)
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", readyOrderId)
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isOk());
 
-        MvcResult result = mockMvc.perform(get("/api/v1/orders"))
+        MvcResult result = mockMvc.perform(get("/api/v1/orders")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -765,6 +876,177 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         OrderResponse preparingResponse = queue.stream()
                 .filter(o -> o.id().equals(preparingOrderId)).findFirst().orElseThrow();
         assertThat(preparingResponse.status()).isEqualTo(OrderStatus.PREPARING);
+    }
+
+    // --- FARELO-124: RBAC on queue()/markAsPreparing/markAsReady/
+    //     markAsDelivered/markAsCancelled -------------------------------
+
+    @Test
+    void rejectsQueueWithNoAuthorizationHeader() throws Exception {
+        mockMvc.perform(get("/api/v1/orders"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // CASHIER is allowed on preparing/ready/deliver/cancel, but not on the
+    // kitchen queue itself — see OrderController's javadoc.
+    @Test
+    void rejectsQueueWhenCallerRoleIsNotAllowed() throws Exception {
+        mockMvc.perform(get("/api/v1/orders")
+                        .header("Authorization", "Bearer " + cashierToken()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void allowsQueueAsKitchen() throws Exception {
+        mockMvc.perform(get("/api/v1/orders")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsPreparingWithNoAuthorizationHeader() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // ATTENDANT is allowed on deliver/cancel but not preparing/ready — see
+    // OrderController's javadoc.
+    @Test
+    void rejectsPreparingWhenCallerRoleIsNotAllowed() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void allowsPreparingAsKitchen() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsReadyWithNoAuthorizationHeader() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + cashierToken()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsReadyWhenCallerRoleIsNotAllowed() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + cashierToken()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsDeliverWithNoAuthorizationHeader() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        String token = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // KITCHEN is allowed on preparing/ready but not deliver/cancel — see
+    // OrderController's javadoc.
+    @Test
+    void rejectsDeliverWhenCallerRoleIsNotAllowed() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        String setupToken = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + setupToken))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)
+                        .header("Authorization", "Bearer " + setupToken))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void allowsDeliverAsAttendant() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        String setupToken = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + setupToken))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)
+                        .header("Authorization", "Bearer " + setupToken))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsCancelWithNoAuthorizationHeader() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsCancelWhenCallerRoleIsNotAllowed() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void allowsCancelAsAttendant() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
+                .andExpect(status().isOk());
     }
 
 }

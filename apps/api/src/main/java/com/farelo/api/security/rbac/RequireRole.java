@@ -34,11 +34,22 @@ import java.lang.annotation.Target;
  * surface — {@code CategoryController}/{@code ProductController} (write
  * methods only) and {@code UserController} (see that subsection of
  * {@code docs/domain-model.md} for exactly which methods and roles, and the
- * reasoning). Still deliberately untouched: {@code CommandController},
- * {@code OrderController}, {@code PrintJobController},
- * {@code IngredientController}, {@code RecipeController},
- * {@code AuthController}, {@code NotificationController} — the PDV/kitchen
- * surface is FARELO-124, a future, distinct ticket.
+ * reasoning).
+ *
+ * <p><b>FARELO-124 applies it to the PDV/kitchen surface</b>: most of
+ * {@code CommandController} (except {@code findByNumber}, a public
+ * "Cardápio QR" dependency), {@code OrderController} (except
+ * {@code create}, also a public dependency), {@code CommandOrdersController},
+ * and only {@code PrintJobController#retry} — the other three
+ * {@code PrintJobController} endpoints are called exclusively by the Farelo
+ * Edge Agent, a machine with no user login, so {@code @RequireRole} doesn't
+ * apply to them (see that class's javadoc for the full reasoning). See the
+ * FARELO-124 subsection of {@code docs/domain-model.md} for exactly which
+ * methods and roles. Still deliberately untouched: {@code
+ * IngredientController}, {@code RecipeController}, {@code AuthController},
+ * {@code NotificationController} — out of scope for both FARELO-123 and
+ * FARELO-124 (inventory/notification RBAC, if ever needed, is a distinct
+ * future ticket).
  */
 @Target({ElementType.TYPE, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)

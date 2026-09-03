@@ -20,6 +20,10 @@ import com.farelo.api.outbox.OutboxWorker;
 import com.farelo.api.printing.PrintJob;
 import com.farelo.api.printing.PrintJobRepository;
 import com.farelo.api.printing.PrintJobStatus;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -64,6 +69,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>Uses dedicated seeded command number 20 — the next free number after
  * every one already reserved elsewhere (see {@code
  * PrintJobServiceIntegrationTests}' javadoc: 1-19, 101, 999 already taken).
+ *
+ * <p><b>FARELO-124</b>: only {@code POST .../retry} now requires a caller
+ * role (see {@code PrintJobController}'s javadoc for why {@code GET} and
+ * {@code .../printed}/{@code .../failed} stay unprotected — Edge Agent
+ * machine endpoints) — so only the {@code .../retry} calls below mint a
+ * token via {@link #tokenFor} and send it as
+ * {@code Authorization: Bearer <token>}, same pattern
+ * {@code ProductControllerIntegrationTests} established at FARELO-123.
+ * Every {@code GET}/{@code .../printed}/{@code .../failed} call keeps
+ * <b>no</b> header, exactly as before this ticket.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -71,8 +86,19 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
 
     private static final int COMMAND_NUMBER = 20;
 
+    private static final String PASSWORD = "senha-forte-123";
+
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
 
     @Autowired
     private CategoryRepository categoryRepository;
@@ -136,6 +162,15 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         Command command = commandRepository.findByNumber(COMMAND_NUMBER).orElseThrow();
         command.setStatus(CommandStatus.AVAILABLE);
         commandRepository.save(command);
+    }
+
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Test User",
+                "test-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD),
+                role));
+        return jwtTokenService.issue(user).token();
     }
 
     private Product createProduct(String name, BigDecimal price, ProductionStation station) {
@@ -363,7 +398,8 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
         markStatus(order, PrintJobStatus.FAILED);
 
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(printJobId.toString()))
                 .andExpect(jsonPath("$.status").value("PENDING"))
@@ -386,7 +422,8 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
         UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
 
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PRINT_JOB_INVALID_TRANSITION"))
                 .andExpect(jsonPath("$.message").exists())
@@ -400,7 +437,8 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
         markStatus(order, PrintJobStatus.PRINTED);
 
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PRINT_JOB_INVALID_TRANSITION"))
                 .andExpect(jsonPath("$.message").exists())
@@ -409,7 +447,8 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsNotFoundWhenRetryingUnknownPrintJob() throws Exception {
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", UUID.randomUUID()))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PRINT_JOB_NOT_FOUND"));
     }
@@ -419,13 +458,15 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
         Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
         UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+        String token = tokenFor(UserRole.ATTENDANT);
 
         // Cycle FAILED -> retry (PENDING) -> FAILED again, MAX_RETRY_COUNT
         // times: each retry succeeds and bumps retryCount by one.
         for (int attempt = 1; attempt <= MAX_RETRY_COUNT; attempt++) {
             markStatus(order, PrintJobStatus.FAILED);
 
-            mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+            mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId)
+                            .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("PENDING"))
                     .andExpect(jsonPath("$.retryCount").value(attempt));
@@ -435,7 +476,8 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         // must be rejected instead of retried again.
         markStatus(order, PrintJobStatus.FAILED);
 
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PRINT_JOB_RETRY_LIMIT_EXCEEDED"))
                 .andExpect(jsonPath("$.message").exists())
@@ -444,6 +486,38 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         PrintJob job = printJobRepository.findById(printJobId).orElseThrow();
         assertThat(job.getStatus()).isEqualTo(PrintJobStatus.FAILED);
         assertThat(job.getRetryCount()).isEqualTo(MAX_RETRY_COUNT);
+    }
+
+    // --- FARELO-124: RBAC on retry() only ----------------------------------
+
+    @Test
+    void rejectsRetryWithNoAuthorizationHeader() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+        markStatus(order, PrintJobStatus.FAILED);
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // retry() deliberately allows all five operational roles (see
+    // PrintJobController's javadoc) — KITCHEN is exercised here as the
+    // least front-of-house-sounding one, to prove the list really is "any
+    // staff role", not just the cashier/attendant roles already used above.
+    @Test
+    void allowsRetryAsKitchen() throws Exception {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
+        UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
+        markStatus(order, PrintJobStatus.FAILED);
+
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/retry", printJobId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING"));
     }
 
 }
