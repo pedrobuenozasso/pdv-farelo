@@ -18,6 +18,7 @@ import com.farelo.api.ordering.OrderNotFoundException;
 import com.farelo.api.printing.PrintJobInvalidTransitionException;
 import com.farelo.api.printing.PrintJobNotFoundException;
 import com.farelo.api.printing.PrintJobRetryLimitExceededException;
+import com.farelo.api.security.InvalidCredentialsException;
 import com.farelo.api.security.UserEmailAlreadyExistsException;
 import com.farelo.api.security.UserNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -205,6 +206,17 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ErrorResponse handleNotificationNotFound(NotificationNotFoundException ex) {
         return new ErrorResponse("NOTIFICATION_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // FARELO-121: POST /api/v1/auth/login with a wrong email or wrong
+    // password (or a matching-but-inactive user) — 401, one generic
+    // code/message for every cause, never distinguishing "email doesn't
+    // exist" from "password is wrong". See InvalidCredentialsException's
+    // javadoc for why.
+    @ExceptionHandler(InvalidCredentialsException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ErrorResponse handleInvalidCredentials(InvalidCredentialsException ex) {
+        return new ErrorResponse("INVALID_CREDENTIALS", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

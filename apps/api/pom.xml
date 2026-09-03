@@ -20,6 +20,9 @@
 
     <properties>
         <java.version>21</java.version>
+        <!-- FARELO-121: JWT issuance/verification for POST /api/v1/auth/login
+             — see com.farelo.api.security.auth.JwtTokenService's javadoc. -->
+        <jjwt.version>0.12.6</jjwt.version>
     </properties>
 
     <dependencies>
@@ -67,6 +70,37 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+
+        <!--
+            FARELO-121: standalone JWT library, deliberately NOT
+            spring-boot-starter-security — see PasswordEncoderConfig's javadoc
+            (FARELO-120) for why this codebase avoids that starter until
+            FARELO-123/124 actually need endpoint protection, and
+            JwtTokenService's javadoc for the token design itself.
+            jjwt-api is the compile-time interface; jjwt-impl (the reference
+            implementation) and jjwt-jackson (claims (de)serialization via
+            Jackson, already on the classpath via spring-boot-starter-web —
+            no need for jjwt's alternative Gson binding) are both
+            implementation details, hence runtime-scoped, same as postgresql/
+            flyway-database-postgresql above.
+        -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>${jjwt.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
         </dependency>
 
         <dependency>

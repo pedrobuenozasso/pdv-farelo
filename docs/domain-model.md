@@ -1552,6 +1552,119 @@ real (BCrypt) — prova de que o hash está sendo aplicado de verdade, não só
 
 Ver `docs/api.md` para os cinco endpoints completos.
 
+### FARELO-121 — Autenticação (login + emissão/verificação de token)
+
+Primeiro mecanismo real de autenticação do sistema: dado email+senha,
+verifica contra `User`/`BCryptPasswordEncoder` (FARELO-120, já mergeado) e
+emite um token que o cliente reapresenta nas próximas requisições. Endpoint
+único: `POST /api/v1/auth/login` (`AuthController`, pacote `security.web`).
+Ver `docs/api.md` para o endpoint completo.
+
+**Escopo deste ticket, explicitamente**: só login + emissão/verificação de
+token. RBAC (FARELO-122) e proteger os endpoints Admin/PDV (FARELO-123/124)
+são tickets futuros e distintos — **nenhum endpoint, nem os já existentes
+nem o `POST /api/v1/auth/login` deste próprio ticket, passa a exigir token
+depois deste ticket**. É esperado e correto que, ao final, seja possível
+obter um token válido sem que nada ainda o exija.
+
+**Decisão de dependência — por que não `spring-boot-starter-security`**:
+mesmo raciocínio já registrado em `PasswordEncoderConfig` (FARELO-120): o
+starter completo autoconfigura uma cadeia de segurança que exige
+autenticação em toda requisição assim que está no classpath, quebrando
+instantaneamente todo endpoint hoje desprotegido por desenho — efeito
+colateral que pré-decidiria o desenho de FARELO-123/124 dentro deste
+ticket. Em vez disso, este ticket adiciona **apenas uma biblioteca de JWT
+focada** (`io.jsonwebtoken:jjwt-api`/`-impl`/`-jackson`, versão `0.12.6`) —
+sem dependência de `spring-security-core`/`-web`/`-config`, sem
+autoconfiguração de filtro algum. `JwtTokenService`
+(`com.farelo.api.security.auth`) constrói/valida o token com uma função
+pura, sem depender da máquina de `AuthenticationManager` do Spring
+Security — não há necessidade dela para o escopo deste ticket.
+
+**Formato do token — JWT assinado (JWS), não um token opaco com tabela de
+sessão**: duas formas foram consideradas — (a) um token aleatório opaco
+persistido em uma nova tabela (`session`/`auth_token`), consultado a cada
+requisição; ou (b) um JWT autocontido, verificado localmente por assinatura,
+sem round-trip ao banco. **Decisão: (b)**. Motivos: nenhuma migration nova
+é necessária (uma tabela de sessão é exatamente o tipo de decisão que
+FARELO-122/123/124 deveriam tomar quando de fato precisarem de revogação,
+não algo a adivinhar aqui); e a verificação futura (o filtro/interceptor que
+FARELO-123/124 vão escrever) não precisa tocar o banco — só uma checagem
+pura de assinatura/expiração, então FARELO-123/124 herdam uma função
+(`JwtTokenService#parse`) sem acoplamento a infraestrutura de request que
+ainda não existe.
+
+**Assinatura — HMAC-SHA256 (HS256), segredo único simétrico**: escolhido
+sobre um algoritmo assimétrico (ex. RS256/par de chaves) porque é o próprio
+backend que emite e verifica seus tokens — nenhum outro serviço precisa
+verificar um token sem também ter acesso ao segredo, então a complexidade
+extra de gerenciar um par de chaves não compra nada aqui (revisitar apenas
+se um serviço externo algum dia precisar verificar tokens que não emitiu).
+O segredo (`security.jwt.secret`, `application.yml`) vem de variável de
+ambiente (`JWT_SECRET`), no mesmo padrão `${ENV_VAR:default}` de
+`spring.datasource.password`/`whatsapp.api.access-token` — nunca hardcoded,
+nunca logado. O default em `application.yml` é deliberadamente inseguro
+(mesmo espírito do `change-me` de `spring.datasource.password`), só longo o
+suficiente (61 bytes, acima do mínimo de 256 bits/32 bytes exigido pelo
+HS256) para o app subir em dev/test sem configuração adicional.
+
+**Expiração — sim, configurável, default de 8 horas**: um token que nunca
+expira significa que um token vazado (ou de um funcionário desligado, ver
+`User#active`) fica válido para sempre, sem forma de desligá-lo a não ser
+trocar o segredo de assinatura para todo mundo de uma vez.
+`security.jwt.expiration-minutes` (default `480` = 8h, um turno de
+trabalho) limita essa janela de exposição sem forçar reautenticação no meio
+do turno.
+
+**O que este ticket deliberadamente NÃO faz — sem revogação/logout, sem
+refresh token**: um JWT stateless não pode ser invalidado antes do próprio
+`exp` sem reintroduzir uma consulta ao banco por requisição (uma blocklist
+server-side), o que anularia o motivo de ter escolhido JWT sobre token
+opaco+tabela. A expiração de 8h é toda a mitigação por enquanto — pior que
+revogação instantânea, mas aceitável para o primeiro ticket de autenticação,
+quando nenhum endpoint sequer checa o token ainda (FARELO-123/124).
+Revisitar se/quando surgir um requisito real de "deslogar este dispositivo
+agora".
+
+**Verificação de credenciais — `AuthenticationService#login`** (pacote
+`security`, ao lado de `UserService`): reaproveita `UserRepository#findByEmail`
+e o mesmo bean `PasswordEncoder` de `PasswordEncoderConfig` (nenhuma
+dependência de hashing nova). Falha com `InvalidCredentialsException` —
+sempre a mesma mensagem genérica ("Invalid credentials"), sem carregar
+email nem motivo — em três casos, deliberadamente indistinguíveis pela
+resposta: email não existe; senha errada; usuário existe e senha está
+certa, mas `active = false` (funcionário desligado não deve conseguir
+token novo mesmo lembrando a senha). **Proteção contra enumeração por
+tempo de resposta**: quando o email não existe, o serviço ainda executa
+`passwordEncoder.matches` contra um hash BCrypt "dummy" pré-computado (uma
+vez, no construtor, com o encoder real injetado), descartando o resultado —
+sem isso, um email inexistente responderia imediatamente enquanto um email
+real sempre pagaria o custo (deliberadamente alto) do BCrypt, uma diferença
+de tempo que um atacante poderia usar para enumerar contas válidas.
+
+Mapeado em `ApiExceptionHandler` (`INVALID_CREDENTIALS`, `401
+Unauthorized`) — mesmo padrão de handler das demais exceções de domínio,
+mas contrastando deliberadamente com `UserNotFoundException` (mensagem
+específica é aceitável ali, é um contexto de CRUD administrativo já
+autenticado-em-nada; aqui, qualquer detalhe vazaria existência de conta).
+
+`LoginRequest` valida apenas `@NotBlank` em `email`/`password` — sem
+`@Email`/`@Size`, deliberadamente diferente de `UserCreateRequest`: validar
+formato/tamanho aqui separaria "credenciais erradas" em duas respostas
+distintas (400 `VALIDATION_ERROR` vs. 401 `INVALID_CREDENTIALS`) para o
+mesmo fato subjacente (login nunca vai funcionar), o oposto do objetivo de
+"todo tipo de erro parece igual" deste endpoint.
+
+Testes: `AuthControllerIntegrationTests` (login com sucesso emite token;
+senha errada e email desconhecido retornam exatamente o mesmo
+status/código/mensagem — prova de que os dois casos são mesmo
+indistinguíveis, não só "algum 401" cada um; usuário inativo com senha
+correta também falha) e `JwtTokenServiceTests` (unitário, sem Spring/
+Postgres: token emitido é validado de volta para a mesma identidade,
+`expiresAt` bate com o `expiration-minutes` configurado, assinatura com
+segredo diferente é rejeitada, token malformado é rejeitado, token já
+expirado é rejeitado).
+
 ## notification
 
 Pacote: `com.farelo.api.notification`.
