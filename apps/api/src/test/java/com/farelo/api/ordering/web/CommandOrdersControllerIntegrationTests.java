@@ -11,13 +11,19 @@ import com.farelo.api.ordering.Order;
 import com.farelo.api.ordering.OrderItem;
 import com.farelo.api.ordering.OrderItemRepository;
 import com.farelo.api.ordering.OrderRepository;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -30,7 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>Uses dedicated seeded command numbers (14, 15) — distinct from every
  * number already spoken for elsewhere in the command/ordering domains'
- * tests ({@code CommandControllerIntegrationTests}: 1-7, 999;
+ * tests ({@code CommandControllerIntegrationTests}: 1-7, 91-92, 999;
  * {@code CommandRepositoryIntegrationTests}: 101;
  * {@code OrderRepositoryIntegrationTests}: 8;
  * {@code OrderItemRepositoryIntegrationTests}: 9;
@@ -38,6 +44,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * mutated here, only orders/items are added under these two dedicated
  * commands, so no {@code @AfterEach} cleanup is needed (same reasoning as
  * {@code OrderRepositoryIntegrationTests}).
+ *
+ * <p><b>FARELO-124</b>: this endpoint now requires a caller role (see
+ * {@code CommandOrdersController}'s javadoc), so every request here mints a
+ * real token via {@link #tokenFor} and sends it as
+ * {@code Authorization: Bearer <token>} — same pattern
+ * {@code ProductControllerIntegrationTests} established at FARELO-123.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -45,6 +57,8 @@ class CommandOrdersControllerIntegrationTests extends AbstractIntegrationTest {
 
     private static final int COMMAND_WITH_ORDERS = 14;
     private static final int COMMAND_WITHOUT_ORDERS = 15;
+
+    private static final String PASSWORD = "senha-forte-123";
 
     @Autowired
     private MockMvc mockMvc;
@@ -64,9 +78,27 @@ class CommandOrdersControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private OrderItemRepository orderItemRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
     private Product createActiveProduct(BigDecimal price) {
         Category category = categoryRepository.save(new Category("Bebidas"));
         return productRepository.save(new Product("Café Espresso", price, category));
+    }
+
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Test User",
+                "test-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD),
+                role));
+        return jwtTokenService.issue(user).token();
     }
 
     @Test
@@ -85,7 +117,8 @@ class CommandOrdersControllerIntegrationTests extends AbstractIntegrationTest {
         Order secondOrder = orderRepository.save(new Order(command));
         orderItemRepository.save(new OrderItem(secondOrder, product, 2, product.getPrice()));
 
-        mockMvc.perform(get("/api/v1/commands/{number}/orders", COMMAND_WITH_ORDERS))
+        mockMvc.perform(get("/api/v1/commands/{number}/orders", COMMAND_WITH_ORDERS)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[0].id").value(firstOrder.getId().toString()))
@@ -99,7 +132,8 @@ class CommandOrdersControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsEmptyListForCommandWithoutOrders() throws Exception {
-        mockMvc.perform(get("/api/v1/commands/{number}/orders", COMMAND_WITHOUT_ORDERS))
+        mockMvc.perform(get("/api/v1/commands/{number}/orders", COMMAND_WITHOUT_ORDERS)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
@@ -107,9 +141,31 @@ class CommandOrdersControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsCommandNotFoundForUnknownCommandNumber() throws Exception {
-        mockMvc.perform(get("/api/v1/commands/{number}/orders", 999))
+        mockMvc.perform(get("/api/v1/commands/{number}/orders", 999)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"));
+    }
+
+    // --- FARELO-124: RBAC on listByCommand() ------------------------------
+
+    @Test
+    void rejectsListingWithNoAuthorizationHeader() throws Exception {
+        mockMvc.perform(get("/api/v1/commands/{number}/orders", COMMAND_WITHOUT_ORDERS))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // KITCHEN has no business viewing a comanda's billing detail — see
+    // CommandOrdersController's javadoc.
+    @Test
+    void rejectsListingWhenCallerRoleIsNotAllowed() throws Exception {
+        mockMvc.perform(get("/api/v1/commands/{number}/orders", COMMAND_WITHOUT_ORDERS)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
     }
 
 }

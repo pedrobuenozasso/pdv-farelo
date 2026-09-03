@@ -2561,6 +2561,176 @@ testar essa fronteira fina). Ver também a extensão de
 
 Ver `docs/api.md` para o detalhe "Requer" em cada um dos endpoints acima.
 
+### FARELO-124 — Proteger PDV (aplicação do RBAC à superfície PDV/cozinha)
+
+Segundo ticket a de fato restringir acesso, depois do FARELO-123 (Admin).
+Este ticket decide *quem* pode chamar *qual* endpoint na superfície
+operacional do dia a dia — os controllers que o javadoc de `RequireRole`
+já apontava como "deliberadamente ainda não tocados" desde o FARELO-122:
+`CommandController` (`command.web`), `OrderController`/
+`CommandOrdersController` (`ordering.web`) e `PrintJobController`
+(`printing.web`). Fora de escopo, explicitamente (mantido do FARELO-123):
+`IngredientController`, `RecipeController` (RBAC de estoque, se algum dia
+necessário, é ticket futuro e distinto), `AuthController` (não faz sentido
+exigir token para obter um token) e `NotificationController`.
+
+**Método de trabalho**: cada endpoint foi decidido individualmente — não
+existe uma regra única "tudo em `command`/`ordering`/`printing` vira
+`ADMIN`+`MANAGER`" — verificando, além do prompt mestre, o consumo real de
+cada endpoint em `apps/web` (o código-fonte do front, não só o texto do
+ticket) e em `apps/edge-agent`, para achar exatamente quais chamadas são
+do fluxo público (Cardápio QR) e quais são de fato staff/PDV/cozinha.
+
+**Dependências públicas encontradas (permanecem sem `@RequireRole`)**:
+
+- `GET /api/v1/commands/{number}` (`CommandController#findByNumber`) —
+  `apps/web/src/app/c/[commandNumber]/page.tsx` (Server Component, sem
+  login algum) chama este endpoint para validar o número da comanda antes
+  de mostrar o cardápio. Mesmo raciocínio de `GET /api/v1/categories`/
+  `GET /api/v1/products` no FARELO-123: também é usado pela tela interna
+  `/pdv`, mas um único endpoint não pode ficar aberto para um chamador e
+  fechado para outro — a dependência pública vence.
+- `POST /api/v1/orders` (`OrderController#create`) — **achado que vai além
+  do texto original do ticket** (que citava só "endpoints de leitura" como
+  dependência pública): `apps/web/src/app/c/[commandNumber]/menu.tsx`
+  (`createOrderMutation`) chama exatamente este endpoint, também sem login
+  algum, para finalizar o pedido do cliente (prompt mestre seção 6,
+  "Confirma → Order criado"). Verificado lendo o código do front, não
+  assumido a partir do método HTTP — protegê-lo quebraria o fluxo de
+  pedido do cliente inteiro, não apenas restringiria a um papel mais
+  adequado.
+
+**Confirmado como NÃO público (apesar de citado como exemplo no ticket)**:
+`GET /api/v1/commands/{number}/orders` (`CommandOrdersController`). O texto
+do ticket citava "listar os pedidos de uma comanda" como possível
+dependência do Cardápio QR, mas `apps/web/src/app/c/[commandNumber]` nunca
+chama esse endpoint — seu único consumidor real é a tela interna `/pdv`
+(`apps/web/src/app/pdv/page.tsx`, `listCommandOrders`). Por isso este
+endpoint **recebeu** `@RequireRole` (ver tabela abaixo), diferente do que
+uma leitura literal do ticket sugeriria.
+
+**Tabela completa — endpoint, papéis exigidos, raciocínio**:
+
+| Endpoint | Papéis | Por quê |
+|---|---|---|
+| `GET /api/v1/commands/{number}` | *(nenhum — público)* | Dependência do Cardápio QR (ver acima) |
+| `POST /api/v1/commands/{number}/open` | `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT` | Ação de frente de loja, sem implicação de dinheiro ainda |
+| `POST /api/v1/commands/{number}/close` | `ADMIN`, `MANAGER`, `CASHIER` | Fechamento é tratado como ação de caixa (mesmo sem validação de pagamento ainda — FARELO-143); `ATTENDANT` deliberadamente fora, diferente de `open` |
+| `POST /api/v1/orders` | *(nenhum — público)* | Dependência do checkout do Cardápio QR (ver acima) |
+| `GET /api/v1/orders` (fila da cozinha) | `ADMIN`, `MANAGER`, `KITCHEN` | Único consumidor real é o KDS (`apps/web/src/app/kds/page.tsx`) |
+| `POST /api/v1/orders/{id}/preparing` | `ADMIN`, `MANAGER`, `KITCHEN`, `CASHIER` | Ação de cozinha, mas `Order` não é segmentado por `productionStation` (diferente de `PrintJob`) — um cashier pode estar preparando itens `BAR` do mesmo pedido |
+| `POST /api/v1/orders/{id}/ready` | `ADMIN`, `MANAGER`, `KITCHEN`, `CASHIER` | Mesmo raciocínio de `preparing` — quem pode iniciar o preparo também pode marcar como pronto |
+| `POST /api/v1/orders/{id}/deliver` | `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT` | Ação de frente de loja (entregar ao cliente); `KITCHEN` fora, oposto de `preparing`/`ready` |
+| `POST /api/v1/orders/{id}/cancel` | `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT` | Mesma tela/persona de `deliver` (`apps/web/src/app/pdv/page.tsx`, `OrderCard`) |
+| `GET /api/v1/commands/{number}/orders` | `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT` | Único consumidor real é `/pdv` (ver acima); `KITCHEN` fora — a cozinha tem sua própria fila |
+| `GET /api/v1/print-jobs` | *(nenhum — máquina)* | Endpoint do Edge Agent, ver abaixo |
+| `POST /api/v1/print-jobs/{id}/printed` | *(nenhum — máquina)* | Endpoint do Edge Agent, ver abaixo |
+| `POST /api/v1/print-jobs/{id}/failed` | *(nenhum — máquina)* | Endpoint do Edge Agent, ver abaixo |
+| `POST /api/v1/print-jobs/{id}/retry` | `ADMIN`, `MANAGER`, `CASHIER`, `KITCHEN`, `ATTENDANT` (todos os cinco) | Ação humana, ver abaixo |
+
+**`CommandController#open`/`#close` — papéis diferentes, não a mesma
+lista**: `open()` é uma ação de frente de loja sem implicação financeira
+(um cliente sentou, a comanda começou a ser usada) — `ATTENDANT` faz isso
+rotineiramente, assim como `CASHIER`. `close()`, por outro lado, é o passo
+que conceitualmente fecha a conta — mesmo sem validação real de pagamento
+ainda (FARELO-034, aguardando FARELO-143), este projeto trata "fechar"
+como ação de manuseio de caixa, não de atendimento geral, então `close()`
+deliberadamente **não** inclui `ATTENDANT`. `KITCHEN` fica de fora dos
+dois — cozinha não abre/fecha comanda.
+
+**`OrderController` — por que `preparing`/`ready` incluem `CASHIER` mas
+`deliver`/`cancel` incluem `ATTENDANT` no lugar**: `Order` (diferente de
+`PrintJob`, que já é dividido por `productionStation` desde o FARELO-074)
+não é segmentado por estação de produção — um único pedido pode misturar
+itens `BAR` e `KITCHEN`, e a transição de status opera no pedido inteiro,
+não por item. Como itens `BAR` são frequentemente preparados por quem está
+no balcão (`CASHIER` numa cafeteria pequena), faz sentido que um cashier
+consiga marcar `PREPARING`/`READY` num pedido que ele mesmo está
+preparando, sem depender de uma conta de cozinha — julgamento documentado
+explicitamente pedido pelo ticket (ver exemplo do próprio ticket:
+"marcar um pedido como READY pode ser ação de cozinha, mas um cashier
+também pode precisar fazer isso"). `deliver`/`cancel`, por sua vez, são
+ações de entrega/gestão do pedido ao cliente — papel de frente de loja
+(`ATTENDANT`), não de quem prepara. `GET /api/v1/orders` (a fila em si,
+usada apenas pelo KDS hoje) fica mais estrita — só `KITCHEN` — porque não
+há hoje nenhuma tela de frente de loja consumindo essa fila; alargar um
+endpoint de leitura "só por precaução" sem consumidor real seria adivinhar
+uma necessidade, não documentar uma real.
+
+**`PrintJobController` — só `retry()` ganha `@RequireRole`; `pending()`/
+`markPrinted()`/`markFailed()` continuam sem nenhum**: verificado contra o
+código-fonte do `apps/edge-agent` (`src/printJobsClient.ts`), esses três
+endpoints são chamados **exclusivamente** pelo Farelo Edge Agent — um
+processo de máquina rodando num mini PC no Farelo (prompt mestre seção
+11), nunca por uma pessoa logada. `@RequireRole` autentica um `User` com
+`UserRole` — alguém que fez login via `POST /api/v1/auth/login`
+(FARELO-121). O Edge Agent não tem esse tipo de conta e nunca deveria ter:
+a seção 11 do prompt mestre é explícita que "o Edge Agent nunca deve
+possuir regra de negócio de pedidos — é apenas infraestrutura de
+dispositivos", e dar a ele um login no formato humano (uma linha `User`,
+um `UserRole`, credenciais para guardar no mini PC) seria exatamente esse
+tipo de vazamento de responsabilidade para dentro do que deveria
+permanecer "só um dispositivo". Uma credencial real de
+máquina-para-máquina (ex: uma API key/mecanismo de service-account por
+dispositivo, verificado por um caminho de verificação próprio e distinto)
+é uma necessidade futura legítima, mas é um mecanismo de autenticação novo
+a desenhar, não um papel para encaixar à força no RBAC construído para
+humanos — decidir esse desenho não foi adivinhado aqui, mesma contenção
+que FARELO-120/121/122 já aplicaram para não pré-decidir o mecanismo de um
+ticket futuro.
+
+`retry()`, ao contrário, é uma chamada genuinamente diferente: por seu
+próprio javadoc/pela entrada FARELO-079 deste documento, é um endpoint
+**manual** — "não existe (ainda) nenhum retry automático agendado" — e,
+confirmado contra o código-fonte de `apps/edge-agent` e `apps/web`, não
+tem nenhum chamador hoje em nenhum dos dois: existe para uma pessoa
+decidir deliberadamente reenfileirar um job que falhou ao imprimir. Isso
+faz dele uma ação de staff de verdade, diferente dos três acima, então
+ganha `@RequireRole` como qualquer outra ação de PDV/cozinha. **Escolha de
+papel — os cinco papéis operacionais** (`ADMIN`/`MANAGER`/`CASHIER`/
+`KITCHEN`/`ATTENDANT`): um `PrintJob` com falha não pertence a um único
+papel ou estação — pode ser um ticket `BAR` ou `KITCHEN` (FARELO-074),
+impresso fisicamente perto do balcão ou da cozinha, e quem estiver perto
+da impressora silenciosa/travada quando ela falha (um cashier, alguém da
+cozinha, um atendente repassando "não saiu o ticket") é exatamente quem
+deveria poder reenviar — restringir isso a um subconjunto menor só
+significaria acionar um gerente para uma ação de baixo risco, limitada
+(máximo de 3 tentativas, `PrintJobService.MAX_RETRY_COUNT`) e facilmente
+reversível. Diferente das escritas de `UserController` (FARELO-123), nada
+aqui pode ser usado para escalar privilégio ou vazar dado, então não há
+motivo para restringir além de "qualquer funcionário autenticado".
+
+**Testes**: `CommandControllerIntegrationTests`/
+`OrderControllerIntegrationTests`/`CommandOrdersControllerIntegrationTests`/
+`PrintJobControllerIntegrationTests` foram atualizados — todo teste que
+bate num endpoint agora protegido passou a mintar um token real
+(`JwtTokenService#issue`, mesmo padrão do FARELO-122/123) e enviá-lo via
+`Authorization: Bearer <token>`; `GET /api/v1/commands/{number}`,
+`POST /api/v1/orders`, `GET /api/v1/print-jobs`,
+`POST /api/v1/print-jobs/{id}/printed` e
+`POST /api/v1/print-jobs/{id}/failed` continuam sem header nenhum em todo
+lugar, provando que essas dependências públicas/de máquina de fato ficaram
+de fora. Cada endpoint protegido ganhou testes dedicados: sem header →
+`401`/`UNAUTHENTICATED`; papel errado (escolhido especificamente por
+excluir aquele papel do endpoint em questão, ex: `KITCHEN` em `open()`/
+`close()`, `ATTENDANT` em `preparing()`/`ready()`, `KITCHEN` em
+`deliver()`/`cancel()`) → `403`/`FORBIDDEN`; papel certo → sucesso como
+antes.
+
+`RoleAuthorizationInterceptorRegressionIntegrationTests` foi estendida:
+`ordersListingStillWorksWithNoAuthorizationHeader` (que provava que
+`GET /api/v1/orders` não exigia token, verdade só até este ticket) foi
+substituída por `kitchenQueueNowRequiresAuthentication` (prova a nova
+fronteira: `401` sem token), e cinco novos testes provam que exatamente as
+dependências públicas/de máquina esperadas continuam funcionando sem
+header: `commandLookupStillWorksWithNoAuthorizationHeader`,
+`orderCreationStillWorksWithNoAuthorizationHeader`,
+`pendingPrintJobsStillWorkWithNoAuthorizationHeader`,
+`markPrintedStillWorksWithNoAuthorizationHeader`,
+`markFailedStillWorksWithNoAuthorizationHeader`.
+
+Ver `docs/api.md` para o detalhe "Requer" em cada um dos endpoints acima.
+
 ## audit
 
 Pacote: `com.farelo.api.audit`. Colocada logo após `security` (não em ordem
