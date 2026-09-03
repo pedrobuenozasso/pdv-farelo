@@ -15,7 +15,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `printing` | `Printer`, `PrintJob`, integração com Edge Agent | Em andamento |
 | `inventory` | `Ingredient`, `Recipe`, `RecipeItem` (ficha técnica), `InventoryMovement` (ledger) | Em andamento |
 | `recipe` | Ficha técnica de produtos — **implementada dentro do pacote `inventory`** (`Recipe`/`RecipeItem`, FARELO-091/092), não como pacote próprio; linha mantida por rastreabilidade com o roadmap original | Em andamento (ver `inventory`) |
-| `notification` | `Notification`, adapter WhatsApp Cloud API | Não iniciado |
+| `notification` | `Notification`, adapter WhatsApp Cloud API | Em andamento |
 | `payment` | `Payment`, múltiplos pagamentos por comanda | Não iniciado |
 | `fiscal` | `FiscalProfile`, `FiscalDocument`, NFC-e (futuro) | Não iniciado |
 | `reporting` | Relatórios e analytics | Não iniciado |
@@ -1401,6 +1401,132 @@ real (BCrypt) — prova de que o hash está sendo aplicado de verdade, não só
 "alguma string diferente".
 
 Ver `docs/api.md` para os cinco endpoints completos.
+
+## notification
+
+Pacote: `com.farelo.api.notification`.
+
+- **`Notification`** (FARELO-110): entidade JPA — o registro durável de
+  algo que precisa ser (ou já foi) enviado a um destinatário. Na prática,
+  hoje, sempre uma mensagem de WhatsApp (prompt mestre seção 19: "Utilizar
+  futuramente: Meta WhatsApp Cloud API. Fluxo: `ORDER_READY → Notification
+  Worker → WhatsApp`. Notificações internas também poderão existir:
+  estoque baixo, estoque zerado, falha de impressão."). `id` (UUID, mesma
+  estratégia de `Category`), `type` (enum `NotificationType`, ver abaixo),
+  `recipient` (`String` — número de WhatsApp formatado, ex:
+  `"5511999999999"`), `content` (`String`/`TEXT`, texto já formatado,
+  congelado no momento da criação), `status` (enum `NotificationStatus`,
+  ver abaixo, padrão `PENDING`), `createdAt`/`updatedAt`. Tabela criada
+  pela migration `V22__create_notification_table.sql` (renumerada de V21
+  — colidia com `InventoryMovement`/FARELO-093, despachado do mesmo commit
+  base).
+
+  **Escopo deste ticket é só a entidade em si** — nenhum produtor real
+  existe ainda (reagir a `ORDER_READY` é FARELO-112, "estoque baixo" é
+  FARELO-113) e nenhum adapter de envio existe (Meta WhatsApp Cloud API é
+  FARELO-111). Mesma abordagem incremental de `Ingredient`/`Recipe`/
+  `InventoryMovement`/`PrintJob` (FARELO-071): entidade primeiro, sem
+  produtor/consumidor.
+
+  **Decisão de design — entidade standalone, sem depender de
+  `OutboxEvent`**: duas formas foram consideradas — (a) um futuro
+  consumidor constrói `Notification` a partir de um `OutboxEvent` que
+  despacha, o mesmo formato que `com.farelo.api.outbox.OutboxWorker` já
+  usa para criar `PrintJob` a partir de `OrderCreated`, com `notification`
+  dependendo dos tipos de `outbox`; ou (b) uma entidade de domínio
+  independente, que um futuro worker (FARELO-112/113) povoa reagindo a um
+  evento de domínio, sem dependência entre os dois pacotes em nenhuma
+  direção. Esta classe usa (b) — a opção mais segura para um ticket que
+  não constrói produtor nem consumidor algum: a direção de dependência já
+  documentada no `package-info.java` de `outbox` é que domínios de negócio
+  dependem de `outbox` para *publicar*, e que `outbox` só depende de volta
+  para um domínio (hoje, só `PrintJobService`) no ponto estreito onde de
+  fato despacha um evento para trabalho real — nada aqui despacha nada
+  ainda, então não há um segundo consumidor real que justifique
+  `OutboxWorker` aprender sobre `notification` hoje. O link eventual —
+  algum worker futuro reagindo a um `OrderCreated`/`STOCK_LOW` drenado
+  criando uma `Notification`, do jeito que `OutboxWorker` cria um
+  `PrintJob` hoje — é responsabilidade de FARELO-112/113 desenhar, no
+  ponto em que existir um segundo alvo de despacho real contra o qual
+  desenhar o mecanismo.
+
+  **`recipient` na própria entidade, sem abstração de canal separada**: um
+  `String` simples em vez de, digamos, um enum `channel` mais um endereço
+  polimórfico — o prompt mestre (seção 19) só nomeia um canal real
+  (WhatsApp) tanto para o fluxo voltado ao cliente (`ORDER_READY`) quanto
+  para "notificações internas" (estoque baixo/zerado, falha de impressão);
+  nada sugere que notificações internas sejam um canal *diferente*, só um
+  `recipient` diferente (um número interno da equipe em vez do número do
+  cliente). Campo nomeado `recipient`, não `phoneNumber`, especificamente
+  para que um canal genuinamente novo no futuro (ex: email) não force um
+  rename.
+
+  **`content` é um snapshot congelado em texto plano**: mesma lógica
+  "snapshot, não referência viva" de `PrintJob.getContent()` — o texto com
+  que uma `Notification` foi criada nunca deve mudar depois só porque,
+  digamos, um pedido ou produto foi editado; é um registro do que
+  realmente foi enviado (ou tentado), não um ponteiro para recalcular do
+  estado atual. Diferente de `PrintJob.content` (JSON estruturado, porque
+  seu consumidor — um futuro Edge Agent formatando uma comanda física —
+  precisa ler campos individuais), aqui o consumidor (um futuro adapter
+  WhatsApp, FARELO-111) só precisa de uma coisa: o corpo da mensagem já
+  formatado, para entregar como está à API do WhatsApp Cloud. Coluna
+  `TEXT`, não `jsonb`.
+
+  **`NotificationType`**: `ORDER_READY`, `STOCK_LOW`, `STOCK_CRITICAL`,
+  `OUT_OF_STOCK`, `PRINT_FAILED` — o subconjunto que a seção 19 de fato
+  nomeia como gatilhos de notificação: `ORDER_READY` ("Fluxo: ORDER_READY
+  → Notification Worker → WhatsApp") e o trio de "notificações internas"
+  (estoque baixo/zerado, falha de impressão). `STOCK_CRITICAL` incluído
+  por simetria com o trio completo de eventos de estoque mínimo já
+  estabelecido nas seções 17/29 — a seção 19 não o nomeia individualmente,
+  mas é a mesma categoria de alerta de estoque que os outros dois.
+  `ORDER_CREATED`/`ORDER_CANCELLED`/`COMMAND_CLOSED`/`PRINT_REQUESTED`/
+  `PRINT_COMPLETED` são deliberadamente **não** incluídos: são eventos de
+  domínio reais (usados por `outbox`/`printing`), mas a seção 19 nunca os
+  nomeia como gatilho de notificação — adicioná-los aqui seria inventar um
+  requisito, não modelar um já escrito. Nenhum produtor existe ainda para
+  nenhum destes valores (FARELO-112/113, tickets futuros).
+
+  **`NotificationStatus`**: `PENDING` (padrão) / `SENT` / `FAILED` — mesmo
+  formato de três estados de `PrintJobStatus`. `markSent()`/`markFailed()`
+  são as únicas formas de mudar `status` após a criação (sem setter
+  público, sem validação — mesma divisão "mutador burro, validação vive no
+  service" que `PrintJob` começou no seu próprio ticket somente-entidade,
+  FARELO-071); nada chama esses métodos ainda, já que nenhum componente
+  real transiciona uma `Notification` para fora de `PENDING` hoje
+  (FARELO-111/112). `updatedAt` existe (diferente do ledger append-only
+  `InventoryMovement`, que deliberadamente não tem `updatedAt`) justamente
+  porque `Notification` tem estado que muda com o tempo.
+
+  `NotificationRepository`: `findByStatusOrderByCreatedAtAsc` (consulta
+  derivada, sem `JOIN FETCH` necessário — `Notification` não tem nenhuma
+  associação `@ManyToOne`/lazy, todo campo é uma coluna simples) — backs
+  `NotificationService#listPending()`/`#list(status)`, mesma lógica FIFO
+  já usada por `PrintJobRepository#findByStatusOrderByCreatedAtAsc`/
+  `OutboxEventRepository#findByStatusOrderByCreatedAtAsc`.
+
+  `NotificationService`: só métodos de leitura — `listPending()` (todo
+  `PENDING`, mais antigo primeiro; não chamado por nada neste ticket, mas
+  a consulta que um futuro worker vai precisar) e `list(status)` (backs
+  `GET /api/v1/notifications`, com filtro opcional por status — quando
+  `status` é `null`, lista tudo, mais antigo primeiro). **Sem métodos de
+  escrita**: nada neste ticket cria ou transiciona uma `Notification`.
+
+  **Endpoint**: só `GET /api/v1/notifications?status=` (filtro opcional)
+  — mesmo padrão minimalista de outros domínios no seu primeiro ticket
+  (ex: `Printer`/FARELO-070). Sem `POST` nem endpoints de transição
+  (`/sent`, `/failed`): nada neste ticket constrói ou transiciona uma
+  `Notification` real. Ver `docs/api.md` para o endpoint completo.
+
+  **Testes**: `NotificationRepositoryIntegrationTests` (mapeamento JPA
+  contra Postgres real — grava e encontra, `markSent`/`markFailed`
+  transicionam status, `findByStatusOrderByCreatedAtAsc` retorna só
+  `PENDING` em ordem) e `NotificationControllerIntegrationTests` (lista
+  vazia, listagem completa em ordem sem filtro, filtro por status —
+  `@BeforeEach` limpa a tabela `notification` inteira, seguro porque é uma
+  tabela nova sem nenhuma FK vinda de outra entidade e os testes desta
+  suíte rodam sequencialmente, não concorrentemente).
 
 ## Outbox (infraestrutura cross-cutting)
 
