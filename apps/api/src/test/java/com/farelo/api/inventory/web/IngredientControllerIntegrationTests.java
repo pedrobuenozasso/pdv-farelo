@@ -4,6 +4,7 @@ import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.inventory.Ingredient;
 import com.farelo.api.inventory.IngredientRepository;
 import com.farelo.api.inventory.IngredientUnit;
+import com.farelo.api.inventory.InventoryMovementRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,21 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * container (see {@link AbstractIntegrationTest}) means the {@code
  * ingredient} table may already have rows from other test classes, so tests
  * that assert list contents clear it first.
+ *
+ * <p><b>{@code inventory_movement} is cleared before {@code ingredient}
+ * (FARELO-094 fix)</b>: {@code ingredient} carries a DB-level FK from
+ * {@code inventory_movement.ingredient_id} (see {@code InventoryMovement}'s
+ * javadoc), so a blind {@code ingredientRepository.deleteAll()} can fail
+ * with a {@code ConstraintViolationException} whenever a test class that
+ * creates {@code InventoryMovement} rows without cleaning up after itself
+ * (by design — see e.g. {@code InventoryMovementRepositoryIntegrationTests}'
+ * javadoc) happens to run earlier in the same JVM against the shared
+ * container. Surefire's test-class order isn't alphabetical/stable across
+ * environments, so this surfaced only once FARELO-094 added a third such
+ * class ({@code InventoryMovementServiceIntegrationTests}) — same category
+ * of landmine already documented in {@code docs/domain-model.md} for
+ * {@code product}/{@code category} vs. {@code order_item}, just one FK hop
+ * closer to home this time.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -47,10 +63,14 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     private IngredientRepository ingredientRepository;
 
     @Autowired
+    private InventoryMovementRepository inventoryMovementRepository;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void cleanInventoryTables() {
+        inventoryMovementRepository.deleteAll();
         ingredientRepository.deleteAll();
     }
 
