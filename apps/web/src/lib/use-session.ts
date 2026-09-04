@@ -25,5 +25,9 @@ function getServerSnapshot(): null {
 // Components too) since a hook import there breaks that build — see that
 // file's comment.
 export function useSession(): Session | null {
-  return useSyncExternalStore(subscribeToStorage, getSession, getServerSnapshot);
+  return useSyncExternalStore(
+    subscribeToStorage,
+    getSession,
+    getServerSnapshot,
+  );
 }

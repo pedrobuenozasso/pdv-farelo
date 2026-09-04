@@ -50,22 +50,29 @@ export function apiErrorMessage(
   return null;
 }
 
-export async function parseResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const body: unknown = await response.json().catch(() => null);
-    if (
-      body &&
-      typeof body === "object" &&
-      "message" in body &&
-      "code" in body &&
-      "correlationId" in body
-    ) {
-      throw new ApiError(
-        body as { code: string; message: string; correlationId: string },
-      );
-    }
-    throw new Error(`Request failed with status ${response.status}`);
+async function throwForErrorResponse(response: Response): Promise<never> {
+  const body: unknown = await response.json().catch(() => null);
+  if (
+    body &&
+    typeof body === "object" &&
+    "message" in body &&
+    "code" in body &&
+    "correlationId" in body
+  ) {
+    throw new ApiError(
+      body as { code: string; message: string; correlationId: string },
+    );
   }
+  throw new Error(`Request failed with status ${response.status}`);
+}
 
+export async function parseResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) return throwForErrorResponse(response);
   return response.json() as Promise<T>;
+}
+
+// For endpoints that respond `204 No Content` on success (e.g. DELETE) —
+// `parseResponse` would fail trying to `.json()` an empty body.
+export async function parseVoidResponse(response: Response): Promise<void> {
+  if (!response.ok) return throwForErrorResponse(response);
 }
