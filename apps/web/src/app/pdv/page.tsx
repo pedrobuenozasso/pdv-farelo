@@ -32,6 +32,7 @@ import { InternalNav } from "@/components/internal-nav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { listCategories, type Category } from "@/lib/api/categories";
 import { apiErrorMessage } from "@/lib/api/client";
 import {
   closeCommand,
@@ -40,6 +41,7 @@ import {
   type CommandStatus,
 } from "@/lib/api/commands";
 import {
+  createOrder,
   listCommandOrders,
   markOrderCancelled,
   markOrderDelivered,
@@ -51,6 +53,7 @@ import {
   recordPayment,
   type PaymentMethod,
 } from "@/lib/api/payments";
+import { listProducts, type Product } from "@/lib/api/products";
 import { cn } from "@/lib/cn";
 
 const COMMAND_NUMBERS = Array.from({ length: 100 }, (_, i) => i + 1);
@@ -166,6 +169,7 @@ function CommandDetail({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [addItemOpen, setAddItemOpen] = useState(false);
 
   const commandQuery = useQuery({
     queryKey: ["pdv", "command", number],
@@ -317,9 +321,39 @@ function CommandDetail({
 
       <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-start">
         <div className="flex flex-col gap-3">
-          <h3 className="text-ink-faint text-xs font-bold tracking-wide uppercase">
-            Pedidos
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-ink-faint text-xs font-bold tracking-wide uppercase">
+              Pedidos
+            </h3>
+            {command &&
+            (command.status === "AVAILABLE" || command.status === "OPEN") ? (
+              <button
+                type="button"
+                onClick={() => setAddItemOpen((open) => !open)}
+                className="text-primary text-xs font-bold hover:underline"
+              >
+                {addItemOpen ? "Fechar" : "+ Adicionar item"}
+              </button>
+            ) : null}
+          </div>
+
+          {addItemOpen ? (
+            <AddItemPanel
+              commandNumber={number}
+              onAdded={() =>
+                // Partial-match invalidation: also catches "orders" and
+                // "paymentsTotal" (both nested under this same key prefix)
+                // in one call — and the command status itself, since
+                // adding the first item auto-opens an AVAILABLE comanda
+                // (CommandService#openForOrdering) and the header badge
+                // needs to reflect that.
+                queryClient.invalidateQueries({
+                  queryKey: ["pdv", "command", number],
+                })
+              }
+            />
+          ) : null}
+
           {ordersQuery.isLoading ? (
             <p className="text-ink-faint text-sm">Carregando...</p>
           ) : null}
@@ -346,6 +380,164 @@ function CommandDetail({
         ) : null}
       </div>
     </Card>
+  );
+}
+
+// FARELO-182/183 — lançamento manual de item pelo caixa, sem depender do
+// cardápio QR. Reaproveita POST /api/v1/orders (já público e genérico —
+// não exige customerName/customerPhone), o mesmo endpoint que o cardápio
+// já usa; cada clique em "Adicionar" gera um pedido próprio de um item só
+// (mais parecido com "bater no caixa" do que um carrinho), o suficiente
+// pro caso de uso do ticket ("Comanda 37 + 1x Água").
+function AddItemPanel({
+  commandNumber,
+  onAdded,
+}: {
+  commandNumber: number;
+  onAdded: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(
+    null,
+  );
+  const [quantity, setQuantity] = useState(1);
+
+  const productsQuery = useQuery({
+    queryKey: ["pdv", "products"],
+    queryFn: listProducts,
+  });
+  const categoriesQuery = useQuery({
+    queryKey: ["pdv", "categories"],
+    queryFn: listCategories,
+  });
+
+  const addItemMutation = useMutation({
+    mutationFn: (product: Product) =>
+      createOrder({
+        commandNumber,
+        items: [{ productId: product.id, quantity }],
+      }),
+    onSuccess: () => {
+      setSelectedProductId(null);
+      setQuantity(1);
+      onAdded();
+    },
+  });
+
+  const errorMessage = apiErrorMessage(
+    addItemMutation.error,
+    "Não foi possível adicionar o item.",
+  );
+
+  // Só produtos ativos e habilitados pro caixa (availableOnPos) — mesmo
+  // filtro que o cardápio QR já aplica pro seu próprio flag
+  // (availableOnMenu), FARELO-181.
+  const availableProducts = (productsQuery.data ?? []).filter(
+    (product) =>
+      product.active &&
+      product.availableOnPos &&
+      product.name.toLowerCase().includes(search.toLowerCase()),
+  );
+  const categoryNameById = new Map(
+    (categoriesQuery.data ?? []).map((category: Category) => [
+      category.id,
+      category.name,
+    ]),
+  );
+  const sections = new Map<string, Product[]>();
+  for (const product of availableProducts) {
+    const categoryName = categoryNameById.get(product.categoryId) ?? "Outros";
+    sections.set(categoryName, [
+      ...(sections.get(categoryName) ?? []),
+      product,
+    ]);
+  }
+
+  const selectedProduct = availableProducts.find(
+    (product) => product.id === selectedProductId,
+  );
+
+  return (
+    <div className="border-line bg-bg flex flex-col gap-3 rounded-2xl border p-4">
+      <input
+        type="text"
+        placeholder="Buscar produto..."
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+      />
+
+      <div className="flex max-h-56 flex-col gap-3 overflow-y-auto">
+        {productsQuery.isLoading ? (
+          <p className="text-ink-faint text-sm">Carregando...</p>
+        ) : null}
+        {availableProducts.length === 0 && !productsQuery.isLoading ? (
+          <p className="text-ink-faint text-sm">Nenhum produto encontrado.</p>
+        ) : null}
+        {Array.from(sections.entries()).map(([categoryName, products]) => (
+          <div key={categoryName} className="flex flex-col gap-1">
+            <div className="text-ink-faint text-[11px] font-bold tracking-wide uppercase">
+              {categoryName}
+            </div>
+            {products.map((product) => (
+              <button
+                key={product.id}
+                type="button"
+                onClick={() => setSelectedProductId(product.id)}
+                className={cn(
+                  "flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
+                  selectedProductId === product.id
+                    ? "bg-primary-soft text-primary-dark font-semibold"
+                    : "hover:bg-bg-alt",
+                )}
+              >
+                <span>{product.name}</span>
+                <span className="font-semibold">
+                  {currencyFormatter.format(product.price)}
+                </span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {selectedProduct ? (
+        <div className="border-line flex items-center gap-3 border-t pt-3">
+          <span className="flex-1 text-sm font-semibold">
+            {selectedProduct.name}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setQuantity((qty) => Math.max(1, qty - 1))}
+              className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+              aria-label="Diminuir quantidade"
+            >
+              −
+            </button>
+            <span className="w-6 text-center text-sm font-bold">
+              {quantity}
+            </span>
+            <button
+              type="button"
+              onClick={() => setQuantity((qty) => qty + 1)}
+              className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+              aria-label="Aumentar quantidade"
+            >
+              +
+            </button>
+          </div>
+          <Button
+            disabled={addItemMutation.isPending}
+            onClick={() => addItemMutation.mutate(selectedProduct)}
+            className="px-4 py-2 text-[13px]"
+          >
+            {addItemMutation.isPending ? "Adicionando..." : "Adicionar"}
+          </Button>
+        </div>
+      ) : null}
+      {errorMessage ? <p className="text-red text-sm">{errorMessage}</p> : null}
+    </div>
   );
 }
 
