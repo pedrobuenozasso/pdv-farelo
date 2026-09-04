@@ -4861,6 +4861,197 @@ nova é introduzida por este ticket além de `fiscal_document.command_id`
 nenhum teste deste projeto), então nenhuma landmine de limpeza nova surge
 aqui.
 
+### FARELO-157 — Criar estados fiscais
+
+Segunda e última peça do Epic 11 (Fiscal Base) sobre `FiscalDocument`,
+depois de FARELO-156. `FiscalDocumentStatus` (FARELO-156) já modelava os
+seis valores literais do prompt mestre (seção 25) com um
+`FiscalDocument.setStatus(...)` deliberadamente simples e sem validação — a
+própria javadoc daquele enum nomeava este ticket, separado, como o dono da
+"máquina de estados/regras de transição". É exatamente isso que este
+ticket constrói: **validação de transição**, não emissão real. Continua
+tudo o que a fronteira de escopo do FARELO-156 já delimitava: nenhum
+cliente SEFAZ, nenhuma geração de XML/assinatura, nenhuma lógica decidindo
+*quando* um documento deve virar `AUTHORIZED`/`REJECTED` — isso continua
+sendo o Epic 12 (FARELO-170-178, "Somente iniciar após validação
+contábil"), ainda não iniciado. O que este ticket adiciona é só a regra
+"de qual estado para qual outro estado um documento pode se mover", exposta
+como validação reutilizável que um futuro FARELO-170+ vai chamar — mesmo
+formato "regras definidas agora, sem produtor automático ainda" que
+`CommandService`'s `CLOSABLE_STATUSES`/`PAYABLE_STATUSES` já usam (conjuntos
+validados, sem lógica de negócio decidindo quando chamá-los).
+
+**A tabela de transição.** Implementada em
+`FiscalDocumentService.LEGAL_TRANSITIONS`, um
+`Map<FiscalDocumentStatus, Set<FiscalDocumentStatus>>`
+(`EnumMap`+`EnumSet`, mesma convenção "enum fechado → `EnumSet`" que
+`CLOSABLE_STATUSES`/`PAYABLE_STATUSES` já usam) — uma generalização daquele
+mesmo formato: aquelas duas constantes só precisavam de um conjunto plano
+de origens válidas para um destino fixo, mas `FiscalDocumentStatus`
+genuinamente tem mais de um destino legal por origem, então a forma que
+esta tabela precisa é "por origem, o conjunto de destinos legais". Tabela
+completa, fundamentada na seção 25 do prompt mestre (`Close Command →
+Payment → Fiscal Service → NFC-e → SEFAZ → AUTHORIZED`) mais conhecimento
+de domínio NFC-e/SEFAZ padrão (não inventado), e corroborada pela própria
+ordem literal dos tickets do Epic 12 (seção 47): FARELO-175 "Persistir
+autorização", FARELO-176 "Persistir rejeição", FARELO-177 "Implementar
+cancelamento", FARELO-178 "Implementar contingência" — ou seja, o próprio
+roadmap já trata "autorizar", "rejeitar", "cancelar" e "entrar em
+contingência" como quatro eventos distintos, não estágios de uma corrente
+linear só.
+
+| Origem | Destinos legais | Por quê |
+|---|---|---|
+| `PENDING` | `PROCESSING`, `CONTINGENCY` | `PROCESSING`: início do caminho feliz — o documento começa a ser transmitido à SEFAZ. `CONTINGENCY`: a SEFAZ pode estar inacessível *antes mesmo* de uma tentativa de emissão ser enviada (ex: o link de internet do café está fora do ar no momento do "fechar a conta") — o modo de contingência pode começar sem nunca passar por `PROCESSING`. |
+| `PROCESSING` | `AUTHORIZED`, `REJECTED`, `CONTINGENCY` | `AUTHORIZED`: passo final do caminho feliz — a SEFAZ aceitou o documento (FARELO-175). `REJECTED`: a SEFAZ avaliou e rejeitou o documento — resultado legítimo e esperado da transmissão, distinto de nunca ter sido enviado (FARELO-176). `CONTINGENCY`: a SEFAZ também pode ficar inacessível *durante* a transmissão (timeout, conexão caiu aguardando resposta) — mesmo desvio de contingência, só que disparado num ponto mais tardio da tentativa. |
+| `CONTINGENCY` | `AUTHORIZED`, `REJECTED` | Pela própria formulação do prompt mestre — um desvio de contingência "eventualmente ainda precisa resolver para `AUTHORIZED`/`REJECTED` quando a conectividade voltar" — um documento regularizado depois de emitido em contingência acaba sendo aceito ou rejeitado pela SEFAZ, mesmos dois resultados legítimos de `PROCESSING`, só que alcançados pelo desvio de contingência em vez de transmissão direta. |
+| `AUTHORIZED` | `CANCELLED` | O único movimento retroativo legítimo desta tabela — cancelar uma NFC-e já autorizada ("cancelamento", FARELO-177) é uma operação SEFAZ real e distinta para um documento já emitido, categoricamente diferente de `REJECTED` (que significa que a SEFAZ nunca aceitou o documento, para começo de conversa). |
+| `REJECTED` | — (terminal) | Prática padrão de NFC-e: corrigir o que causou a rejeição e emitir um documento fiscal *novo* (uma nova linha `FiscalDocument`), não mutar o rejeitado de volta para `PENDING` e tentar de novo com a mesma linha/número — o registro do documento rejeitado deve permanecer exatamente como estava quando a SEFAZ rejeitou. |
+| `CANCELLED` | — (terminal) | Cancelamento já é, em si, um evento legal final; não existe "descancelar" legítimo. |
+
+Toda aresta **não** listada acima é ilegal — inclusive nenhuma
+auto-transição (ex: `PENDING` → `PENDING`), mesmo comportamento "sem caso
+especial idempotente de mesmo estado" já estabelecido por
+`OrderService#transition`/o helper de transição privado de
+`PrintJobService`. Arestas deliberadamente **excluídas** por incerteza
+genuína, com a razão documentada em vez de adivinhada (a "regra do
+padrão conservador" pedida pelo ticket): `PENDING`/`PROCESSING`/`CONTINGENCY`
+→ `CANCELLED` (cancelamento só se aplica a um documento já `AUTHORIZED` —
+ver a linha `AUTHORIZED` → `CANCELLED` acima); `PENDING` → `AUTHORIZED`/
+`REJECTED` (pulariam `PROCESSING`, contradizendo a ordem da seção 25);
+`PROCESSING` → `PENDING` e `CONTINGENCY` → `PROCESSING`/`PENDING`
+("resetar"/"retomar" uma tentativa em andamento é uma necessidade futura
+plausível, mas não é nomeada em nenhum lugar do material-fonte — como esta
+tabela é o guarda-corpo que um Epic 12 ainda não construído vai usar, o
+padrão conservador é deixar uma aresta de fora até uma necessidade real a
+nomear, e não adivinhar uma agora: uma regra desnecessariamente restrita só
+pode ser rígida demais e é pega pelos próprios testes de um ticket futuro;
+uma regra erroneamente *permissiva* poderia deixar dado ruim passar
+silenciosamente antes que qualquer coisa a exercite de verdade); `AUTHORIZED`
+→ `REJECTED` (uma NFC-e já autorizada não pode retroativamente virar
+rejeitada — desfazer isso é exatamente para o que `CANCELLED` existe, como
+evento legal distinto, não uma reutilização de rejeição).
+
+**Onde vive — `FiscalDocumentService`, não a entidade.** Mesmo split
+serviço/entidade já estabelecido por `OrderService#transition` vs.
+`Order.setStatus`/`PrintJobService`'s transition helper vs.
+`PrintJob.markPrinted()`/`markFailed()`: `FiscalDocument.setStatus(...)`
+continua um mutador simples e sem validação (FARELO-156, inalterado); toda
+a lógica de legalidade vive em `FiscalDocumentService`. Dois métodos
+públicos:
+
+- `transition(UUID id, FiscalDocumentStatus newStatus)` — o método
+  principal (assinatura sugerida literalmente pelo próprio ticket): busca
+  o documento por id (`FiscalDocumentRepository#findByIdWithCommand`, novo
+  — mesmo `JOIN FETCH command` de
+  `OrderRepository#findByIdWithCommand`/`PrintJobRepository#findByIdWithOrder`,
+  pela mesma razão FARELO-055 de sempre), confere a aresta na tabela acima,
+  aplica e salva. Sem parâmetro de comanda — combina com a forma que um
+  futuro produtor do Epic 12 (FARELO-170+) deve chamar isto: um processo de
+  emissão conduzindo um `FiscalDocument` específico que já tem em mãos (ex:
+  acabou de receber uma resposta da SEFAZ para ele) não tem motivo natural
+  para também conhecer ou re-resolver o `number` da comanda daquele
+  documento.
+- `transition(int commandNumber, UUID id, FiscalDocumentStatus newStatus)`
+  — overload com escopo de comanda, usado pelo endpoint HTTP manual (ver
+  abaixo). Resolve `commandNumber` do mesmo jeito que `listByCommand(int)`
+  já faz, e **confirma que o documento pertence àquela comanda** antes de
+  delegar ao método principal — mesmo precedente "recurso aninhado deve
+  pertencer ao pai nomeado, senão é 404" já estabelecido por
+  `RecipeItemService#delete(UUID, UUID)` (via
+  `RecipeItemRepository#findByIdAndRecipeId`) para `DELETE
+  /api/v1/recipes/{recipeId}/items/{itemId}`. Um par `number`/`id`
+  incompatível (ex: um id de documento válido emprestado da URL de outra
+  comanda) é reportado como `FiscalDocumentNotFoundException`, não
+  silenciosamente aceito nem exposto como um erro distinto de "comanda
+  errada" que vazaria se aquele id existe sob alguma outra comanda.
+
+**Novas exceções.** `FiscalDocumentInvalidTransitionException` (aresta
+ilegal, mesma forma/precedente de
+`OrderInvalidTransitionException`/`PrintJobInvalidTransitionException` — uma
+exceção única e reutilizável, não uma subclasse por aresta proibida) e
+`FiscalDocumentNotFoundException` (id inexistente, ou existente mas sob
+comanda diferente — mesma forma de `OrderNotFoundException`/
+`PrintJobNotFoundException`, já que `FiscalDocument` não tinha, antes deste
+ticket, nenhum método de busca por id sozinho). Ambas ligadas no
+`ApiExceptionHandler`: `FISCAL_DOCUMENT_NOT_FOUND` (404) e
+`FISCAL_DOCUMENT_INVALID_TRANSITION` (409) — mesmo formato/status de toda
+exceção `*NotFoundException`/`*InvalidTransitionException` já existente
+neste arquivo.
+
+**Decisão de exposição do endpoint — SIM, um endpoint manual.** O ticket
+oferecia duas opções defensáveis (mesma escolha que
+`PrintJobService#retry`, FARELO-079, já enquadrou explicitamente na própria
+javadoc): (a) um endpoint manual, já que nenhum produtor automático de
+emissão real existe ainda (Epic 12, gated); ou (b) deixar só como
+infraestrutura de backend, sem endpoint ainda — o formato
+"consulta existe antes de seu primeiro chamador real" de
+`InventoryMovementRepository#sumQuantityByIngredientId`. Este ticket
+escolhe (a): `POST
+/api/v1/commands/{number}/fiscal-documents/{id}/transition`, implementado
+em `FiscalDocumentController` (mesmo pacote `fiscal.web` do endpoint de
+listagem do FARELO-156, mesmo raciocínio de direção de dependência). Razão
+principal, a mesma do FARELO-079: uma transição validada com zero
+chamadores reais e zero cobertura HTTP é muito mais difícil de confiar
+quando o Epic 12 realmente começar a chamá-la — um teste de integração
+batendo num endpoint real exercita exatamente o mesmo caminho de código
+(`transition(int, UUID, FiscalDocumentStatus)`: resolução de comanda,
+checagem de posse, tabela de transição, persistência) que um futuro
+produtor também vai percorrer. Construir o caminho manual agora também não
+"pinta" o Epic 12 num canto: nada impede um futuro processo de emissão de
+chamar diretamente `transition(UUID, FiscalDocumentStatus)` (contornando
+esta camada HTTP inteiramente, como naturalmente faria de dentro de um
+processo de backend), deixando este endpoint como uma superfície
+manual/de operabilidade genuinamente separada e ainda útil (ex: suporte
+resolvendo manualmente um documento travado), não algo para apagar depois.
+
+**RBAC — `ADMIN`/`MANAGER`, diferente do `retry` do FARELO-079.** O
+endpoint de listagem (`GET .../fiscal-documents`, FARELO-156) continua
+desprotegido — nenhum ticket dedicado de RBAC para `fiscal` existe ainda.
+O novo `POST .../transition`, porém, exige `@RequireRole({ADMIN, MANAGER})`
+— raciocínio diferente da escolha deliberadamente ampla de "todos os cinco
+papéis" do `PrintJobController#retry`: um retry de impressão é de baixo
+risco e facilmente reversível (reimprimir um ticket, limitado a 3
+tentativas), agnóstico de estação, e algo que qualquer um perto de uma
+impressora travada deveria poder fazer. Forçar manualmente o status de um
+documento fiscal não é isso — mesmo sem a integração SEFAZ real do Epic 12
+ainda, esta ação escreve num registro que este código já trata como
+fiscal/legalmente significativo (seção 26/27: "configuração fiscal" é
+explicitamente citada entre as operações que auditoria deve cobrir), então
+recebe o mesmo escopo dos endpoints de escrita de `PaymentController`
+(`record`/`close`: `ADMIN`/`MANAGER`/`CASHIER`) menos `CASHIER` — registrar
+um pagamento ou fechar uma comanda é trabalho rotineiro de PDV que um
+caixa faz o tempo todo, enquanto forçar manualmente o estado de um
+documento fiscal não é uma ação operacional normal para nenhum papel ainda
+(nada no fluxo/UI deste código a chama) e está mais perto de uma correção
+de back-office/compliance, então fica com os dois papéis que já cobrem
+esse tipo de responsabilidade em outras partes deste código.
+
+**Testes**: `FiscalDocumentServiceIntegrationTests` (nova classe, contra
+Postgres real) cobre cada uma das sete arestas legais da tabela pelo menos
+uma vez (incluindo o caminho feliz completo `PENDING` → `PROCESSING` →
+`AUTHORIZED` em duas chamadas), mais uma amostra representativa de arestas
+ilegais (pular `PROCESSING`, reverter `PROCESSING` → `PENDING`, agir sobre
+os dois estados terminais, `AUTHORIZED` → `REJECTED`), o overload com
+escopo de comanda (sucesso, comanda errada, comanda inexistente) e id
+desconhecido — não uma varredura exaustiva dos 30 pares ordenados
+possíveis, por pedido explícito do próprio ticket, mas o suficiente para
+provar que a tabela realmente restringe algo. `FiscalDocumentControllerIntegrationTests`
+ganha cobertura HTTP real (`MockMvc`) do novo endpoint: sucesso para
+`ADMIN`/`MANAGER`, `401` sem token, `403` para um papel fora da lista,
+`409 FISCAL_DOCUMENT_INVALID_TRANSITION` para uma transição ilegal, `404
+FISCAL_DOCUMENT_NOT_FOUND` para id desconhecido e para posse cruzada de
+comanda, `404 COMMAND_NOT_FOUND` para `number` desconhecido, e `400
+VALIDATION_ERROR` para corpo sem `status`.
+
+Usa números de comanda seedados 26-27 (`FiscalDocumentServiceIntegrationTests`)
+e 85-90 (`FiscalDocumentControllerIntegrationTests`) — livres per o registro
+mantido ao longo desta suíte (ver as subseções FARELO-156 acima e
+`PaymentControllerIntegrationTests` para o registro mais completo).
+Nenhuma FK cross-tabela nova é introduzida por este ticket (só métodos de
+serviço/controller e duas exceções novas), então nenhuma landmine de
+limpeza nova surge aqui — mesma razão já dada na subseção FARELO-156.
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —

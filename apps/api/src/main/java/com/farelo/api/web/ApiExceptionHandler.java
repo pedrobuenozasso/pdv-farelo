@@ -10,6 +10,8 @@ import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
 import com.farelo.api.command.CommandNotFullyPaidException;
 import com.farelo.api.fiscal.CompanyFiscalConfigurationNotFoundException;
+import com.farelo.api.fiscal.FiscalDocumentInvalidTransitionException;
+import com.farelo.api.fiscal.FiscalDocumentNotFoundException;
 import com.farelo.api.fiscal.FiscalProfileNotFoundException;
 import com.farelo.api.inventory.IngredientNotFoundException;
 import com.farelo.api.inventory.RecipeAlreadyExistsException;
@@ -199,6 +201,26 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ErrorResponse handleCompanyFiscalConfigurationNotFound(CompanyFiscalConfigurationNotFoundException ex) {
         return new ErrorResponse("COMPANY_FISCAL_CONFIGURATION_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // FARELO-157: id given to POST
+    // /api/v1/commands/{number}/fiscal-documents/{id}/transition doesn't
+    // exist, or exists under a different comanda than {number} — see
+    // FiscalDocumentNotFoundException's javadoc. Same "not found" shape as
+    // every other *NotFoundException handler in this class.
+    @ExceptionHandler(FiscalDocumentNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleFiscalDocumentNotFound(FiscalDocumentNotFoundException ex) {
+        return new ErrorResponse("FISCAL_DOCUMENT_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict, same state-conflict reasoning as
+    // OrderInvalidTransitionException/PrintJobInvalidTransitionException
+    // above (FARELO-157).
+    @ExceptionHandler(FiscalDocumentInvalidTransitionException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleFiscalDocumentInvalidTransition(FiscalDocumentInvalidTransitionException ex) {
+        return new ErrorResponse("FISCAL_DOCUMENT_INVALID_TRANSITION", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     @ExceptionHandler(RecipeNotFoundException.class)
