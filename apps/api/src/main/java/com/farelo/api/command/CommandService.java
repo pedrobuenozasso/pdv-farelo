@@ -16,6 +16,29 @@ public class CommandService {
     private static final Set<CommandStatus> CLOSABLE_STATUSES =
             EnumSet.of(CommandStatus.OPEN, CommandStatus.PAYMENT_REQUESTED);
 
+    // FARELO-141: statuses from which a payment can be recorded. Same two
+    // values as CLOSABLE_STATUSES above, kept as its own constant rather
+    // than reused directly — the two answer different domain questions
+    // ("can this be closed" vs. "can this accept a payment") that only
+    // happen to agree today. AVAILABLE is excluded: nothing has been
+    // ordered yet, so there is nothing to pay for. CLOSED is excluded: the
+    // tab is already settled — a payment "against" an already-closed
+    // command reads backwards (if a payment was missed before closing,
+    // that's a data-entry mistake to fix by correcting the close, not by
+    // bolting a payment onto a command that's conceptually done). BLOCKED
+    // is excluded for the same reason it is excluded from
+    // CommandCannotAcceptOrdersException's valid set — a blocked command
+    // isn't in normal operational use. That leaves exactly OPEN (the
+    // common case — a payment recorded while the comanda is still being
+    // used) and PAYMENT_REQUESTED (a payment recorded after staff marked
+    // the comanda as awaiting payment, whenever a future ticket adds that
+    // transition) — the same window in which FARELO-034 already allows
+    // close(), which makes sense: paying and closing are two steps of the
+    // same "settling the tab" operation, so they share the same valid
+    // origin states.
+    private static final Set<CommandStatus> PAYABLE_STATUSES =
+            EnumSet.of(CommandStatus.OPEN, CommandStatus.PAYMENT_REQUESTED);
+
     private final CommandRepository commandRepository;
 
     public CommandService(CommandRepository commandRepository) {
@@ -81,6 +104,31 @@ public class CommandService {
             case PAYMENT_REQUESTED, CLOSED, BLOCKED ->
                     throw new CommandCannotAcceptOrdersException(number, command.getStatus());
         };
+    }
+
+    /**
+     * Resolves a comanda ready to have a payment recorded against it
+     * (FARELO-141, {@code PaymentService#record}). Read-only, unlike {@link
+     * #open}/{@link #close}/{@link #openForOrdering} above — recording a
+     * payment is not itself a {@code Command} state transition (no future
+     * ticket has defined one for it either; {@code PAYMENT_REQUESTED} is
+     * reached some other way, not as a side effect of a payment), so this
+     * method only validates and returns, never calls {@code save}.
+     *
+     * @throws CommandNotFoundException {@code number} doesn't exist (via
+     *     {@link #findByNumber}).
+     * @throws CommandCannotAcceptPaymentsException the comanda exists but its
+     *     status isn't in {@link #PAYABLE_STATUSES} — see that constant's
+     *     comment for the full reasoning.
+     */
+    public Command findForPayment(int number) {
+        Command command = findByNumber(number);
+
+        if (!PAYABLE_STATUSES.contains(command.getStatus())) {
+            throw new CommandCannotAcceptPaymentsException(number, command.getStatus());
+        }
+
+        return command;
     }
 
 }

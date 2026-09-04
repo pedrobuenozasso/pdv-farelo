@@ -3727,6 +3727,158 @@ Pacote: `com.farelo.api.payment`.
   terceiro número de comanda, nunca escrito por nenhum outro teste, só
   para a asserção de lista vazia.
 
+  ### FARELO-141 — Registrar pagamento manual
+
+  Primeiro produtor real de `Payment` — mesmo padrão "segundo ticket de um
+  domínio adiciona o primeiro produtor" já visto em `InventoryMovement`
+  (FARELO-093 → FARELO-094), `Notification` (FARELO-110 → FARELO-111/112) e
+  `AuditLog` (FARELO-125 → FARELO-126). Endpoint novo:
+  `POST /api/v1/commands/{number}/payments`, irmão do `GET` já existente
+  (FARELO-140) no mesmo `PaymentController`. `PaymentService` ganha
+  `record(int commandNumber, BigDecimal amount, PaymentMethod method)` — só
+  um `INSERT`; o `Payment` construído usa o construtor já existente
+  (`Payment(Command, BigDecimal, PaymentMethod)`, inalterado desde
+  FARELO-140 — este ticket não toca a forma da entidade, sem `status`, sem
+  método de update, permanece append-only). **Não soma pagamentos por
+  comanda nem valida total pago antes de fechar** — isso é FARELO-142 e
+  FARELO-143, respectivamente, ambos fora do escopo aqui; este método
+  registra exatamente um pagamento por chamada, nada mais.
+
+  **`amount > 0` é validado na camada de DTO, não no service**: mesma
+  convenção já estabelecida por `InventoryMovementRequest#quantity()`/
+  `InventoryLossRequest#quantity()` — `PaymentRequest` (novo, em
+  `com.farelo.api.payment.web`) tem `@NotNull @Positive BigDecimal amount`,
+  então um valor zero/negativo já é rejeitado como `400 VALIDATION_ERROR`
+  antes de qualquer transação abrir, e `PaymentService#record` nunca
+  precisa reverificar essa regra. `method` é `@NotNull PaymentMethod` —
+  ausente/`null` explícito no JSON também é `400 VALIDATION_ERROR`.
+
+  **Decisão de desenho — precondição de status: `Command` precisa estar
+  `OPEN` ou `PAYMENT_REQUESTED`, não `AVAILABLE` nem `CLOSED` nem
+  `BLOCKED`.** O prompt mestre (seção 30/Epic 10) não especifica essa
+  precondição explicitamente, então esta é uma decisão deste ticket, não uma
+  transcrição de spec. Raciocínio, verificado contra `CommandStatus`/
+  `CommandService` reais (não adivinhado):
+
+  - `AVAILABLE` é rejeitado: uma comanda nunca aberta não tem nada para
+    pagar — não existe pedido algum contra ela ainda (`OrderService#create`
+    exige uma comanda em `AVAILABLE`/`OPEN` para criar um pedido, e
+    `AVAILABLE` só vira `OPEN` na criação do primeiro pedido ou via
+    `POST .../open`). Registrar um pagamento aqui seria dinheiro sem
+    contrapartida nenhuma no sistema.
+  - `CLOSED` é rejeitado: a conta já foi liquidada — um pagamento
+    "contra" uma comanda já fechada é conceitualmente invertido. Se um
+    pagamento foi esquecido antes do fechamento, a correção é operacional
+    (reabrir/corrigir o fechamento), não um `Payment` solto colado numa
+    comanda que já terminou seu ciclo.
+  - `BLOCKED` é rejeitado pelo mesmo motivo que já vale para
+    `CommandCannotAcceptOrdersException` — uma comanda bloqueada não está
+    em uso operacional normal.
+  - `OPEN` e `PAYMENT_REQUESTED` são aceitos: são exatamente os dois
+    estados de origem que `CommandService#close` já aceita
+    (`CLOSABLE_STATUSES`, FARELO-034) — faz sentido de domínio que pagar e
+    fechar compartilhem a mesma janela de estados válidos, já que são dois
+    passos da mesma operação ("liquidar a conta"): tipicamente um pagamento
+    é registrado *antes* de fechar (`OPEN` → paga → fecha), mas nada
+    impede que aconteça depois de a comanda ser marcada como aguardando
+    pagamento (`PAYMENT_REQUESTED`, quando um ticket futuro adicionar essa
+    transição).
+
+  Implementado como `CommandService#findForPayment(int)` — mesmo padrão
+  arquitetural de `CommandService#openForOrdering(int)` (chamado por
+  `OrderService`, um domínio diferente, que depende de `CommandService`
+  para resolver e validar o `number` de negócio antes de agir): resolve o
+  `number` (404 `COMMAND_NOT_FOUND` via `CommandNotFoundException`, igual a
+  todo outro método de `CommandService`), valida o status contra o novo
+  conjunto privado `PAYABLE_STATUSES` (`EnumSet.of(OPEN,
+  PAYMENT_REQUESTED)` — mesmos dois valores de `CLOSABLE_STATUSES`, mantido
+  como constante própria em vez de reaproveitar a mesma referência, porque
+  as duas respondem perguntas de domínio diferentes que só coincidem hoje
+  por acaso: "pode fechar" vs. "pode receber pagamento") e, ao contrário de
+  `open`/`close`/`openForOrdering`, **não faz nenhum `save`** — não é uma
+  transição de estado de `Command`, só uma leitura validada, então o método
+  nem é `@Transactional`. Erro de status novo, dedicado:
+  `CommandCannotAcceptPaymentsException` (pacote `command`, ao lado de
+  `CommandCannotAcceptOrdersException`/`CommandCannotBeClosedException`) →
+  `409 Conflict`, `code: "COMMAND_CANNOT_ACCEPT_PAYMENTS"` via
+  `ApiExceptionHandler`. Deliberadamente uma exceção própria, não reaproveita
+  nenhuma das três já existentes: `CommandNotAvailableException` implicaria
+  `AVAILABLE` como único estado de origem válido — o oposto do que este
+  método precisa (`AVAILABLE` é justamente um dos estados *rejeitados*
+  aqui, e uma comanda ainda `AVAILABLE` *está* disponível, então a mensagem
+  "not available" soaria invertida, mesmo raciocínio já usado para
+  justificar `CommandCannotBeClosedException` como classe própria);
+  `CommandCannotAcceptOrdersException` aceita `AVAILABLE` como origem válida
+  e rejeita por um conjunto de motivos diferente — o oposto do que um
+  pagamento precisa; `CommandCannotBeClosedException` tem a mensagem certa
+  por coincidência (mesmos dois estados válidos), mas nomear a exceção por
+  "fechar" quando quem está chamando é o fluxo de pagamento seria enganoso
+  para qualquer log/depuração futura.
+
+  **Nota sobre escopo de arquivo**: este ticket toca `CommandService.java`
+  (pacote `command`) — permitido, já que a lista de pacotes vedados do
+  ticket (`inventory`, `notification`, `catalog`, `audit`, `ordering`) não
+  inclui `command`, e o precedente de `OrderService`↔`CommandService`
+  (domínio consumidor chamando um método novo em `CommandService` que
+  resolve+valida) já estabelece esse exato tipo de dependência
+  cross-domain como aceitável e existente.
+
+  **Decisão de desenho — RBAC: `ADMIN`/`MANAGER`/`CASHIER`, endpoint
+  protegido desde já.** Diferente do `GET .../payments` (FARELO-140, que
+  seguiu — e continua seguindo — o precedente "primeiro endpoint de leitura
+  de um domínio fica desprotegido"), este é um `POST` que grava dinheiro
+  recebido — uma ação de manuseio de caixa inequívoca. Mais importante: ao
+  contrário de FARELO-127 (onde proteger `Ingredient`/`Recipe` teria sido
+  escopo alheio ao ticket de auditoria de estoque), aqui `payment` é um
+  domínio novo em folha e **este É o ticket que cria a própria superfície de
+  escrita** — proteger `record()` agora está dentro do escopo, não é uma
+  tangente. Reaproveita literalmente a mesma lista de papéis que
+  `CommandController#close` já usa para a ação de comanda mais parecida
+  ("cash-handling", FARELO-124): `ADMIN`, `MANAGER`, `CASHIER` —
+  deliberadamente sem `ATTENDANT` (serviço de mesa, não manuseio de caixa,
+  mesma exclusão que `close()` já faz) e sem `KITCHEN` (nenhuma relação com
+  pagamentos). Ao contrário de
+  `InventoryMovementController#create`/`#recordLoss` (FARELO-127), o
+  handler **não** recebe um `AuthenticatedPrincipal`: aqueles endpoints
+  precisam de um ator real porque alimentam uma trilha de auditoria
+  (`InventoryMovementService#recordAudit`); `Payment` não ganhou nenhum
+  campo "registrado por" (nem podia — o ticket veda alterar a forma da
+  entidade), então não há para onde encaminhar um principal.
+
+  **Testes**: `PaymentControllerIntegrationTests` ganhou 15 testes novos
+  para `record()` — sucesso a partir de `OPEN` e de `PAYMENT_REQUESTED`;
+  rejeição (`409 COMMAND_CANNOT_ACCEPT_PAYMENTS`) a partir de `AVAILABLE`,
+  `CLOSED` e `BLOCKED`; `404 COMMAND_NOT_FOUND` para número inexistente;
+  `400 VALIDATION_ERROR` para `amount` zero, negativo, e `method` ausente;
+  e a tríade padrão de RBAC (`401 UNAUTHENTICATED` sem header, `403
+  FORBIDDEN` com `ATTENDANT`, sucesso com `CASHIER`). Usa os números de
+  comanda semeados 60-66 — cada um usado por exatamente um método de teste
+  (nunca compartilhado entre testes), mesma cautela de isolamento que a
+  nota do FARELO-140 acima já documenta (ordem de execução de método do
+  JUnit não é garantida). **Segunda nota de isolamento encontrada durante a
+  implementação**: a primeira versão desta suíte usava 50-56 para essas
+  mesmas sete comandas, o que quebrou `CommandSeedIntegrationTests`
+  (`seedsExactlyOneHundredAvailableCommands`) — aquele teste amostra
+  especificamente os números 1, 50 e 100 do seed do FARELO-031 e espera que
+  os três permaneçam `AVAILABLE` para sempre; a comanda #50 sendo deixada em
+  `OPEN` por um teste de `record()` (rodando numa execução de suíte
+  completa, container Postgres único compartilhado — ver
+  `AbstractIntegrationTest`) quebrou essa asserção de forma dependente da
+  ordem entre classes de teste, não só entre métodos. Corrigido de duas
+  formas: (1) migrando o intervalo para 60-66, livre de qualquer número já
+  amostrado em outro lugar da suíte; (2) adicionando
+  `resetMutatedTestCommands()` num `@AfterEach`, mesmo padrão que
+  `CommandControllerIntegrationTests` já usa para `open`/`close`, devolvendo
+  cada uma das sete comandas a `AVAILABLE` depois de cada teste — necessário
+  porque, ao contrário da maioria dos testes deste domínio (que só fazem
+  `INSERT`), estes mutam o `status` de uma linha compartilhada entre toda a
+  suíte. Registro atualizado de números de comanda reservados nesta suíte,
+  na vizinhança deste domínio: 44-45, 48
+  (`PaymentRepositoryIntegrationTests`), 46-47, 49 (`GET` em
+  `PaymentControllerIntegrationTests`), 60-66 (`POST`/`record` em
+  `PaymentControllerIntegrationTests`, FARELO-141).
+
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —
