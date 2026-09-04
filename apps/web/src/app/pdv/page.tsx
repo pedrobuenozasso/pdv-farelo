@@ -24,7 +24,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
 import { AuthGuard } from "@/components/auth-guard";
@@ -684,40 +684,87 @@ function PaymentPanel({
 }) {
   const queryClient = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
+  // FARELO-225: shown after a CASH payment with change is confirmed by the
+  // backend — persists past the form closing/resetting, since that's the
+  // number the cashier still needs to hand back to the customer.
+  const [lastChangeGiven, setLastChangeGiven] = useState<number | null>(null);
 
-  const paymentFormSchema = z.object({
-    amount: z
-      .string()
-      .trim()
-      .min(1, "Valor é obrigatório")
-      .refine((value) => !Number.isNaN(Number(value)), "Valor inválido")
-      .refine((value) => Number(value) > 0, "Valor deve ser maior que zero"),
-    method: z.enum(["PIX", "CREDIT_CARD", "DEBIT_CARD", "CASH", "OTHER"]),
-  });
+  const paymentFormSchema = z
+    .object({
+      amount: z
+        .string()
+        .trim()
+        .min(1, "Valor é obrigatório")
+        .refine((value) => !Number.isNaN(Number(value)), "Valor inválido")
+        .refine((value) => Number(value) > 0, "Valor deve ser maior que zero"),
+      method: z.enum(["PIX", "CREDIT_CARD", "DEBIT_CARD", "CASH", "OTHER"]),
+      // FARELO-225 ("Tratar troco em dinheiro") — optional, CASH-only on
+      // the wire (see recordPayment's input type); left as a plain string
+      // here so the field can be empty without failing validation.
+      amountReceived: z.string().trim().optional(),
+    })
+    .refine(
+      (data) =>
+        data.method !== "CASH" ||
+        !data.amountReceived ||
+        (!Number.isNaN(Number(data.amountReceived)) &&
+          Number(data.amountReceived) >= Number(data.amount)),
+      {
+        message: "Dinheiro recebido deve ser maior ou igual ao valor",
+        path: ["amountReceived"],
+      },
+    );
   type PaymentFormValues = z.infer<typeof paymentFormSchema>;
 
   const {
     register,
     handleSubmit,
     reset,
+    control,
     formState: { errors },
   } = useForm<PaymentFormValues>({
     resolver: zodResolver(paymentFormSchema),
     defaultValues: {
       amount: remaining > 0 ? String(remaining) : "",
       method: "PIX",
+      amountReceived: "",
     },
   });
+
+  // useWatch, not the form's own watch() — the latter returns a function
+  // React Compiler can't safely memoize (see react-hooks/incompatible-
+  // library), the same reasoning this project already applies elsewhere
+  // for React-Compiler-era hook constraints.
+  const method = useWatch({ control, name: "method" });
+  const amount = useWatch({ control, name: "amount" });
+  const amountReceived = useWatch({ control, name: "amountReceived" });
+
+  // Live preview only — the authoritative changeGiven the cashier acts on
+  // comes back from the backend in recordPaymentMutation's response (see
+  // onSuccess below), not from this client-side arithmetic.
+  const previewChange =
+    method === "CASH" &&
+    amountReceived &&
+    !Number.isNaN(Number(amountReceived)) &&
+    !Number.isNaN(Number(amount)) &&
+    Number(amountReceived) >= Number(amount)
+      ? Number(amountReceived) - Number(amount)
+      : null;
 
   const recordPaymentMutation = useMutation({
     mutationFn: (values: PaymentFormValues) =>
       recordPayment(commandNumber, {
         amount: Number(values.amount),
         method: values.method,
+        amountReceived:
+          values.method === "CASH" && values.amountReceived
+            ? Number(values.amountReceived)
+            : undefined,
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       reset();
       setFormOpen(false);
+      setLastChangeGiven(result.changeGiven > 0 ? result.changeGiven : null);
       queryClient.invalidateQueries({
         queryKey: ["pdv", "command", commandNumber, "paymentBalance"],
       });
@@ -758,6 +805,12 @@ function PaymentPanel({
 
       <PrintConferenceButton commandNumber={commandNumber} />
 
+      {lastChangeGiven !== null ? (
+        <div className="border-line bg-primary-soft text-primary-dark rounded-2xl border p-3 text-center text-sm font-bold">
+          Troco a devolver: {currencyFormatter.format(lastChangeGiven)}
+        </div>
+      ) : null}
+
       {formOpen ? (
         <form
           onSubmit={handleSubmit((values) =>
@@ -796,6 +849,33 @@ function PaymentPanel({
               ))}
             </select>
           </div>
+          {method === "CASH" ? (
+            <div className="flex flex-col gap-1">
+              <label
+                className="text-ink text-sm font-medium"
+                htmlFor="amountReceived"
+              >
+                Dinheiro recebido (R$) · opcional
+              </label>
+              <input
+                id="amountReceived"
+                inputMode="decimal"
+                placeholder="Deixe em branco se não houver troco"
+                className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+                {...register("amountReceived")}
+              />
+              {errors.amountReceived ? (
+                <p className="text-red text-sm">
+                  {errors.amountReceived.message}
+                </p>
+              ) : null}
+              {previewChange !== null ? (
+                <p className="text-ink-soft text-sm">
+                  Troco: {currencyFormatter.format(previewChange)}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {errorMessage ? (
             <p className="text-red text-sm">{errorMessage}</p>
           ) : null}
@@ -825,7 +905,8 @@ function PaymentPanel({
               // this component mounts before `remaining` settles (both
               // queries still loading), so re-seed the field here with
               // the real value at the moment the form actually opens.
-              reset({ amount: String(remaining), method: "PIX" });
+              reset({ amount: String(remaining), method: "PIX", amountReceived: "" });
+              setLastChangeGiven(null);
               setFormOpen(true);
             }}
           >

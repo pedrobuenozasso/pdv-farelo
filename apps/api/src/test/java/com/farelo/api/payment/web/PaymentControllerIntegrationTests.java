@@ -143,6 +143,13 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
     private static final int BALANCE_PARTIAL_NUMBER = 83;
     private static final int BALANCE_OVERPAID_NUMBER = 84;
 
+    // FARELO-225: POST .../payments (record) with amountReceived/changeGiven
+    // tests below — 85-88, free per this class's own registry above.
+    private static final int RECORD_CHANGE_GIVEN_NUMBER = 85;
+    private static final int RECORD_NO_CHANGE_NUMBER = 86;
+    private static final int RECORD_CHANGE_WRONG_METHOD_NUMBER = 87;
+    private static final int RECORD_CHANGE_BELOW_AMOUNT_NUMBER = 88;
+
     // FARELO-143 (POST .../close) — moved verbatim from
     // CommandControllerIntegrationTests (4-7, 92), plus new numbers (73-77)
     // for the payment-sufficiency tests this ticket adds. See class javadoc.
@@ -216,6 +223,10 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         resetToAvailable(RECORD_VALIDATION_NUMBER);
         resetToAvailable(RECORD_RBAC_NUMBER);
         resetToAvailable(RECORD_BLOCKED_NUMBER);
+        resetToAvailable(RECORD_CHANGE_GIVEN_NUMBER);
+        resetToAvailable(RECORD_NO_CHANGE_NUMBER);
+        resetToAvailable(RECORD_CHANGE_WRONG_METHOD_NUMBER);
+        resetToAvailable(RECORD_CHANGE_BELOW_AMOUNT_NUMBER);
         resetToAvailable(CLOSE_FROM_OPEN_NUMBER);
         resetToAvailable(CLOSE_FROM_PAYMENT_REQUESTED_NUMBER);
         resetToAvailable(CLOSE_FROM_AVAILABLE_NUMBER);
@@ -384,6 +395,78 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
 
         assertThat(paymentRepository.findByCommandOrderByCreatedAtAsc(command(RECORD_PAYMENT_REQUESTED_NUMBER)))
                 .hasSize(1);
+    }
+
+    // --- FARELO-225: "Tratar troco em dinheiro" -----------------------------
+
+    @Test
+    void computesChangeGivenWhenCashReceivedExceedsAmount() throws Exception {
+        setStatus(RECORD_CHANGE_GIVEN_NUMBER, CommandStatus.OPEN);
+
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", RECORD_CHANGE_GIVEN_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"amount": 90.00, "method": "CASH", "amountReceived": 100.00}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.amount").value(90.00))
+                .andExpect(jsonPath("$.method").value("CASH"))
+                .andExpect(jsonPath("$.changeGiven").value(10.00));
+
+        // Only the applied amount is persisted — the change itself is never
+        // part of the ledger (see PaymentRequest's javadoc).
+        List<Payment> persisted = paymentRepository.findByCommandOrderByCreatedAtAsc(command(RECORD_CHANGE_GIVEN_NUMBER));
+        assertThat(persisted).hasSize(1);
+        assertThat(persisted.get(0).getAmount()).isEqualByComparingTo("90.00");
+    }
+
+    @Test
+    void changeGivenIsZeroWhenAmountReceivedOmitted() throws Exception {
+        setStatus(RECORD_NO_CHANGE_NUMBER, CommandStatus.OPEN);
+
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", RECORD_NO_CHANGE_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"amount": 40.00, "method": "CASH"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.changeGiven").value(0));
+    }
+
+    @Test
+    void rejectsAmountReceivedForNonCashMethod() throws Exception {
+        setStatus(RECORD_CHANGE_WRONG_METHOD_NUMBER, CommandStatus.OPEN);
+
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", RECORD_CHANGE_WRONG_METHOD_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"amount": 50.00, "method": "PIX", "amountReceived": 60.00}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        assertThat(paymentRepository.findByCommandOrderByCreatedAtAsc(command(RECORD_CHANGE_WRONG_METHOD_NUMBER)))
+                .isEmpty();
+    }
+
+    @Test
+    void rejectsAmountReceivedBelowAmount() throws Exception {
+        setStatus(RECORD_CHANGE_BELOW_AMOUNT_NUMBER, CommandStatus.OPEN);
+
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", RECORD_CHANGE_BELOW_AMOUNT_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"amount": 50.00, "method": "CASH", "amountReceived": 40.00}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        assertThat(paymentRepository.findByCommandOrderByCreatedAtAsc(command(RECORD_CHANGE_BELOW_AMOUNT_NUMBER)))
+                .isEmpty();
     }
 
     @Test

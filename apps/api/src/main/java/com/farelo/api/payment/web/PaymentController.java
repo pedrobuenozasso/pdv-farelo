@@ -129,20 +129,32 @@ public class PaymentController {
     // resource's correct URI under the REST collection/{id} convention, even
     // before any handler exists to resolve it (see OrderController#create's
     // comment for the same reasoning spelled out in full).
+    //
+    // FARELO-225 ("Tratar troco em dinheiro"): changeGiven is computed here,
+    // not in PaymentService — it's pure arithmetic on two values already in
+    // hand (request.amountReceived()/request.amount()), needs no database
+    // read, and is never persisted (see PaymentRequest's javadoc), so
+    // there's no business logic here for the service layer to own.
+    // PaymentService#record itself is unchanged: it still persists exactly
+    // request.amount() as the Payment, same as before this ticket.
     @PostMapping("/{number}/payments")
     @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
-    public ResponseEntity<PaymentResponse> record(
+    public ResponseEntity<PaymentRecordResponse> record(
             @PathVariable int number,
             @Valid @RequestBody PaymentRequest request,
             UriComponentsBuilder uriComponentsBuilder) {
         Payment payment = paymentService.record(number, request.amount(), request.method());
+
+        BigDecimal changeGiven = request.amountReceived() != null
+                ? request.amountReceived().subtract(request.amount())
+                : BigDecimal.ZERO;
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/commands/{number}/payments/{id}")
                 .buildAndExpand(number, payment.getId())
                 .toUri();
 
-        return ResponseEntity.created(location).body(PaymentResponse.from(payment));
+        return ResponseEntity.created(location).body(PaymentRecordResponse.from(payment, changeGiven));
     }
 
     // FARELO-142 ("Permitir múltiplos pagamentos por comanda"). A separate

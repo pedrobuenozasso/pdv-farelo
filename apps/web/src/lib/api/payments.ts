@@ -34,7 +34,17 @@ export type PaymentBalance = {
 export type RecordPaymentInput = {
   amount: number;
   method: PaymentMethod;
+  // FARELO-225 ("Tratar troco em dinheiro") — only meaningful/allowed when
+  // method is CASH, and must be >= amount (backend validates both). The
+  // cash the customer physically handed over; amount stays "valor
+  // efetivamente aplicado" exactly as before this ticket.
+  amountReceived?: number;
 };
+
+// FARELO-225: response shape for recordPayment — changeGiven is computed
+// by the backend, never persisted (it's cash handed back, not money the
+// business received — see PaymentRequest's javadoc on the backend).
+export type RecordPaymentResult = Payment & { changeGiven: number };
 
 export async function getTotalPaid(commandNumber: number): Promise<TotalPaid> {
   const response = await fetch(
@@ -57,11 +67,11 @@ export async function getPaymentBalance(
 export async function recordPayment(
   commandNumber: number,
   input: RecordPaymentInput,
-): Promise<Payment> {
+): Promise<RecordPaymentResult> {
   const response = await fetch(`/api/v1/commands/${commandNumber}/payments`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(input),
   });
-  return parseResponse<Payment>(response);
+  return parseResponse<RecordPaymentResult>(response);
 }
