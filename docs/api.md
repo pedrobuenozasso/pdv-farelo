@@ -52,10 +52,12 @@ Um endpoint **sem** a marca "Requer" continua acessível sem nenhum header,
 exatamente como sempre foi — inclusive depois do FARELO-123 (que adicionou
 a marca a alguns endpoints de `categories`/`products`/`users`), do
 FARELO-124 (que adicionou a marca a alguns endpoints de `commands`/
-`orders`/`print-jobs` — a superfície PDV/cozinha) e do FARELO-127 (que
-adicionou a marca a exatamente dois endpoints de `ingredients` — ver essas
-seções abaixo e o raciocínio completo em `docs/domain-model.md`, subseções
-FARELO-123, FARELO-124 e FARELO-127). Dois casos seguem deliberadamente sem
+`orders`/`print-jobs` — a superfície PDV/cozinha), do FARELO-127 (que
+adicionou a marca a exatamente dois endpoints de `ingredients`) e do
+FARELO-141 (que adicionou a marca ao único `POST` de `payments`, deixando o
+`GET` irmão sem marca — ver essa seção abaixo) — ver essas seções abaixo e o
+raciocínio completo em `docs/domain-model.md`, subseções FARELO-123,
+FARELO-124, FARELO-127 e FARELO-141. Dois casos seguem deliberadamente sem
 a marca mesmo depois do FARELO-124: os dois endpoints que o Cardápio QR
 (cliente anônimo, sem login) depende diretamente
 (`GET /api/v1/commands/{number}`, `POST /api/v1/orders`), e três dos quatro
@@ -2020,6 +2022,82 @@ Lista vazia (`[]`) quando a comanda existe mas ainda não tem pagamentos.
 
 - `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
   `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
+
+### `POST /api/v1/commands/{number}/payments`
+
+Registra um pagamento manual contra uma comanda — `PIX`, `CREDIT_CARD`,
+`DEBIT_CARD`, `CASH` ou `OTHER`. (FARELO-141, "Registrar pagamento manual")
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`** (FARELO-141) — tratado como ação
+de manuseio de caixa, mesma lista de papéis que `POST
+/api/v1/commands/{number}/close` já usa para a ação de comanda mais
+parecida (ver acima); ver a seção "Autenticação/RBAC" no topo deste
+documento para o formato do header e das respostas `401`/`403`, e a
+subseção FARELO-141 de `docs/domain-model.md` para o raciocínio completo.
+
+Não soma pagamentos já registrados contra a comanda nem valida um total
+pago — isso é FARELO-142/FARELO-143, tickets futuros e distintos. Este
+endpoint só registra o pagamento passado nesta chamada, um por requisição.
+
+**Request body**
+
+```json
+{
+  "amount": 25.50,
+  "method": "PIX"
+}
+```
+
+| Campo | Observações |
+|---|---|
+| `amount` | `BigDecimal`, obrigatório, estritamente positivo (`@Positive`) — zero ou negativo é `400 VALIDATION_ERROR`. |
+| `method` | Obrigatório, um de `PIX`/`CREDIT_CARD`/`DEBIT_CARD`/`CASH`/`OTHER` — ausente/`null` é `400 VALIDATION_ERROR`. |
+
+**Estados de origem válidos da comanda**: `OPEN` e `PAYMENT_REQUESTED` —
+mesmos dois estados que `POST /api/v1/commands/{number}/close` já aceita
+como origem (ver acima); `AVAILABLE` (nada foi pedido ainda), `CLOSED` (a
+conta já foi liquidada) e `BLOCKED` são inválidos como origem. Ver a
+subseção FARELO-141 de `docs/domain-model.md` para o raciocínio completo
+por trás dessa precondição.
+
+**Response — `201 Created`**
+
+Mesmo formato de `PaymentResponse` do `GET` acima. Header `Location`
+apontando para `/api/v1/commands/{number}/payments/{id}` — mesma convenção
+já usada por `POST /api/v1/orders`/`POST
+/api/v1/ingredients/{ingredientId}/movements`: essa URL não resolve para
+nenhum handler ainda (não existe `GET` de um pagamento individual, só a
+listagem acima), mas continua sendo a URI correta do recurso pela convenção
+REST `coleção/{id}`.
+
+```json
+{
+  "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+  "commandNumber": 1,
+  "amount": 25.50,
+  "method": "PIX",
+  "createdAt": "2026-09-02T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
+  `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
+- `409 Conflict` — a comanda existe mas não está em um estado que aceita
+  pagamento (`AVAILABLE`, `CLOSED` ou `BLOCKED`):
+
+  ```json
+  {
+    "code": "COMMAND_CANNOT_ACCEPT_PAYMENTS",
+    "message": "Command 62 cannot accept payments (current status: AVAILABLE, expected OPEN or PAYMENT_REQUESTED)",
+    "correlationId": "..."
+  }
+  ```
+
+- `400 Bad Request` — `amount` ausente/zero/negativo, ou `method`
+  ausente/inválido, `code: "VALIDATION_ERROR"` (mesmo formato padrão de
+  validação usado em todo o resto da API).
 
 ### `POST /api/v1/fiscal-profiles`
 

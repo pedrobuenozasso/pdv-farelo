@@ -1,15 +1,49 @@
 package com.farelo.api.payment.web;
 
+import com.farelo.api.payment.Payment;
 import com.farelo.api.payment.PaymentService;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.rbac.RequireRole;
+import jakarta.validation.Valid;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.util.List;
 
 /**
- * Exposes {@code GET /api/v1/commands/{number}/payments} (FARELO-140).
+ * Exposes {@code GET /api/v1/commands/{number}/payments} (FARELO-140) and
+ * {@code POST /api/v1/commands/{number}/payments} (FARELO-141, "Registrar
+ * pagamento manual").
+ *
+ * <p><b>{@link #record} requires {@code ADMIN}/{@code MANAGER}/{@code
+ * CASHIER}</b>: unlike {@link #listByCommand} below, this is a brand-new
+ * write surface with no unprotected-by-precedent read endpoint to defer to
+ * (contrast {@code InventoryMovementController}, where FARELO-127 had to
+ * weigh protecting an *existing* write endpoint against the scope of a
+ * differently-named ticket — not the situation here: FARELO-141 *is* the
+ * ticket that creates this write surface, so applying RBAC to it now is
+ * squarely in scope, not a tangent). Recording a payment is unambiguously a
+ * cash-handling action, so this reuses the exact role list {@link
+ * com.farelo.api.command.web.CommandController#close} already settled on for
+ * the closest precedent of "a cash-handling comanda action" (see that
+ * method's javadoc): {@code ADMIN}/{@code MANAGER}/{@code CASHIER}, and
+ * deliberately <b>not</b> {@code ATTENDANT} (front-of-house table service,
+ * not cash handling — same exclusion {@code close()} makes) or {@code
+ * KITCHEN} (no business recording payments at all). No {@code
+ * AuthenticatedPrincipal} parameter is needed here, unlike {@code
+ * InventoryMovementController#create}/{@code #recordLoss}: those endpoints
+ * need a principal because they feed an audit trail
+ * ({@code InventoryMovementService#recordAudit}); {@link Payment} carries no
+ * "recorded by" field (this ticket doesn't add one — see {@code Payment}'s
+ * javadoc, its shape is deliberately unchanged), so there is nothing for a
+ * principal to be forwarded to.
  *
  * <p><b>Placement note</b>: this is a command-scoped URL, but lives in the
  * new {@code payment} domain ({@code com.farelo.api.payment.web}), not in
@@ -32,12 +66,14 @@ import java.util.List;
  * URL path is independent of which class handles it, so this costs
  * nothing.
  *
- * <p><b>No {@code @RequireRole}</b>: same "leave a domain's first read
- * endpoint unprotected" precedent already followed by {@code Notification}
- * (FARELO-110) and {@code AuditLog} (FARELO-125) at their own first
- * tickets — no dedicated RBAC-application ticket exists yet for {@code
- * payment} (contrast with {@code CommandOrdersController}, protected only
- * later, at FARELO-124, a separate numbered ticket).
+ * <p><b>{@link #listByCommand} stays unprotected</b>: same "leave a domain's
+ * first read endpoint unprotected" precedent already followed by {@code
+ * Notification} (FARELO-110) and {@code AuditLog} (FARELO-125) at their own
+ * first tickets, and unaffected by {@link #record} landing above — read
+ * access to the ledger carries none of the cash-handling-write concern that
+ * justifies protecting {@code record} (same split {@code
+ * InventoryMovementController} already has between its protected {@code
+ * POST}s and unprotected {@code GET}s).
  */
 @RestController
 @RequestMapping("/api/v1/commands")
@@ -57,6 +93,29 @@ public class PaymentController {
         return paymentService.listByCommand(number).stream()
                 .map(PaymentResponse::from)
                 .toList();
+    }
+
+    // FARELO-141. Location points at .../payments/{id} — same convention
+    // OrderController#create/InventoryMovementController#create/#recordLoss
+    // already use: this resource has no single-item GET handler of its own
+    // (only the list above), but the Location header still names the
+    // resource's correct URI under the REST collection/{id} convention, even
+    // before any handler exists to resolve it (see OrderController#create's
+    // comment for the same reasoning spelled out in full).
+    @PostMapping("/{number}/payments")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
+    public ResponseEntity<PaymentResponse> record(
+            @PathVariable int number,
+            @Valid @RequestBody PaymentRequest request,
+            UriComponentsBuilder uriComponentsBuilder) {
+        Payment payment = paymentService.record(number, request.amount(), request.method());
+
+        URI location = uriComponentsBuilder
+                .path("/api/v1/commands/{number}/payments/{id}")
+                .buildAndExpand(number, payment.getId())
+                .toUri();
+
+        return ResponseEntity.created(location).body(PaymentResponse.from(payment));
     }
 
 }
