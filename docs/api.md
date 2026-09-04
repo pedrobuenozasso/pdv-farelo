@@ -2487,7 +2487,7 @@ comanda é naturalmente pequeno.
 | Campo | Observações |
 |---|---|
 | `commandNumber` | Número de negócio da comanda (não o `id` técnico) — mesma convenção de `PaymentResponse.commandNumber`. |
-| `status` | Um de `PENDING`/`PROCESSING`/`AUTHORIZED`/`REJECTED`/`CANCELLED`/`CONTINGENCY` (vocabulário literal do prompt mestre, seção 25). Sempre `PENDING` hoje — nada ainda move um documento para outro estado (isso é FARELO-157/Epic 12). |
+| `status` | Um de `PENDING`/`PROCESSING`/`AUTHORIZED`/`REJECTED`/`CANCELLED`/`CONTINGENCY` (vocabulário literal do prompt mestre, seção 25). Sempre `PENDING` para um documento recém-criado; pode mudar via `POST .../transition` (FARELO-157, abaixo) — nenhum produtor automático real ainda existe (isso é Epic 12). |
 | `documentNumber`/`series`/`accessKey`/`protocolNumber`/`xmlContent`/`authorizedAt` | Placeholders nuláveis para o que uma NFC-e real eventualmente carrega — sempre `null` hoje, já que nada neste código ainda computa/valida/transmite nenhum desses dados (Epic 12). |
 
 Diferente de `Payment`, este documento **é** mutável ao longo do tempo (um
@@ -2502,5 +2502,75 @@ documento fiscal.
 
 - `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
   `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
+
+### `POST /api/v1/commands/{number}/fiscal-documents/{id}/transition`
+
+Move um `FiscalDocument` existente para um novo `status`, validando que a
+transição é legal antes de aplicá-la. (FARELO-157, "Criar estados fiscais")
+
+**Requer: `ADMIN`, `MANAGER`** — diferente do `GET .../fiscal-documents`
+acima (que continua sem marca "Requer"). Ver a subseção FARELO-157 de
+`docs/domain-model.md` para o raciocínio completo (por que este endpoint
+existe mesmo sem produtor automático ainda, e por que o escopo de papel é
+mais estreito que o `retry` de `PrintJob`).
+
+**Ainda não emite nenhuma NFC-e real** — isso continua sendo o Epic 12,
+explicitamente gated ("Somente iniciar após validação contábil"). Este
+endpoint só valida/aplica a transição de `status` pedida; não chama SEFAZ,
+não gera XML, não decide sozinho quando um documento deveria ser
+autorizado ou rejeitado.
+
+**Request body**
+
+```json
+{
+  "status": "PROCESSING"
+}
+```
+
+| Campo | Obrigatório | Observações |
+|---|---|---|
+| `status` | Sim | Um de `PENDING`/`PROCESSING`/`AUTHORIZED`/`REJECTED`/`CANCELLED`/`CONTINGENCY` — o destino pedido. Se ausente/`null`, `400 VALIDATION_ERROR`. |
+
+**Tabela de transição** (ver `docs/domain-model.md`, seção `fiscal`,
+subseção FARELO-157, para a tabela completa com o raciocínio por aresta):
+
+| Origem | Destinos legais |
+|---|---|
+| `PENDING` | `PROCESSING`, `CONTINGENCY` |
+| `PROCESSING` | `AUTHORIZED`, `REJECTED`, `CONTINGENCY` |
+| `CONTINGENCY` | `AUTHORIZED`, `REJECTED` |
+| `AUTHORIZED` | `CANCELLED` |
+| `REJECTED` | — (terminal) |
+| `CANCELLED` | — (terminal) |
+
+**Response — `200 OK`**
+
+`FiscalDocumentResponse` atualizado, mesmo formato do `GET
+.../fiscal-documents` acima, com `status` já refletindo o novo valor.
+
+**Erros**
+
+- `401 Unauthorized`/`403 Forbidden` — sem token ou papel fora de `ADMIN`/
+  `MANAGER`, mesmo formato padrão (`code: "UNAUTHENTICATED"`/`"FORBIDDEN"`).
+- `400 Bad Request` — `status` ausente/inválido no corpo,
+  `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `number` não corresponde a nenhuma comanda existente
+  (`code: "COMMAND_NOT_FOUND"`), **ou** `id` não corresponde a nenhum
+  documento fiscal existente, **ou** corresponde a um documento que
+  pertence a uma comanda diferente de `number` (mesmo `code:
+  "FISCAL_DOCUMENT_NOT_FOUND"` nos dois últimos casos — deliberado, para
+  não vazar se aquele `id` existe sob outra comanda; ver a subseção
+  FARELO-157 de `docs/domain-model.md`).
+- `409 Conflict` — o status atual do documento não tem aresta legal para o
+  `status` pedido na tabela acima:
+
+  ```json
+  {
+    "code": "FISCAL_DOCUMENT_INVALID_TRANSITION",
+    "message": "Fiscal document <id> cannot transition to AUTHORIZED (current status: PENDING)",
+    "correlationId": "..."
+  }
+  ```
 
 _(demais endpoints a preencher conforme implementados)_

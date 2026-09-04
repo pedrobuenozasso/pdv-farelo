@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface FiscalDocumentRepository extends JpaRepository<FiscalDocument, UUID> {
@@ -24,5 +25,17 @@ public interface FiscalDocumentRepository extends JpaRepository<FiscalDocument, 
     // called.
     @Query("SELECT fd FROM FiscalDocument fd JOIN FETCH fd.command WHERE fd.command = :command ORDER BY fd.createdAt ASC")
     List<FiscalDocument> findByCommandOrderByCreatedAtAsc(@Param("command") Command command);
+
+    // FARELO-157: backs FiscalDocumentService#getById/transition. Same JOIN
+    // FETCH reasoning as above and as
+    // com.farelo.api.ordering.OrderRepository#findByIdWithCommand/
+    // com.farelo.api.printing.PrintJobRepository#findByIdWithOrder — a plain
+    // findById(id) would leave `command` as an uninitialized lazy proxy, and
+    // both FiscalDocumentResponse#from and the command-number ownership
+    // check in FiscalDocumentService#transition(int, UUID,
+    // FiscalDocumentStatus) need command.getId()/getNumber() after this
+    // method's own (short) transaction has already closed.
+    @Query("SELECT fd FROM FiscalDocument fd JOIN FETCH fd.command WHERE fd.id = :id")
+    Optional<FiscalDocument> findByIdWithCommand(@Param("id") UUID id);
 
 }
