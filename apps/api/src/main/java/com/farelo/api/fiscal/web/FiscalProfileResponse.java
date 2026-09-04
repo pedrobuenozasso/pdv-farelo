@@ -13,9 +13,11 @@ import java.util.UUID;
  * fiscal codes to exist on {@link FiscalProfile} — {@code null} means "not
  * configured yet" (see {@code FiscalProfile.ncm}'s javadoc). {@code cfop}
  * (FARELO-153) is the second, same {@code null}-means-"not configured yet"
- * shape (see {@code FiscalProfile.cfop}'s javadoc). CST/CSOSN (or any other
- * seção 24 fiscal code) still doesn't exist on {@link FiscalProfile}, see
- * that class's javadoc for why (FARELO-154, future ticket).
+ * shape (see {@code FiscalProfile.cfop}'s javadoc). {@code cst}/
+ * {@code csosn} (FARELO-154) are the third and last, same
+ * {@code null}-means-"not configured yet" shape each, plus mutual
+ * exclusivity with each other (see {@code FiscalProfile.cst}/{@code
+ * .csosn}'s javadoc) — never both non-null on the same response.
  */
 public record FiscalProfileResponse(
         UUID id,
@@ -23,6 +25,8 @@ public record FiscalProfileResponse(
         String description,
         String ncm,
         String cfop,
+        String cst,
+        String csosn,
         boolean active,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
@@ -34,6 +38,8 @@ public record FiscalProfileResponse(
                 fiscalProfile.getDescription(),
                 fiscalProfile.getNcm(),
                 fiscalProfile.getCfop(),
+                fiscalProfile.getCst(),
+                fiscalProfile.getCsosn(),
                 fiscalProfile.isActive(),
                 fiscalProfile.getCreatedAt(),
                 fiscalProfile.getUpdatedAt());

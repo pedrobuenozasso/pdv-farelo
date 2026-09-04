@@ -2226,11 +2226,18 @@ Cria um perfil fiscal. (FARELO-150)
 
 Primeiro endpoint do domínio `fiscal`. Sem `active` no corpo — um perfil
 novo sempre começa `true`, mesmo padrão de `Category`/`Ingredient`. Desde o
-FARELO-152, aceita `ncm`; desde o FARELO-153, aceita `cfop` também.
-CST/CSOSN (ou qualquer outro dado fiscal previsto na seção 24 do prompt
-mestre) continua deliberadamente fora de escopo — ver
-`docs/domain-model.md`, seção `fiscal`, para o raciocínio completo (esse
-campo é FARELO-154, ticket futuro e já numerado).
+FARELO-152, aceita `ncm`; desde o FARELO-153, aceita `cfop` também. Desde o
+FARELO-154, aceita `cst`/`csosn` — o terceiro e último dos três campos
+fiscais nomeados como tickets próprios (seção 24 do prompt mestre); qualquer
+outro dado fiscal previsto nessa seção (CEST, origem, cBenef, ICMS, CBS,
+IBS) continua deliberadamente fora de escopo, sem ticket nomeado ainda.
+
+`cst`/`csosn` **são mutuamente exclusivos** — um perfil fiscal é configurado
+para um regime tributário (CST = Regime Normal, CSOSN = Simples Nacional),
+nunca os dois ao mesmo tempo. Ver `docs/domain-model.md`, seção `fiscal`,
+subseção FARELO-154, para o raciocínio completo dessa decisão de modelagem
+(inclusive por que não foi adicionado um campo de regime tributário a
+`FiscalProfile` para validar isso de forma mais completa).
 
 **Request body**
 
@@ -2239,7 +2246,9 @@ campo é FARELO-154, ticket futuro e já numerado).
   "name": "Isento",
   "description": "Produtos sem incidência de ICMS",
   "ncm": "12345678",
-  "cfop": "5102"
+  "cfop": "5102",
+  "cst": "60",
+  "csosn": null
 }
 ```
 
@@ -2249,6 +2258,8 @@ campo é FARELO-154, ticket futuro e já numerado).
 | `description` | string | não | Texto livre; omitido/`null` = "sem descrição" |
 | `ncm` | string | não | (FARELO-152) NCM — sempre exatamente 8 dígitos numéricos (`@Pattern`, `^[0-9]{8}$`); omitido/`null` = "sem NCM configurado" |
 | `cfop` | string | não | (FARELO-153) CFOP — sempre exatamente 4 dígitos numéricos (`@Pattern`, `^[0-9]{4}$`); omitido/`null` = "sem CFOP configurado" |
+| `cst` | string | não | (FARELO-154) CST (Regime Normal) — 2 a 3 dígitos numéricos (`@Pattern`, `^[0-9]{2,3}$`; formato mais frouxo que `ncm`/`cfop` porque a tabela CST varia por tipo de tributo — ICMS/IPI/PIS/COFINS têm tabelas próprias). Omitido/`null` = "sem CST configurado". **Mutuamente exclusivo com `csosn`** — enviar os dois no mesmo request é rejeitado |
+| `csosn` | string | não | (FARELO-154) CSOSN (Simples Nacional) — sempre exatamente 3 dígitos numéricos (`@Pattern`, `^[0-9]{3}$`, mesma confiança de formato que `ncm`/`cfop` — tabela nacional única). Omitido/`null` = "sem CSOSN configurado". **Mutuamente exclusivo com `cst`** — enviar os dois no mesmo request é rejeitado |
 
 **Response — `201 Created`**
 
@@ -2261,6 +2272,8 @@ Header `Location: /api/v1/fiscal-profiles/{id}`.
   "description": "Produtos sem incidência de ICMS",
   "ncm": "12345678",
   "cfop": "5102",
+  "cst": "60",
+  "csosn": null,
   "active": true,
   "createdAt": "2026-09-02T13:00:00Z",
   "updatedAt": "2026-09-02T13:00:00Z"
@@ -2269,10 +2282,11 @@ Header `Location: /api/v1/fiscal-profiles/{id}`.
 
 **Erros**
 
-- `400 Bad Request` — `name` ausente/em branco, ou `ncm`/`cfop` enviados num
-  formato inválido (não são exatamente 8/4 dígitos numéricos,
-  respectivamente), no formato de erro padrão, com
-  `code: "VALIDATION_ERROR"`.
+- `400 Bad Request` — `name` ausente/em branco; `ncm`/`cfop`/`cst`/`csosn`
+  enviados num formato inválido (não são exatamente 8/4/2-3/3 dígitos
+  numéricos, respectivamente); ou `cst` **e** `csosn` enviados juntos no
+  mesmo request (`CstCsosnMutuallyExclusive`) — todos no formato de erro
+  padrão, com `code: "VALIDATION_ERROR"`.
 
 ### `GET /api/v1/fiscal-profiles`
 
@@ -2293,6 +2307,8 @@ ticket futuro se o Admin precisar).
     "description": "Produtos sem incidência de ICMS",
     "ncm": "12345678",
     "cfop": "5102",
+    "cst": "60",
+    "csosn": null,
     "active": true,
     "createdAt": "2026-09-02T13:00:00Z",
     "updatedAt": "2026-09-02T13:00:00Z"
@@ -2333,7 +2349,9 @@ torná-lo opcional na criação.
   "description": "Atualizado após revisão contábil",
   "active": true,
   "ncm": "12345678",
-  "cfop": "5102"
+  "cfop": "5102",
+  "cst": null,
+  "csosn": "102"
 }
 ```
 
@@ -2344,6 +2362,8 @@ torná-lo opcional na criação.
 | `active` | boolean | sim | |
 | `ncm` | string | não | (FARELO-152) Sempre exatamente 8 dígitos numéricos (`@Pattern`, `^[0-9]{8}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um NCM configurado anteriormente de volta para "sem NCM configurado", mesmo comportamento de `description` acima |
 | `cfop` | string | não | (FARELO-153) Sempre exatamente 4 dígitos numéricos (`@Pattern`, `^[0-9]{4}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um CFOP configurado anteriormente de volta para "sem CFOP configurado", mesmo comportamento de `ncm`/`description` acima |
+| `cst` | string | não | (FARELO-154) 2 a 3 dígitos numéricos (`@Pattern`, `^[0-9]{2,3}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um CST configurado anteriormente. **Mutuamente exclusivo com `csosn`** |
+| `csosn` | string | não | (FARELO-154) Sempre exatamente 3 dígitos numéricos (`@Pattern`, `^[0-9]{3}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um CSOSN configurado anteriormente. **Mutuamente exclusivo com `cst`** |
 
 **Response — `200 OK`**
 
@@ -2352,8 +2372,8 @@ torná-lo opcional na criação.
 
 **Erros**
 
-- `400 Bad Request` — mesmas validações do `POST`, mais `active` ausente,
-  `code: "VALIDATION_ERROR"`.
+- `400 Bad Request` — mesmas validações do `POST` (incluindo a exclusão
+  mútua `cst`/`csosn`), mais `active` ausente, `code: "VALIDATION_ERROR"`.
 - `404 Not Found` — `{id}` do perfil fiscal não existe,
   `code: "FISCAL_PROFILE_NOT_FOUND"`.
 

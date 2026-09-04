@@ -40,11 +40,24 @@ import jakarta.validation.constraints.Pattern;
  * {@code @NotNull}, same reasoning as {@code ncm}: a fiscal profile with no
  * CFOP yet is a legitimate, common state (see {@code FiscalProfile.cfop}'s
  * javadoc).
+ *
+ * <p>{@code cst}/{@code csosn} (FARELO-154) are optional too, same
+ * "PUT is a full replace" convention as {@code ncm}/{@code cfop} above —
+ * omitting either (or sending {@code null}) clears a previously-set value
+ * back to "not configured". Also mutually exclusive with each other
+ * ({@link CstCsosnMutuallyExclusive}, applied at the record level below) —
+ * see {@link FiscalProfileRequest}'s javadoc for the full reasoning on the
+ * exclusivity rule and the two different {@code @Pattern}s ({@code cst}
+ * looser, {@code csosn} exact).
  */
+@CstCsosnMutuallyExclusive
 public record FiscalProfileUpdateRequest(
         @NotBlank String name,
         String description,
         @NotNull Boolean active,
         @Pattern(regexp = "^[0-9]{8}$", message = "ncm must be exactly 8 numeric digits") String ncm,
-        @Pattern(regexp = "^[0-9]{4}$", message = "cfop must be exactly 4 numeric digits") String cfop) {
+        @Pattern(regexp = "^[0-9]{4}$", message = "cfop must be exactly 4 numeric digits") String cfop,
+        @Pattern(regexp = "^[0-9]{2,3}$", message = "cst must be 2 to 3 numeric digits") String cst,
+        @Pattern(regexp = "^[0-9]{3}$", message = "csosn must be exactly 3 numeric digits") String csosn)
+        implements FiscalProfileCstCsosnCarrier {
 }

@@ -4577,6 +4577,154 @@ formato de sucesso/validação/limpar-campo-opcional já usado pelos testes de
 `@RequireRole` em nenhum endpoint, mesmo raciocínio/precedente já
 documentado na seção `FiscalProfile` acima.
 
+### FARELO-154 — Adicionar CST/CSOSN
+
+Terceiro e último dos três campos fiscais nomeados como tickets próprios na
+seção `FiscalProfile` acima (FARELO-152/153/154) — nenhum outro campo da
+seção 24 do prompt mestre (CEST, origem, cBenef, ICMS, CBS, IBS) tem ticket
+nomeado ainda, então continuam fora de escopo.
+
+**Por que isto NÃO é estruturalmente idêntico a FARELO-152/153.** NCM
+(sempre 8 dígitos) e CFOP (sempre 4 dígitos) são, cada um, **um** código com
+**um** formato — FARELO-153 foi literalmente "troca o regex, troca o nome",
+mesmo shape do FARELO-152. CST e CSOSN não são isso: são dois códigos
+**diferentes e mutuamente exclusivos**, não um código com um formato.
+
+- **CST** (Código de Situação Tributária) se aplica a um negócio no
+  "Regime Normal" (Lucro Real/Presumido).
+- **CSOSN** (Código de Situação da Operação no Simples Nacional) se aplica
+  a um negócio no "Simples Nacional".
+- Um único perfil fiscal é configurado para um regime tributário, então usa
+  CST **ou** CSOSN, nunca os dois ao mesmo tempo.
+
+**Decisão de modelagem — duas colunas nullable (`cst`/`csosn`) com um
+`CHECK` de exclusão mútua no banco.** O brief deste ticket apresentou três
+formas possíveis: (a) duas colunas nullable sem nenhuma exclusão mútua
+reforçada (mais simples, confia em quem configura para preencher só o campo
+certo pro regime); (b) duas colunas nullable **com** um `CHECK` de banco
+garantindo que no máximo uma esteja preenchida por vez (defesa em
+profundidade); (c) alguma outra forma. Escolhido (b):
+
+- É a mesma disciplina "defesa em profundidade" que este código já aplica a
+  `ncm`/`cfop` (validação no DTO + `CHECK` no banco) — aqui a regra
+  adicional (exclusão mútua) é exatamente o tipo de invariante estrutural e
+  permanente que um `CHECK` existe para expressar, e o Postgres consegue
+  expressá-la de forma limpa: `CHECK (cst IS NULL OR csosn IS NULL)`
+  (`ck_fiscal_profile_cst_csosn_exclusive`, ver
+  `V33__add_fiscal_profile_cst_csosn_columns.sql`). Como a expressão saiu
+  limpa, não havia motivo para recuar para a opção (a) mais fraca.
+- O mesmo par de campos ganhou também a validação equivalente na borda do
+  DTO: uma constraint Bean Validation nova,
+  `@CstCsosnMutuallyExclusive` (aplicada a nível de classe em
+  `FiscalProfileRequest`/`FiscalProfileUpdateRequest`, ver
+  `apps/api/src/main/java/com/farelo/api/fiscal/web/CstCsosnMutuallyExclusive.java`),
+  reaproveitando o mesmo formato de erro `400`/`VALIDATION_ERROR` que toda
+  outra falha de Bean Validation neste endpoint já usa (via
+  `ApiExceptionHandler#handleValidationException`), em vez de uma exceção
+  de domínio dedicada com seu próprio handler — esta é a primeira
+  constraint Bean Validation *custom* (nível de classe/cross-field) deste
+  código; toda `@Pattern`/`@NotBlank`/`@NotNull` anterior é de campo único,
+  e este é o primeiro lugar do código que precisa checar dois campos um
+  contra o outro na borda do request.
+- A constraint só rejeita **os dois preenchidos ao mesmo tempo** — `cst`
+  e `csosn` ambos `null` continua sendo um estado legítimo (perfil ainda
+  não configurado, ou já criado antes deste ticket), mesmo raciocínio
+  null-como-estado-de-negócio já estabelecido por `ncm`/`cfop`.
+
+**Por que não uma coluna única (`cstOrCsosn`) em vez de duas.** Colapsar em
+uma única coluna esconderia qual dos dois códigos está ali, obrigando quem
+consumir o dado a inferir "isto é CST ou CSOSN?" a partir do formato/valor —
+frágil e ambíguo (um CST de 3 dígitos e um CSOSN de 3 dígitos podem
+coincidir em formato). Duas colunas nomeadas mantêm a distinção explícita
+no schema, sem custo real (`FiscalProfile` já tem várias colunas
+opcionais).
+
+**Validação de formato — mais frouxa para `cst`, exata para `csosn`, e por
+quê.** Diferente de NCM/CFOP (cada um um único código nacional com
+contagem de dígitos fixa e conhecida com confiança alta), "CST" não é uma
+tabela única — a tabela do CST de ICMS (Tabela A, Ajuste SINIEF 07/2001), a
+do CST de IPI e a do CST de PIS/COFINS são tabelas distintas, cada uma com
+seus próprios códigos, e esta coluna não registra a qual tipo de tributo o
+código pertence. Inventar uma contagem exata de dígitos aqui seria simular
+uma precisão que este ticket não tem base para afirmar com confiança — ao
+contrário de NCM/CFOP, onde o formato vem direto da legislação/nomenclatura
+sem ambiguidade. Por isso `cst` usa uma validação mais frouxa,
+`@Pattern(regexp = "^[0-9]{2,3}$")`: numérico, 2 a 3 dígitos — o
+denominador estrutural comum honesto entre as tabelas de CST em uso geral,
+sem fingir uma exatidão inexistente.
+
+`csosn`, ao contrário, é uma tabela nacional única (Simples Nacional,
+Convênio ICMS 123/2012, Anexos I/II) cujos códigos são sempre exatamente 3
+dígitos numéricos (ex: 101, 102, 103, 201, 202, 203, 300, 400, 500, 900) —
+mesma confiança de "formato fixo pela legislação, não escolha da
+aplicação" que já embasa NCM (8 dígitos)/CFOP (4 dígitos). Por isso
+`csosn` recebeu a mesma validação exata que `ncm`/`cfop`:
+`@Pattern(regexp = "^[0-9]{3}$")`.
+
+**Sem campo de regime tributário em `FiscalProfile` para validar
+CST-vs-CSOSN "de verdade".** O brief deste ticket pediu para verificar
+explicitamente se a ausência de um campo de regime tributário (já decidida
+pelo FARELO-155/`CompanyFiscalConfiguration`, ver subseção abaixo — prompt
+mestre nunca nomeia "Simples Nacional"/"Regime Normal"/CRT em lugar
+nenhum) afeta as opções deste ticket. Afeta: sem um campo de regime, não
+existe como o sistema validar "este CST está correto para o regime deste
+negócio" ou "este perfil deveria estar usando CSOSN, não CST" — só é
+possível validar a propriedade estrutural mais fraca, "não configure os
+dois ao mesmo tempo". Adicionar um campo de regime a `FiscalProfile` (ou a
+`CompanyFiscalConfiguration`) só para viabilizar essa validação mais forte
+seria reintroduzir exatamente o campo sem base textual que o FARELO-155 já
+recusou adicionar — mesma disciplina, não deste ticket para revisitar.
+O `CHECK`/`@CstCsosnMutuallyExclusive` deste ticket é, portanto, o máximo
+que dá para reforçar honestamente sem esse campo: exclusão mútua, não
+correção-de-regime.
+
+**`FiscalProfile`**: ganha `cst` (`String`, `@Column(name = "cst", length =
+3)`, nullable) e `csosn` (`String`, `@Column(name = "csosn", length = 3)`,
+nullable) — mesmo raciocínio null-como-estado-de-negócio permanente já
+estabelecido por `ncm`/`cfop`.
+
+**`FiscalProfileRequest`/`FiscalProfileUpdateRequest`**: ambos ganham `cst`
+e `csosn` opcionais, mesmo formato opcional de `ncm`/`cfop`, mais a
+constraint de classe `@CstCsosnMutuallyExclusive` (ver acima). Em
+`FiscalProfileUpdateRequest`, ambos seguem a mesma convenção "`PUT` é
+substituição completa" já estabelecida por `description`/`ncm`/`cfop`:
+omitir o campo (ou enviar `null`) no `PUT` limpa um CST/CSOSN previamente
+configurado de volta para "não configurado".
+
+**`FiscalProfileResponse`**: ganha `cst` e `csosn` (posicionados depois de
+`cfop`, antes de `active`). **`FiscalProfileService`**: `create`/`update`
+ganham dois parâmetros a mais (`cst`, `csosn`), repassados direto para
+`FiscalProfile.setCst(...)`/`setCsosn(...)` — nenhuma lógica de negócio
+nova além de persistir os valores já validados pelo DTO.
+
+**Testes**: `FiscalProfileRepositoryIntegrationTests` ganha
+`savesAndFindsFiscalProfileWithCst`/`savesAndFindsFiscalProfileWithCsosn`/
+`savesFiscalProfileWithoutCstOrCsosn`/
+`rejectsFiscalProfileWithBothCstAndCsosnSet` (este último salva via
+repositório diretamente, contornando o DTO, para exercitar o `CHECK` do
+banco isoladamente — mesmo raciocínio "validação de DTO + `CHECK` de banco
+são coisas testadas separadamente" já implícito nos testes de `ncm`/`cfop`).
+`FiscalProfileControllerIntegrationTests` ganha
+`createsFiscalProfileWithValidCstAlone`/`createsFiscalProfileWithValidCsosnAlone`/
+`createsFiscalProfileWithoutCstOrCsosn`/
+`rejectsFiscalProfileWithBothCstAndCsosnSetWithStandardErrorFormat`/
+`rejectsCstWithWrongDigitCountWithStandardErrorFormat`/
+`rejectsNonNumericCstWithStandardErrorFormat`/
+`rejectsCsosnWithWrongDigitCountWithStandardErrorFormat`/
+`rejectsNonNumericCsosnWithStandardErrorFormat` (criação) e
+`updatesFiscalProfileSettingCst`/`updatesFiscalProfileSettingCsosn`/
+`updateWithoutCstClearsPreviouslySetCst`/
+`updateWithoutCsosnClearsPreviouslySetCsosn`/
+`rejectsUpdateSettingBothCstAndCsosnWithStandardErrorFormat`/
+`rejectsInvalidCstOnUpdateWithStandardErrorFormat`/
+`rejectsInvalidCsosnOnUpdateWithStandardErrorFormat` (atualização) — mesmo
+formato de sucesso/validação/limpar-campo-opcional já usado pelos testes de
+`ncm`/`cfop`, mais os casos novos de exclusão mútua.
+
+**RBAC**: nenhuma mudança — `FiscalProfileController` continua sem
+`@RequireRole` em nenhum endpoint, mesmo raciocínio/precedente já
+documentado na seção `FiscalProfile` acima.
+
 ### FARELO-155 — Criar `CompanyFiscalConfiguration`
 
 Segunda entidade do domínio `fiscal` — **distinta de `FiscalProfile`**, não

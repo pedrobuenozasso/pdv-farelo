@@ -62,7 +62,7 @@ public class FiscalProfileController {
             @Valid @RequestBody FiscalProfileRequest request,
             UriComponentsBuilder uriComponentsBuilder) {
         FiscalProfile fiscalProfile = fiscalProfileService.create(
-                request.name(), request.description(), request.ncm(), request.cfop());
+                request.name(), request.description(), request.ncm(), request.cfop(), request.cst(), request.csosn());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/fiscal-profiles/{id}")
@@ -89,7 +89,8 @@ public class FiscalProfileController {
     @PutMapping("/{id}")
     public FiscalProfileResponse update(@PathVariable UUID id, @Valid @RequestBody FiscalProfileUpdateRequest request) {
         FiscalProfile fiscalProfile = fiscalProfileService.update(
-                id, request.name(), request.description(), request.active(), request.ncm(), request.cfop());
+                id, request.name(), request.description(), request.active(), request.ncm(), request.cfop(),
+                request.cst(), request.csosn());
         return FiscalProfileResponse.from(fiscalProfile);
     }
 
