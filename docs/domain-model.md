@@ -4225,6 +4225,182 @@ Pacote: `com.farelo.api.fiscal`.
   toda outra classe limpar suas próprias linhas primeiro. Ver a subseção
   FARELO-151 na seção `catalog` para o resto da mudança.
 
+### FARELO-155 — Criar `CompanyFiscalConfiguration`
+
+Segunda entidade do domínio `fiscal` — **distinta de `FiscalProfile`**, não
+uma mudança nela. `FiscalProfile` classifica *produtos* individuais
+("Isento", "Tributado padrão"); `CompanyFiscalConfiguration` representa a
+identidade/configuração fiscal da **própria empresa** (a que um dia emitirá
+NFC-e). Sem FK entre as duas — `Product` continua apontando só para
+`FiscalProfile`. Terceira peça do Epic 11 (Fiscal Base — prompt mestre
+seção 47: "NÃO EMITIR NFC-e ainda"), depois de FARELO-150/151.
+
+**Sourcing dos campos — o que vem do prompt mestre vs. o que foi
+inferido.** Diferente de `FiscalProfile` (cujos campos `name`/`description`
+também não eram texto literal do prompt mestre, mas cujas *omissões* —
+NCM/CFOP/CST/CSOSN — correspondem cada uma a um ticket futuro já numerado
+no roadmap: FARELO-152/153/154), a seção 24 ("Dados fiscais previstos") não
+dá nenhuma lista de campos para dados fiscais em nível de empresa — sua
+lista inteira (NCM, CFOP, CST/CSOSN, CEST, origem, cBenef, ICMS, CBS, IBS) é
+território de classificação tributária *por produto*, já coberto por
+`FiscalProfile`. A seção 23 só nomeia esta entidade
+(`CompanyFiscalConfiguration`) entre as cinco entidades fiscais previstas —
+não enumera suas colunas. Isso foi confirmado por busca textual (`CNPJ`,
+"razão social", "inscrição estadual", "regime tributário", "Simples
+Nacional", "endereço" — nenhum desses termos aparece em
+`docs/PROMPT_MESTRE.md` fora deste próprio ticket). Diferente das omissões
+de `FiscalProfile` (cada uma respaldada por um ticket futuro concreto), não
+existe nenhum ticket no roadmap que leia "Adicionar CNPJ à
+CompanyFiscalConfiguration" para adiar a decisão — deixar esta entidade sem
+nenhum campo de negócio a deixaria permanentemente vazia, sem nenhum ticket
+programado para preenchê-la, o que anularia o único propósito que a seção
+23 atribui a ela.
+
+Os campos abaixo foram, portanto, inferidos a partir do propósito
+declarado da própria entidade — o mesmo método de inferência já usado para
+`FiscalProfile.name`/`description` — aplicado aqui a "o mínimo pelo qual um
+negócio brasileiro é identificado":
+
+- **`cnpj`** (`VARCHAR(32) NOT NULL`) e **`legalName`/razão social**
+  (`VARCHAR(120) NOT NULL`) — o mínimo absoluto para esta linha responder
+  "qual é essa empresa". Sem pelo menos esses dois, a linha não carrega
+  nenhuma identidade fiscal. Sem validação de formato/dígito verificador em
+  `cnpj` — o prompt mestre não define essa regra, e inventar uma (regex de
+  14 dígitos, algoritmo de dígito verificador) seria além do texto, a
+  mesma contenção já aplicada a `FiscalProfile.name`.
+- **`tradeName`/nome fantasia**, **`stateRegistration`/inscrição estadual**
+  e **`address`** (todos opcionais, `VARCHAR(120)`/`VARCHAR(32)`/`TEXT`) —
+  dados padrão de identificação/registro de empresa que completam "quem/onde
+  é essa empresa" além do CNPJ/razão social nus, espelhando como
+  `FiscalProfile.description` completa um `name` nu. `stateRegistration` é
+  opcional porque algumas empresas são legitimamente isentas de IE.
+  `address` é um único campo de texto livre (`TEXT`, mesmo formato nullable
+  de `Product.description`/`FiscalProfile.description`), não um endereço
+  estruturado em múltiplas colunas — nenhum consumidor precisa de endereço
+  estruturado ainda (emissão real de XML de NFC-e é Epic 12, que só começa
+  após validação contábil, e está explicitamente fora do escopo deste
+  ticket).
+
+**Deliberadamente SEM campo de regime tributário** (ex: Simples Nacional vs.
+Regime Normal). Este foi o único campo que o próprio brief deste ticket
+sinalizou como plausível mas pediu para verificar antes de adicionar — e o
+prompt mestre não nomeia "Simples Nacional", "Regime Normal", CRT ou
+qualquer conceito de regime em lugar nenhum. Diferente de CNPJ/razão social
+(dado puramente identificador, universal — "o que é essa empresa"), um
+indicador de regime tributário é dado de classificação tributária, a mesma
+categoria de coisa que os campos NCM/CFOP/CST que `FiscalProfile`
+deliberadamente adiou — a diferença é que aqueles têm número de ticket
+futuro reservado e este não. Aproximar isso com uma `String` solta e sem
+validação seria só uma versão disfarçada do mesmo enum que este ticket foi
+instruído a não inventar sem base textual. Ficou de fora por completo; um
+ticket futuro (quando o roadmap de fato nomear um, ou quando a emissão real
+de NFC-e do Epic 12 precisar dele) é o lugar certo para adicioná-lo — não
+este.
+
+**Sem `active`**: diferente de `FiscalProfile`, onde `active` existe porque
+múltiplas linhas de `Product` referenciam um `FiscalProfile` por id e o
+negócio pode querer aposentar um perfil sem apagar/deixar órfãs essas
+referências, não há nada análogo aqui — nada mais no schema referencia
+`company_fiscal_configuration` por id, e existe exatamente uma linha, então
+não há cenário de "aposentar esta mas manter as outras" para suportar.
+
+`createdAt`/`updatedAt` (`OffsetDateTime` UTC) e `id` (UUID, mesma
+estratégia `@UuidGenerator(RANDOM)` de `FiscalProfile`/`Category`/
+`Product`/`Ingredient`) são bookkeeping puro, sem significado fiscal
+próprio — id gerado mesmo sem nunca ser endereçado por um `{id}` no path
+(ver forma do endpoint abaixo). Tabela criada pela migration
+`V29__create_company_fiscal_configuration_table.sql`.
+
+**Decisão de forma singleton — opção (a): entidade comum, sem enforcement
+no banco.** Nenhum outro domínio deste código tem um precedente de "linha
+de configuração única/global" (buscado explicitamente; não existe nenhum).
+O invariante "no máximo uma linha" é mantido pela camada de
+aplicação/controller (sem `POST`; `PUT` sempre localiza e substitui a
+única linha existente via `findFirstByOrderByCreatedAtAsc()`), não por uma
+constraint de banco (id fixo/conhecido, índice único sobre coluna dummy).
+Escolhido porque o estilo consistente deste código é "não superengenheirar
+para um invariante sem necessidade real de enforcement ainda" (AGENTS.md:
+"não... criar abstrações prematuras") — nada nesta tabela é endereçado por
+um id vindo de fora da API (diferente de `fiscal_profile`, em que
+`product.fiscal_profile_id` faz FK), então uma linha extra inserida fora
+da superfície da API (o que nada aqui impede, o mesmo tipo de invariante
+não-forçado já existente em outros lugares deste código, ex:
+`Category.name` não ser único) simplesmente nunca seria alcançável via
+`GET`/`PUT` (ambos sempre resolvem para a linha criada primeiro) — raio de
+impacto baixo. Se a disciplina operacional real algum dia se provar
+insuficiente, forçar isso no nível do banco é um follow-up pequeno e
+isolado.
+
+**Decisão de forma do endpoint — `GET`/`PUT` em caminho singular, sem
+`{id}`, deliberadamente diferente do CRUD genérico
+(`POST`/`GET` lista/`GET {id}`/`PUT {id}`) de `FiscalProfile`.**
+`FiscalProfile` é um valor de lookup de muitas linhas — muitos perfis
+fiscais podem existir, um `Product` escolhe um por id, então um endpoint de
+coleção é a forma certa. `CompanyFiscalConfiguration` é o oposto: a empresa
+tem exatamente uma identidade fiscal, ponto final — não há pergunta
+"listar quais" ou "qual delas". Uma forma genérica `POST`/`GET` lista/
+`PUT {id}` deixaria um cliente fazer `POST` de uma segunda configuração de
+empresa sem nada impedindo (a tabela em si também não tem constraint de
+unicidade — ver decisão acima), quebrando silenciosamente o único
+invariante pelo qual esta entidade existe. `GET`/`PUT` num caminho
+singular e sem id modela "existe exatamente uma" na própria superfície da
+API: `GET` sempre significa "a" configuração, `PUT` sempre significa
+"definir/substituir a" configuração — não há id que um cliente possa errar
+ou usar para criar uma segunda linha.
+
+`PUT` é *create-or-replace* (ver `CompanyFiscalConfigurationService#save`):
+a primeiríssima chamada cria a única linha, toda chamada seguinte a
+substitui. É também por isso que não há um `POST` separado para "criar" a
+linha primeiro — `PUT` já cobre tanto "ainda não configurado" quanto "já
+configurado" numa única operação, então um cliente integrando este
+endpoint (ex: uma futura tela Admin "Configurações", prompt mestre seção
+21) nunca precisa decidir se a linha já existe antes de chamar. Sempre
+retorna `200 OK`, mesmo na primeira chamada — sem distinção de status
+entre "criou" e "substituiu".
+
+`GET` retorna `404`/`COMPANY_FISCAL_CONFIGURATION_NOT_FOUND` (via
+`CompanyFiscalConfigurationNotFoundException`) quando `PUT` nunca foi
+chamado — nenhuma migration semeia uma linha padrão, já que este código não
+conhece o CNPJ/razão social reais de nenhuma empresa para inventar um valor
+inicial, e semear dados fiscais fictícios seria pior que um 404.
+
+`CompanyFiscalConfigurationRepository` (Spring Data JPA) adiciona um único
+método de consulta próprio, `findFirstByOrderByCreatedAtAsc()`, usado pelo
+service para localizar "a" linha (se existir) sem endereçá-la por id — o
+resto é CRUD padrão herdado de `JpaRepository`.
+`CompanyFiscalConfigurationService`: só `get()`/`save(...)` — sem
+`create`/`listAll`/`getById` como `FiscalProfileService`, espelhando a
+forma `GET`/`PUT`-only do controller.
+`CompanyFiscalConfigurationNotFoundException` (`404`/
+`COMPANY_FISCAL_CONFIGURATION_NOT_FOUND`) registrada em
+`ApiExceptionHandler`, mesmo formato de `FiscalProfileNotFoundException` —
+mas sem parâmetro de id, já que não há nada a identificar, só "configurado"
+vs. "ainda não configurado".
+
+**Decisão de RBAC — deliberadamente SEM `@RequireRole` em nenhum
+endpoint**: mesmo precedente já documentado na subseção FARELO-150 acima
+(`FiscalProfileController`, `IngredientController`,
+`Payment`/`Notification`/`AuditLog` nos próprios primeiros tickets) —
+proteger os primeiros endpoints de um domínio/entidade novo é
+consistentemente adiado para um ticket dedicado futuro neste código, nunca
+embutido no ticket que primeiro cria a superfície de escrita, a menos que o
+próprio texto do ticket seja sobre proteção (não é, aqui). Se/quando a
+configuração fiscal da empresa precisar ficar restrita a
+`ADMIN`/`MANAGER`, isso é decisão de um ticket futuro, não deste.
+
+**Testes**: `CompanyFiscalConfigurationRepositoryIntegrationTests`
+(mapeamento JPA contra Postgres real, incluindo o comportamento de
+`findFirstByOrderByCreatedAtAsc()`, mesmo formato de
+`FiscalProfileRepositoryIntegrationTests`) e
+`CompanyFiscalConfigurationControllerIntegrationTests` (HTTP real via
+`MockMvc`, cobrindo `GET`/`PUT` — sucesso, `404` antes do primeiro `PUT`,
+validação, e que um segundo `PUT` substitui a linha existente em vez de
+criar uma segunda, `count() == 1`). Diferente de
+`FiscalProfileControllerIntegrationTests`, nada faz FK em
+`company_fiscal_configuration`, então o `@BeforeEach` de ambas as classes
+de teste faz só um `deleteAll()` direto, sem a landmine de limpeza
+cross-tabela documentada para `fiscal_profile`/`product`.
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —
