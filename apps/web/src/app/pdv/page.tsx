@@ -43,11 +43,14 @@ import {
   type CommandStatus,
 } from "@/lib/api/commands";
 import {
+  cancelOrderItem,
   createOrder,
   listCommandOrders,
   markOrderCancelled,
   markOrderDelivered,
   type Order,
+  type OrderItem,
+  type OrderItemCancelReason,
   type OrderStatus,
 } from "@/lib/api/orders";
 import {
@@ -101,6 +104,16 @@ const ORDER_STATUS_TONE: Record<
   READY: "green",
   DELIVERED: "neutral",
   CANCELLED: "red",
+};
+
+// FARELO-200/201: labels for the five fixed OrderItemCancelReason values —
+// order matches the enum's declaration on the backend.
+const ITEM_CANCEL_REASON_LABEL: Record<OrderItemCancelReason, string> = {
+  CUSTOMER_REQUEST: "Pedido do cliente",
+  ENTRY_ERROR: "Erro de lançamento",
+  OUT_OF_STOCK: "Sem estoque",
+  QUALITY_ISSUE: "Problema de qualidade",
+  OTHER: "Outro",
 };
 
 const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
@@ -216,15 +229,20 @@ function CommandDetail({
   );
 
   const orders = ordersQuery.data ?? [];
+  // FARELO-200/201: a cancelled item must not count toward the total owed
+  // even when its parent order is otherwise still live — mirrors the
+  // exclusion OrderItemRepository#sumOwedByCommand applies server-side.
   const totalOwed = orders
     .filter((order) => order.status !== "CANCELLED")
     .reduce(
       (sum, order) =>
         sum +
-        order.items.reduce(
-          (itemSum, item) => itemSum + item.unitPrice * item.quantity,
-          0,
-        ),
+        order.items
+          .filter((item) => !item.cancelled)
+          .reduce(
+            (itemSum, item) => itemSum + item.unitPrice * item.quantity,
+            0,
+          ),
       0,
     );
   const totalPaid = totalPaidQuery.data?.totalPaid ?? 0;
@@ -885,10 +903,11 @@ function OrderCard({
     "Não foi possível cancelar o pedido.",
   );
 
-  const subtotal = order.items.reduce(
-    (sum, item) => sum + item.unitPrice * item.quantity,
-    0,
-  );
+  // FARELO-200/201: a cancelled item drops out of the subtotal, same
+  // exclusion as the comanda-level totalOwed above.
+  const subtotal = order.items
+    .filter((item) => !item.cancelled)
+    .reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
 
   return (
     <div className="border-line bg-surface rounded-2xl border p-4">
@@ -900,16 +919,18 @@ function OrderCard({
           {ORDER_STATUS_LABEL[order.status]}
         </Badge>
       </div>
-      <ul className="border-line mt-2 flex flex-col gap-0.5 border-t pt-2">
+      <ul className="border-line mt-2 flex flex-col gap-1 border-t pt-2">
         {order.items.map((item) => (
-          <li key={item.id} className="flex justify-between text-sm">
-            <span>
-              {item.quantity}× {item.productName}
-            </span>
-            <span className="font-semibold">
-              {currencyFormatter.format(item.unitPrice * item.quantity)}
-            </span>
-          </li>
+          <OrderItemRow
+            key={item.id}
+            item={item}
+            orderId={order.id}
+            commandNumber={commandNumber}
+            // Item-level cancellation follows the same non-terminal-order
+            // rule as whole-order cancellation (canCancel above) — see
+            // OrderItemCancellationNotAllowedException's javadoc.
+            canCancel={canCancel}
+          />
         ))}
       </ul>
       <div className="text-ink-soft mt-2 flex justify-end text-[13px]">
@@ -976,5 +997,150 @@ function OrderCard({
         <p className="text-red mt-2 text-sm">{cancelErrorMessage}</p>
       ) : null}
     </div>
+  );
+}
+
+// FARELO-200/201: one line item within an OrderCard, with its own
+// cancel-with-reason flow. A separate component (not inline in OrderCard's
+// map) because each row needs its own local "is the reason picker open"/
+// selected-reason/description state, independent of every other row and
+// of the order-level cancel confirmation above.
+function OrderItemRow({
+  item,
+  orderId,
+  commandNumber,
+  canCancel,
+}: {
+  item: OrderItem;
+  orderId: string;
+  commandNumber: number;
+  canCancel: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [cancelling, setCancelling] = useState(false);
+  const [reason, setReason] = useState<OrderItemCancelReason | "">("");
+  const [description, setDescription] = useState("");
+
+  const cancelItemMutation = useMutation({
+    mutationFn: () => {
+      if (!reason) {
+        throw new Error("Selecione um motivo.");
+      }
+      return cancelOrderItem(orderId, item.id, reason, description || undefined);
+    },
+    onSuccess: () => {
+      setCancelling(false);
+      setReason("");
+      setDescription("");
+      queryClient.invalidateQueries({
+        queryKey: ["pdv", "command", commandNumber, "orders"],
+      });
+    },
+  });
+
+  const cancelErrorMessage = apiErrorMessage(
+    cancelItemMutation.error,
+    "Não foi possível cancelar o item.",
+  );
+
+  // description is required only when reason is OTHER (mirrors
+  // OrderItemCancelRequest's @AssertTrue on the backend).
+  const descriptionRequired = reason === "OTHER";
+  const canConfirm = reason !== "" && (!descriptionRequired || description.trim() !== "");
+
+  if (item.cancelled) {
+    return (
+      <li className="flex flex-col gap-0.5 text-sm">
+        <div className="flex justify-between">
+          <span className="text-ink-soft line-through">
+            {item.quantity}× {item.productName}
+          </span>
+          <span className="text-ink-soft font-semibold line-through">
+            {currencyFormatter.format(item.unitPrice * item.quantity)}
+          </span>
+        </div>
+        <span className="text-ink-soft text-[12px]">
+          Cancelado
+          {item.cancelledByUserName ? ` por ${item.cancelledByUserName}` : ""}
+          {item.cancelReason
+            ? ` · ${ITEM_CANCEL_REASON_LABEL[item.cancelReason]}`
+            : ""}
+          {item.cancelDescription ? ` — ${item.cancelDescription}` : ""}
+        </span>
+      </li>
+    );
+  }
+
+  return (
+    <li className="flex flex-col gap-1 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span>
+          {item.quantity}× {item.productName}
+        </span>
+        <div className="flex items-center gap-2">
+          <span className="font-semibold">
+            {currencyFormatter.format(item.unitPrice * item.quantity)}
+          </span>
+          {canCancel ? (
+            <button
+              type="button"
+              onClick={() => setCancelling((current) => !current)}
+              className="text-red text-[12px] font-semibold hover:opacity-80"
+            >
+              {cancelling ? "Fechar" : "Cancelar item"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {cancelling ? (
+        <div className="bg-bg-alt flex flex-col gap-2 rounded-lg p-2">
+          <select
+            value={reason}
+            onChange={(event) =>
+              setReason(event.target.value as OrderItemCancelReason)
+            }
+            className="border-line rounded-md border bg-transparent px-2 py-1.5 text-[13px]"
+          >
+            <option value="">Selecione o motivo</option>
+            {Object.entries(ITEM_CANCEL_REASON_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          {descriptionRequired ? (
+            <input
+              type="text"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Descreva o motivo (obrigatório)"
+              className="border-line rounded-md border bg-transparent px-2 py-1.5 text-[13px]"
+            />
+          ) : null}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="danger"
+              disabled={!canConfirm || cancelItemMutation.isPending}
+              onClick={() => cancelItemMutation.mutate()}
+              className="px-3 py-1.5 text-[12px]"
+            >
+              {cancelItemMutation.isPending ? "Cancelando..." : "Confirmar"}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={cancelItemMutation.isPending}
+              onClick={() => setCancelling(false)}
+              className="px-3 py-1.5 text-[12px]"
+            >
+              Voltar
+            </Button>
+          </div>
+          {cancelErrorMessage ? (
+            <p className="text-red text-[12px]">{cancelErrorMessage}</p>
+          ) : null}
+        </div>
+      ) : null}
+    </li>
   );
 }

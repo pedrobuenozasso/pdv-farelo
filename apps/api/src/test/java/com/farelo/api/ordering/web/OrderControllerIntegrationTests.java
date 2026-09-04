@@ -1063,4 +1063,291 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(status().isOk());
     }
 
+    // --- FARELO-200/201: POST /{orderId}/items/{itemId}/cancel -----------
+
+    private UUID firstItemId(UUID orderId) {
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        return orderItemRepository.findByOrder(order).get(0).getId();
+    }
+
+    @Test
+    void cancelsItemWithReasonAndRecordsActor() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID itemId = firstItemId(orderId);
+
+        User actor = userRepository.save(new User(
+                "Operador Caixa",
+                "test-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD),
+                UserRole.CASHIER));
+        String token = jwtTokenService.issue(actor).token();
+
+        String body = """
+                {
+                  "reason": "CUSTOMER_REQUEST"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(itemId.toString()))
+                .andExpect(jsonPath("$.cancelled").value(true))
+                .andExpect(jsonPath("$.cancelledAt").exists())
+                .andExpect(jsonPath("$.cancelledByUserName").value("Operador Caixa"))
+                .andExpect(jsonPath("$.cancelReason").value("CUSTOMER_REQUEST"))
+                .andExpect(jsonPath("$.cancelDescription").value(nullValue()));
+
+        OrderItem persisted = orderItemRepository.findById(itemId).orElseThrow();
+        assertThat(persisted.isCancelled()).isTrue();
+        assertThat(persisted.getCancelledByUserId()).isEqualTo(actor.getId());
+    }
+
+    @Test
+    void rejectsOtherReasonWithoutDescription() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID itemId = firstItemId(orderId);
+
+        String body = """
+                {
+                  "reason": "OTHER"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void cancelsWithOtherReasonWhenDescriptionProvided() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID itemId = firstItemId(orderId);
+
+        String body = """
+                {
+                  "reason": "OTHER",
+                  "description": "Cliente trocou de ideia na hora"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cancelDescription").value("Cliente trocou de ideia na hora"));
+    }
+
+    @Test
+    void rejectsMissingReasonWithStandardErrorFormat() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID itemId = firstItemId(orderId);
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void returnsConflictWhenItemAlreadyCancelled() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID itemId = firstItemId(orderId);
+        String token = cashierToken();
+
+        String body = """
+                {
+                  "reason": "ENTRY_ERROR"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ORDER_ITEM_ALREADY_CANCELLED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void returnsNotFoundWhenItemBelongsToDifferentOrder() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID otherOrderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID itemFromOtherOrder = firstItemId(otherOrderId);
+
+        String body = """
+                {
+                  "reason": "ENTRY_ERROR"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemFromOtherOrder)
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ORDER_ITEM_NOT_FOUND"));
+    }
+
+    @Test
+    void returnsNotFoundWhenItemIdUnknown() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        String body = """
+                {
+                  "reason": "ENTRY_ERROR"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, UUID.randomUUID())
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ORDER_ITEM_NOT_FOUND"));
+    }
+
+    @Test
+    void returnsConflictWhenCancellingItemOnDeliveredOrder() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID itemId = firstItemId(orderId);
+        String token = cashierToken();
+        mockMvc.perform(post("/api/v1/orders/{id}/preparing", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/ready", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/orders/{id}/deliver", orderId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        String body = """
+                {
+                  "reason": "ENTRY_ERROR"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ORDER_ITEM_CANCELLATION_NOT_ALLOWED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void rejectsCancelItemWithNoAuthorizationHeader() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID itemId = firstItemId(orderId);
+
+        String body = """
+                {
+                  "reason": "ENTRY_ERROR"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // KITCHEN is allowed on preparing/ready but not on item-level
+    // cancellation — same role list as whole-order cancel above.
+    @Test
+    void rejectsCancelItemWhenCallerRoleIsNotAllowed() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID itemId = firstItemId(orderId);
+
+        String body = """
+                {
+                  "reason": "ENTRY_ERROR"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void allowsCancelItemAsAttendant() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+        UUID itemId = firstItemId(orderId);
+
+        String body = """
+                {
+                  "reason": "ENTRY_ERROR"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+    }
+
+    // FARELO-200: a cancelled item must not count toward the comanda's
+    // total owed — OrderItemRepository#sumOwedByCommand excludes it.
+    //
+    // Asserted as a BEFORE/AFTER delta rather than an absolute total: this
+    // test's @AfterEach only resets COMMAND_AVAILABLE back to AVAILABLE
+    // (see resetToAvailable), it does not delete the orders/items every
+    // other test in this class has already created against the same
+    // shared command number, so an absolute "total owed == 10.00"
+    // assertion is false once other tests have run first — same "check
+    // relative membership, not an absolute count" reasoning this class's
+    // own kitchenQueueExcludesDeliveredAndCancelledOrders test already
+    // uses for the same shared-fixture reason.
+    @Test
+    void cancelledItemIsExcludedFromCommandTotalOwed() throws Exception {
+        Command command = commandRepository.findByNumber(COMMAND_AVAILABLE).orElseThrow();
+        BigDecimal owedBeforeOrder = orderItemRepository.sumOwedByCommand(command, OrderStatus.CANCELLED);
+
+        Product espresso = createActiveProduct(new BigDecimal("10.00"));
+        UUID orderId = createOrder(espresso);
+        UUID itemId = firstItemId(orderId);
+
+        assertThat(orderItemRepository.sumOwedByCommand(command, OrderStatus.CANCELLED))
+                .isEqualByComparingTo(owedBeforeOrder.add(new BigDecimal("10.00")));
+
+        String body = """
+                {
+                  "reason": "ENTRY_ERROR"
+                }
+                """;
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/cancel", orderId, itemId)
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        assertThat(orderItemRepository.sumOwedByCommand(command, OrderStatus.CANCELLED))
+                .isEqualByComparingTo(owedBeforeOrder);
+    }
+
 }

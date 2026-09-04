@@ -1,9 +1,11 @@
 package com.farelo.api.ordering.web;
 
 import com.farelo.api.ordering.NewOrderItem;
+import com.farelo.api.ordering.OrderItem;
 import com.farelo.api.ordering.OrderService;
 import com.farelo.api.ordering.OrderWithItems;
 import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.AuthenticatedPrincipal;
 import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -154,6 +156,26 @@ public class OrderController {
     public OrderResponse markAsCancelled(@PathVariable UUID id) {
         OrderWithItems result = orderService.markAsCancelled(id);
         return OrderResponse.from(result);
+    }
+
+    // FARELO-200/201: same role list as markAsCancelled above — cancelling
+    // one line is the same class of front-of-house decision as cancelling
+    // the whole order, made from the same pdv/page.tsx OrderCard. Needs
+    // AuthenticatedPrincipal (unlike markAsCancelled) so OrderService#
+    // cancelItem can denormalize who performed the cancellation onto the
+    // item (see OrderItem#cancel's javadoc) — resolved the same way
+    // ProductController/InventoryMovementController already do for their
+    // @RequireRole-protected write endpoints.
+    @PostMapping("/{orderId}/items/{itemId}/cancel")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
+    public OrderItemResponse cancelItem(
+            @PathVariable UUID orderId,
+            @PathVariable UUID itemId,
+            @Valid @RequestBody OrderItemCancelRequest request,
+            AuthenticatedPrincipal principal) {
+        OrderItem item = orderService.cancelItem(
+                orderId, itemId, request.reason(), request.description(), principal.userId());
+        return OrderItemResponse.from(item);
     }
 
 }

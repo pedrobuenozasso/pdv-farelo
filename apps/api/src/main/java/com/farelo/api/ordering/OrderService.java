@@ -8,6 +8,8 @@ import com.farelo.api.command.CommandService;
 import com.farelo.api.inventory.InventoryMovementService;
 import com.farelo.api.inventory.OrderItemConsumption;
 import com.farelo.api.outbox.OutboxPublisher;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,6 +41,14 @@ public class OrderService {
     private static final Set<OrderStatus> CANCELLABLE_STATUSES =
             Set.of(OrderStatus.CREATED, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY);
 
+    // Item-level statuses that block a cancellation (FARELO-200): the two
+    // Order terminal statuses. See OrderItemCancellationNotAllowedException's
+    // javadoc for why this is deliberately a different, wider set than
+    // CANCELLABLE_STATUSES above (a different question: "is this order
+    // settled" vs. "can this whole order still transition").
+    private static final Set<OrderStatus> ITEM_CANCELLATION_BLOCKED_STATUSES =
+            Set.of(OrderStatus.DELIVERED, OrderStatus.CANCELLED);
+
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final OrderStatusHistoryRepository orderStatusHistoryRepository;
@@ -46,6 +56,7 @@ public class OrderService {
     private final ProductService productService;
     private final OutboxPublisher outboxPublisher;
     private final InventoryMovementService inventoryMovementService;
+    private final UserService userService;
 
     public OrderService(
             OrderRepository orderRepository,
@@ -54,7 +65,8 @@ public class OrderService {
             CommandService commandService,
             ProductService productService,
             OutboxPublisher outboxPublisher,
-            InventoryMovementService inventoryMovementService) {
+            InventoryMovementService inventoryMovementService,
+            UserService userService) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.orderStatusHistoryRepository = orderStatusHistoryRepository;
@@ -62,6 +74,7 @@ public class OrderService {
         this.productService = productService;
         this.outboxPublisher = outboxPublisher;
         this.inventoryMovementService = inventoryMovementService;
+        this.userService = userService;
     }
 
     /**
@@ -339,6 +352,72 @@ public class OrderService {
     @Transactional
     public OrderWithItems markAsCancelled(UUID orderId) {
         return transition(orderId, CANCELLABLE_STATUSES, OrderStatus.CANCELLED);
+    }
+
+    /**
+     * Cancels one {@link OrderItem} without touching the rest of its
+     * {@link Order} (FARELO-200/201) — the item-level counterpart to
+     * {@link #markAsCancelled}, which cancels an order wholesale. The item
+     * row is never deleted; {@link OrderItem#cancel} marks it (see that
+     * method's javadoc for the full field set this writes: timestamp,
+     * operator, reason, description).
+     *
+     * <p><b>Deliberately does NOT recalculate anything server-side</b> —
+     * there is no "order total"/"comanda total" column anywhere in this
+     * schema to update; every total in this system (comanda total owed,
+     * an order's subtotal) is already computed on read, either by {@link
+     * OrderItemRepository#sumOwedByCommand} (which already excludes whole
+     * {@code CANCELLED} orders and, from this ticket on, must also treat a
+     * cancelled item as excluded — see that query) or client-side in the
+     * PDV (which now also filters {@code OrderItemResponse.cancelled()}).
+     * FARELO-200's "recalcular valor da comanda" requirement is satisfied
+     * by every reader correctly excluding this item going forward, not by
+     * a stored total this method would need to touch.
+     *
+     * <p><b>Deliberately does NOT reverse any inventory movement</b> — an
+     * item whose product had an active recipe already consumed ingredients
+     * ({@link InventoryMovementService#consumeForOrder}, {@code
+     * ORDER_CONSUMPTION}) the moment the order was created, and that
+     * consumption is untouched here. Reversing it is FARELO-203 ("Reverter
+     * estoque ao cancelar item"), a distinct, future ticket — this method
+     * only does what FARELO-200/201 themselves ask for. Until FARELO-203
+     * lands, cancelling an item leaves the ingredient ledger overstating
+     * consumption for that item's quantity; this is a known, intentional
+     * gap, not an oversight.
+     *
+     * @throws OrderNotFoundException {@code orderId} doesn't exist.
+     * @throws OrderItemNotFoundException {@code itemId} doesn't exist, or
+     *     exists but belongs to a different order.
+     * @throws OrderItemCancellationNotAllowedException the parent order is
+     *     {@code DELIVERED} or {@code CANCELLED} (see {@link
+     *     ITEM_CANCELLATION_BLOCKED_STATUSES}).
+     * @throws OrderItemAlreadyCancelledException the item was already
+     *     cancelled.
+     */
+    @Transactional
+    public OrderItem cancelItem(
+            UUID orderId,
+            UUID itemId,
+            OrderItemCancelReason reason,
+            String description,
+            UUID actorId) {
+        Order order = getById(orderId);
+
+        OrderItem item = orderItemRepository.findByIdWithProduct(itemId)
+                .filter(candidate -> candidate.getOrder().getId().equals(orderId))
+                .orElseThrow(() -> new OrderItemNotFoundException(orderId, itemId));
+
+        if (ITEM_CANCELLATION_BLOCKED_STATUSES.contains(order.getStatus())) {
+            throw new OrderItemCancellationNotAllowedException(orderId, itemId, order.getStatus());
+        }
+        if (item.isCancelled()) {
+            throw new OrderItemAlreadyCancelledException(itemId);
+        }
+
+        User actor = userService.getById(actorId);
+        item.cancel(actor.getId(), actor.getName(), reason, description);
+
+        return orderItemRepository.save(item);
     }
 
     // Single-origin convenience overload, used by markAsPreparing/

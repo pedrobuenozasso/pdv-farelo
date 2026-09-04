@@ -3,6 +3,8 @@ package com.farelo.api.ordering;
 import com.farelo.api.catalog.Product;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -37,6 +39,21 @@ import java.util.UUID;
  * would be a column with no writer; it's cheaper to add later if/when an
  * update use case actually appears than to carry dead machinery now.
  *
+ * <p><strong>Cancellation</strong> (FARELO-200/201): {@code cancelledAt}
+ * (nullable — non-null <em>is</em> "cancelled", no separate boolean) plus
+ * {@code cancelledByUserId}/{@code cancelledByUserName} (operator, name
+ * denormalized the same way {@code AuditLog.userName} is, so it survives a
+ * later rename/deactivation) and {@code cancelReason}/{@code
+ * cancelDescription} (see {@link OrderItemCancelReason}'s javadoc — {@code
+ * cancelDescription} is required only when the reason is {@code OTHER}).
+ * The item row is never deleted — same soft-state convention as {@code
+ * Category}/{@code Ingredient}/{@code Recipe}'s {@code active} flag,
+ * applied here via a nullable timestamp instead since "when" is itself
+ * meaningful data FARELO-200 asks to keep. See {@link
+ * OrderService#cancelItem}'s javadoc for the full precondition/scope
+ * reasoning, including why no inventory reversal happens here (FARELO-203,
+ * a distinct future ticket).
+ *
  * <p>Id generation follows the same strategy as {@link
  * com.farelo.api.catalog.Category}.
  */
@@ -66,6 +83,22 @@ public class OrderItem {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    @Column(name = "cancelled_at")
+    private OffsetDateTime cancelledAt;
+
+    @Column(name = "cancelled_by_user_id")
+    private UUID cancelledByUserId;
+
+    @Column(name = "cancelled_by_user_name")
+    private String cancelledByUserName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "cancel_reason")
+    private OrderItemCancelReason cancelReason;
+
+    @Column(name = "cancel_description")
+    private String cancelDescription;
 
     protected OrderItem() {
         // required by JPA
@@ -121,6 +154,50 @@ public class OrderItem {
 
     public OffsetDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public boolean isCancelled() {
+        return cancelledAt != null;
+    }
+
+    public OffsetDateTime getCancelledAt() {
+        return cancelledAt;
+    }
+
+    public UUID getCancelledByUserId() {
+        return cancelledByUserId;
+    }
+
+    public String getCancelledByUserName() {
+        return cancelledByUserName;
+    }
+
+    public OrderItemCancelReason getCancelReason() {
+        return cancelReason;
+    }
+
+    public String getCancelDescription() {
+        return cancelDescription;
+    }
+
+    /**
+     * The only writer of the five cancellation fields — deliberately one
+     * method setting all of them together (no individual setters), so a
+     * cancelled item can never end up with e.g. a {@code cancelReason} but
+     * no {@code cancelledAt}. See {@link OrderService#cancelItem} for the
+     * precondition checks (item not already cancelled, parent order not
+     * terminal) that must happen before this is ever called.
+     */
+    public void cancel(
+            UUID actorId,
+            String actorName,
+            OrderItemCancelReason reason,
+            String description) {
+        this.cancelledAt = OffsetDateTime.now(ZoneOffset.UTC);
+        this.cancelledByUserId = actorId;
+        this.cancelledByUserName = actorName;
+        this.cancelReason = reason;
+        this.cancelDescription = description;
     }
 
     @Override

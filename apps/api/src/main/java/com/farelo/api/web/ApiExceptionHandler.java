@@ -20,6 +20,9 @@ import com.farelo.api.inventory.RecipeItemNotFoundException;
 import com.farelo.api.inventory.RecipeNotFoundException;
 import com.farelo.api.notification.NotificationNotFoundException;
 import com.farelo.api.ordering.OrderInvalidTransitionException;
+import com.farelo.api.ordering.OrderItemAlreadyCancelledException;
+import com.farelo.api.ordering.OrderItemCancellationNotAllowedException;
+import com.farelo.api.ordering.OrderItemNotFoundException;
 import com.farelo.api.ordering.OrderNotFoundException;
 import com.farelo.api.printing.PrintJobInvalidTransitionException;
 import com.farelo.api.printing.PrintJobNotFoundException;
@@ -153,6 +156,27 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleOrderInvalidTransition(OrderInvalidTransitionException ex) {
         return new ErrorResponse("ORDER_INVALID_TRANSITION", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(OrderItemNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleOrderItemNotFound(OrderItemNotFoundException ex) {
+        return new ErrorResponse("ORDER_ITEM_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict, same state-conflict reasoning as OrderInvalidTransitionException
+    // above — the item exists but can't be cancelled right now (FARELO-200/201).
+    @ExceptionHandler(OrderItemAlreadyCancelledException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleOrderItemAlreadyCancelled(OrderItemAlreadyCancelledException ex) {
+        return new ErrorResponse("ORDER_ITEM_ALREADY_CANCELLED", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(OrderItemCancellationNotAllowedException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleOrderItemCancellationNotAllowed(OrderItemCancellationNotAllowedException ex) {
+        return new ErrorResponse(
+                "ORDER_ITEM_CANCELLATION_NOT_ALLOWED", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     @ExceptionHandler(PrintJobNotFoundException.class)

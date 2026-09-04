@@ -18,12 +18,23 @@ import { authHeaders, parseResponse } from "./client";
 export type OrderStatus =
   "CREATED" | "CONFIRMED" | "PREPARING" | "READY" | "DELIVERED" | "CANCELLED";
 
+// FARELO-200/201: the five fixed cancellation reasons — must match
+// OrderItemCancelReason on the backend exactly (same string values, sent
+// as-is in cancelOrderItem's request body).
+export type OrderItemCancelReason =
+  "CUSTOMER_REQUEST" | "ENTRY_ERROR" | "OUT_OF_STOCK" | "QUALITY_ISSUE" | "OTHER";
+
 export type OrderItem = {
   id: string;
   productId: string;
   productName: string;
   quantity: number;
   unitPrice: number;
+  cancelled: boolean;
+  cancelledAt: string | null;
+  cancelledByUserName: string | null;
+  cancelReason: OrderItemCancelReason | null;
+  cancelDescription: string | null;
 };
 
 export type Order = {
@@ -123,4 +134,26 @@ export async function markOrderCancelled(orderId: string): Promise<Order> {
     headers: authHeaders(),
   });
   return parseResponse<Order>(response);
+}
+
+// POST /api/v1/orders/{orderId}/items/{itemId}/cancel (FARELO-200/201) —
+// cancels a single line item without touching the rest of the order.
+// `description` is required by the backend only when `reason` is "OTHER"
+// (see OrderItemCancelRequest's javadoc); the caller (app/pdv/page.tsx)
+// enforces the same rule in its UI before calling this.
+export async function cancelOrderItem(
+  orderId: string,
+  itemId: string,
+  reason: OrderItemCancelReason,
+  description?: string,
+): Promise<OrderItem> {
+  const response = await fetch(
+    `/api/v1/orders/${orderId}/items/${itemId}/cancel`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ reason, description }),
+    },
+  );
+  return parseResponse<OrderItem>(response);
 }
