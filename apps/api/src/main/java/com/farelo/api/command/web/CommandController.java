@@ -11,25 +11,33 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * {@code /api/v1/commands} — {@code POST .../open}/{@code .../close}
- * (FARELO-033/034) require a staff role as of FARELO-124; {@link
- * #findByNumber} stays deliberately unprotected — see its own javadoc.
+ * {@code /api/v1/commands} — {@code GET /{number}} (FARELO-032) and {@code
+ * POST .../open} (FARELO-033). {@link #open} requires a staff role as of
+ * FARELO-124; {@link #findByNumber} stays deliberately unprotected — see
+ * its own javadoc.
  *
- * <p><b>Why {@link #open}/{@link #close} use different role lists instead
- * of sharing one</b>: both are front-of-house actions — no kitchen role
- * ({@code KITCHEN}) has any business calling either, so it's excluded from
- * both — but they aren't the same kind of operation. {@link #open} just
- * marks a comanda as being used (a customer sat down, staff starts their
- * tab) and carries no money implication yet, so {@code ATTENDANT} (table
- * service) does this routinely, same as {@code CASHIER}. {@link #close},
- * on the other hand, is the step that conceptually settles the tab — even
- * though FARELO-034 doesn't wire up a real payment check yet (that's
- * FARELO-143), this codebase treats "closing" as a cash-handling action,
- * not a general floor-service one, so {@link #close} deliberately does
- * <b>not</b> include {@code ATTENDANT} — narrower than {@link #open} on
- * purpose, not an oversight. {@code ADMIN}/{@code MANAGER} are added to
- * both, same "can always do what any staff role can" reasoning FARELO-123
- * already used for {@code CategoryController}/{@code ProductController}.
+ * <p><b>{@code POST .../close} (FARELO-034) no longer lives here.</b> It
+ * moved to {@code com.farelo.api.payment.web.PaymentController#close}
+ * (FARELO-143, "Validar total pago antes de fechar") — closing now requires
+ * validating total paid against total owed, a cross-domain check ({@code
+ * payment} + {@code ordering}) that this class cannot perform without
+ * {@code command.web} taking on a dependency in the wrong direction (see
+ * {@code PaymentController}'s javadoc and {@code
+ * PaymentService#closeCommand(int)}'s javadoc for the full reasoning). The
+ * URL is unchanged ({@code POST /api/v1/commands/{number}/close}), same
+ * role list ({@code ADMIN}/{@code MANAGER}/{@code CASHIER}), same response
+ * shape ({@link CommandResponse}) — only the controller class changed.
+ * {@code CommandService#close(int)} itself is untouched, still the
+ * low-level status-transition primitive {@code PaymentService#closeCommand}
+ * delegates to.
+ *
+ * <p>{@link #open}, unlike the former {@code close}, just marks a comanda
+ * as being used (a customer sat down, staff starts their tab) and carries
+ * no money implication, so {@code ATTENDANT} (table service) does this
+ * routinely, same as {@code CASHIER}. {@code ADMIN}/{@code MANAGER} are
+ * added too, same "can always do what any staff role can" reasoning
+ * FARELO-123 already used for {@code CategoryController}/{@code
+ * ProductController}.
  */
 @RestController
 @RequestMapping("/api/v1/commands")
@@ -76,15 +84,6 @@ public class CommandController {
     @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
     public CommandResponse open(@PathVariable int number) {
         Command command = commandService.open(number);
-        return CommandResponse.from(command);
-    }
-
-    // Same POST-not-PATCH reasoning as open() above. No payment/fiscal
-    // validation yet (FARELO-034) — that's Epic 10/FARELO-143.
-    @PostMapping("/{number}/close")
-    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
-    public CommandResponse close(@PathVariable int number) {
-        Command command = commandService.close(number);
         return CommandResponse.from(command);
     }
 

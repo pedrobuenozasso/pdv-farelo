@@ -1,5 +1,7 @@
 package com.farelo.api.payment.web;
 
+import com.farelo.api.command.Command;
+import com.farelo.api.command.web.CommandResponse;
 import com.farelo.api.payment.Payment;
 import com.farelo.api.payment.PaymentService;
 import com.farelo.api.security.UserRole;
@@ -80,6 +82,24 @@ import java.util.List;
  * reasoning as {@link #listByCommand}: it's a read over the same ledger,
  * exposing a derived aggregate rather than raw rows — no more sensitive
  * than the list it's computed from.
+ *
+ * <p><b>{@link #close} (FARELO-143) — moved here from {@code
+ * com.farelo.api.command.web.CommandController}.</b> {@code POST
+ * /api/v1/commands/{number}/close} is still the exact same URL FARELO-034
+ * introduced, but the handler for it now lives in this class, calling
+ * {@link PaymentService#closeCommand(int)} instead of {@code
+ * CommandService#close(int)} directly — see that method's javadoc for the
+ * full dependency-direction reasoning on why the payment-sufficiency check
+ * had to live in {@code payment}, and why keeping the controller mapping
+ * consistent with that (rather than leaving it in {@code CommandController}
+ * and having {@code command.web} depend on {@code PaymentService}) was the
+ * more consistent choice given this class's own placement reasoning above.
+ * Reuses {@link CommandResponse} — the response shape for {@code close} is
+ * unchanged by this move, still the same {@code Command} representation
+ * {@code open}/{@code findByNumber} return. Same {@code ADMIN}/{@code
+ * MANAGER}/{@code CASHIER} role list {@code CommandController#close} always
+ * used (cash-handling action, no {@code ATTENDANT}/{@code KITCHEN}) — RBAC
+ * behavior is unchanged, only the class that enforces it.
  */
 @RestController
 @RequestMapping("/api/v1/commands")
@@ -137,6 +157,19 @@ public class PaymentController {
     public PaymentTotalResponse totalPaid(@PathVariable int number) {
         BigDecimal totalPaid = paymentService.getTotalPaid(number);
         return PaymentTotalResponse.of(number, totalPaid);
+    }
+
+    // FARELO-143 ("Validar total pago antes de fechar") — see this class's
+    // javadoc for why this route moved here from CommandController, and
+    // PaymentService#closeCommand's javadoc for the full validation
+    // reasoning. Same POST-not-PATCH and Location-header conventions don't
+    // apply here (this isn't a creation endpoint); URL/method/role list are
+    // byte-for-byte what CommandController#close used before this ticket.
+    @PostMapping("/{number}/close")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
+    public CommandResponse close(@PathVariable int number) {
+        Command command = paymentService.closeCommand(number);
+        return CommandResponse.from(command);
     }
 
 }

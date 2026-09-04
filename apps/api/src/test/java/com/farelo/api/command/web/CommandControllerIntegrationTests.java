@@ -26,20 +26,28 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Integration test for {@code GET}/{@code POST .../open}/{@code POST
- * .../close /api/v1/commands/{number}}, against a real PostgreSQL instance
+ * Integration test for {@code GET}/{@code POST .../open
+ * /api/v1/commands/{number}}, against a real PostgreSQL instance
  * (Testcontainers).
  *
- * <p>The mutating tests ({@code open}/{@code close}) use dedicated seeded
- * numbers (2-7) — distinct from the ones the {@code GET} tests read (1) and
+ * <p><b>FARELO-143 moved every {@code POST .../close} test out of this
+ * class</b>, into {@code PaymentControllerIntegrationTests} — see {@code
+ * CommandController}'s updated javadoc for why the route itself moved to
+ * {@code PaymentController#close}. Numbers 4-7 and 92 (previously used by
+ * those tests) are retired from this file, not reused here — see that
+ * class's javadoc for their new home and the new FARELO-143 numbers added
+ * alongside them.
+ *
+ * <p>The mutating tests still here ({@code open}) use dedicated seeded
+ * numbers (2-3) — distinct from the ones the {@code GET} tests read (1) and
  * {@code CommandSeedIntegrationTests} samples (1, 50, 100) — and reset
  * their status back to {@code AVAILABLE} in {@code @AfterEach}, since these
  * mutate state shared with every other test class via the singleton
  * Postgres container (see {@link AbstractIntegrationTest}).
  *
- * <p><b>FARELO-124</b>: {@code open}/{@code close} now require a caller
- * role (see {@code CommandController}'s javadoc), so every {@code POST}
- * here mints a real token via {@link #tokenFor} and sends it as
+ * <p><b>FARELO-124</b>: {@code open} requires a caller role (see {@code
+ * CommandController}'s javadoc), so every {@code POST} here mints a real
+ * token via {@link #tokenFor} and sends it as
  * {@code Authorization: Bearer <token>} — same {@code tokenFor(UserRole)}
  * pattern {@code ProductControllerIntegrationTests}/
  * {@code UserControllerIntegrationTests} established at FARELO-123.
@@ -53,12 +61,7 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
 
     private static final int OPEN_TEST_NUMBER = 2;
     private static final int CONFLICT_TEST_NUMBER = 3;
-    private static final int CLOSE_FROM_OPEN_NUMBER = 4;
-    private static final int CLOSE_FROM_PAYMENT_REQUESTED_NUMBER = 5;
-    private static final int CLOSE_FROM_AVAILABLE_NUMBER = 6;
-    private static final int CLOSE_ALREADY_CLOSED_NUMBER = 7;
     private static final int RBAC_OPEN_NUMBER = 91;
-    private static final int RBAC_CLOSE_NUMBER = 92;
 
     private static final String PASSWORD = "senha-forte-123";
 
@@ -81,12 +84,7 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
     void resetMutatedTestCommands() {
         resetToAvailable(OPEN_TEST_NUMBER);
         resetToAvailable(CONFLICT_TEST_NUMBER);
-        resetToAvailable(CLOSE_FROM_OPEN_NUMBER);
-        resetToAvailable(CLOSE_FROM_PAYMENT_REQUESTED_NUMBER);
-        resetToAvailable(CLOSE_FROM_AVAILABLE_NUMBER);
-        resetToAvailable(CLOSE_ALREADY_CLOSED_NUMBER);
         resetToAvailable(RBAC_OPEN_NUMBER);
-        resetToAvailable(RBAC_CLOSE_NUMBER);
     }
 
     private void resetToAvailable(int number) {
@@ -94,15 +92,6 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
             command.setStatus(CommandStatus.AVAILABLE);
             commandRepository.save(command);
         });
-    }
-
-    // Test-only setup: sets a command straight to a given status, bypassing
-    // the API (there's no endpoint yet to reach PAYMENT_REQUESTED, for
-    // instance) — just to arrange the scenario before exercising close().
-    private void setStatus(int number, CommandStatus status) {
-        Command command = commandRepository.findByNumber(number).orElseThrow();
-        command.setStatus(status);
-        commandRepository.save(command);
     }
 
     private String tokenFor(UserRole role) {
@@ -173,68 +162,7 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"));
     }
 
-    @Test
-    void closesOpenCommand() throws Exception {
-        setStatus(CLOSE_FROM_OPEN_NUMBER, CommandStatus.OPEN);
-
-        mockMvc.perform(post("/api/v1/commands/{number}/close", CLOSE_FROM_OPEN_NUMBER)
-                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.number").value(CLOSE_FROM_OPEN_NUMBER))
-                .andExpect(jsonPath("$.status").value("CLOSED"));
-
-        Optional<Command> persisted = commandRepository.findByNumber(CLOSE_FROM_OPEN_NUMBER);
-        assertThat(persisted).isPresent();
-        assertThat(persisted.get().getStatus()).isEqualTo(CommandStatus.CLOSED);
-    }
-
-    @Test
-    void closesPaymentRequestedCommand() throws Exception {
-        setStatus(CLOSE_FROM_PAYMENT_REQUESTED_NUMBER, CommandStatus.PAYMENT_REQUESTED);
-
-        mockMvc.perform(post("/api/v1/commands/{number}/close", CLOSE_FROM_PAYMENT_REQUESTED_NUMBER)
-                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CLOSED"));
-
-        Optional<Command> persisted = commandRepository.findByNumber(CLOSE_FROM_PAYMENT_REQUESTED_NUMBER);
-        assertThat(persisted).isPresent();
-        assertThat(persisted.get().getStatus()).isEqualTo(CommandStatus.CLOSED);
-    }
-
-    @Test
-    void returnsConflictWhenClosingAvailableCommand() throws Exception {
-        // CLOSE_FROM_AVAILABLE_NUMBER is left at its seed default
-        // (AVAILABLE) — never opened, so it can't be closed.
-        mockMvc.perform(post("/api/v1/commands/{number}/close", CLOSE_FROM_AVAILABLE_NUMBER)
-                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("COMMAND_CANNOT_BE_CLOSED"))
-                .andExpect(jsonPath("$.message").exists())
-                .andExpect(jsonPath("$.correlationId").exists());
-    }
-
-    @Test
-    void returnsConflictWhenClosingAlreadyClosedCommand() throws Exception {
-        setStatus(CLOSE_ALREADY_CLOSED_NUMBER, CommandStatus.CLOSED);
-
-        mockMvc.perform(post("/api/v1/commands/{number}/close", CLOSE_ALREADY_CLOSED_NUMBER)
-                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("COMMAND_CANNOT_BE_CLOSED"))
-                .andExpect(jsonPath("$.message").exists())
-                .andExpect(jsonPath("$.correlationId").exists());
-    }
-
-    @Test
-    void returnsCommandNotFoundWhenClosingUnknownNumber() throws Exception {
-        mockMvc.perform(post("/api/v1/commands/{number}/close", 999)
-                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"));
-    }
-
-    // --- FARELO-124: RBAC on open()/close() -------------------------------
+    // --- FARELO-124: RBAC on open() ----------------------------------------
 
     @Test
     void rejectsOpenWithNoAuthorizationHeader() throws Exception {
@@ -259,38 +187,6 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
     void allowsOpenAsAttendant() throws Exception {
         mockMvc.perform(post("/api/v1/commands/{number}/open", RBAC_OPEN_NUMBER)
                         .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
-                .andExpect(status().isOk());
-    }
-
-    @Test
-    void rejectsCloseWithNoAuthorizationHeader() throws Exception {
-        setStatus(RBAC_CLOSE_NUMBER, CommandStatus.OPEN);
-
-        mockMvc.perform(post("/api/v1/commands/{number}/close", RBAC_CLOSE_NUMBER))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
-                .andExpect(jsonPath("$.correlationId").exists());
-    }
-
-    // ATTENDANT can open() but, deliberately, not close() — see
-    // CommandController's javadoc for why closing is narrower.
-    @Test
-    void rejectsCloseWhenCallerRoleIsNotAllowed() throws Exception {
-        setStatus(RBAC_CLOSE_NUMBER, CommandStatus.OPEN);
-
-        mockMvc.perform(post("/api/v1/commands/{number}/close", RBAC_CLOSE_NUMBER)
-                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
-                .andExpect(jsonPath("$.correlationId").exists());
-    }
-
-    @Test
-    void allowsCloseAsCashier() throws Exception {
-        setStatus(RBAC_CLOSE_NUMBER, CommandStatus.OPEN);
-
-        mockMvc.perform(post("/api/v1/commands/{number}/close", RBAC_CLOSE_NUMBER)
-                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk());
     }
 

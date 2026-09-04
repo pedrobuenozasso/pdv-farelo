@@ -272,9 +272,24 @@ Pacote: `com.farelo.api.command`.
 
 CRUD REST do lado do backend, focado no ciclo de vida: `GET /{number}`
 (FARELO-032), `POST /{number}/open` (`AVAILABLE`→`OPEN`, FARELO-033),
-`POST /{number}/close` (`OPEN`/`PAYMENT_REQUESTED`→`CLOSED`, sem validação
-de pagamento/fiscal ainda — FARELO-143/Epic 10 — FARELO-034). Fecha o
-Epic 2 (Comandas) do lado do backend por enquanto. Ver `docs/api.md`.
+`POST /{number}/close` (`OPEN`/`PAYMENT_REQUESTED`→`CLOSED`, FARELO-034).
+Fecha o Epic 2 (Comandas) do lado do backend por enquanto. Ver
+`docs/api.md`.
+
+**`CommandService#close`/FARELO-143 ("Validar total pago antes de
+fechar")**: `close(int)` em si permanece só a transição de status,
+inalterada em comportamento — mas o handler HTTP de
+`POST /{number}/close` não chama mais `CommandService#close` diretamente.
+Validar que o total pago cobre o total devido exige ler dados de
+`ordering` e `payment`, e `command` não pode depender de nenhum dos dois
+sem formar um ciclo de dependência de bean do Spring (ambos já dependem de
+`command`) — então a orquestração (checar status via o novo
+`CommandService#findClosable(int)`, comparar pago vs. devido, só então
+chamar `close`) mora em `PaymentService#closeCommand`, e a própria rota
+HTTP migrou para `PaymentController` (pacote `payment`). Ver a subseção
+FARELO-143 em `payment` abaixo para o raciocínio completo — incluindo por
+que isso não é só um detalhe de `payment`, mas uma decisão que também
+redesenhou como `command` expõe seu próprio `close()`.
 
 ## ordering
 
@@ -497,6 +512,24 @@ follow-up não ticketado que já aconteceu com FARELO-019).
 
   Ver `docs/api.md` para os endpoints `POST /api/v1/orders/{id}/deliver`
   e `POST /api/v1/orders/{id}/cancel`.
+
+- **`OrderService#getTotalOwed(int commandNumber)`** (FARELO-143, "Validar
+  total pago antes de fechar"): o total devido de uma comanda — soma de
+  `unitPrice × quantity` de todo `OrderItem` de todo `Order` dela,
+  **excluindo pedidos `CANCELLED`** — via a nova query agregada
+  `OrderItemRepository#sumOwedByCommand(Command, OrderStatus
+  excludedStatus)` (mesmo formato `@Query` + `COALESCE(SUM(...), 0)` de
+  `PaymentRepository#sumAmountByCommand`). Construído aqui, em `ordering`,
+  e não em `payment`, porque é fundamentalmente dado de `Order`/
+  `OrderItem` — confirmado antes de construir que essa soma não existia em
+  lugar nenhum do código (o próprio javadoc do FARELO-142 já apontava essa
+  lacuna, deliberadamente fora do escopo daquele ticket). Consumido por
+  `PaymentService#closeCommand` (pacote `payment`, que passou a depender
+  de `OrderService` neste ticket) como o lado "devido" da validação antes
+  de `CommandService#close`. Sem endpoint REST próprio — só uma peça
+  interna da validação de fechamento; ver a subseção FARELO-143 em
+  `payment` para o raciocínio completo (dependência cross-domain,
+  semântica de comparação, exclusão de `CANCELLED`, testes).
 
 ## printing
 
@@ -4063,6 +4096,160 @@ Pacote: `com.farelo.api.payment`.
   inexistente. Usa números de comanda dedicados **70-72** — próximos livres
   depois de todos os já reservados nesta suíte (44-49, 60-66; ver javadoc
   atualizado da classe para o registro completo).
+
+### FARELO-143 — Validar total pago antes de fechar
+
+  Fecha o Epic 10 (Pagamentos). Liga `PaymentService#getTotalPaid`
+  (FARELO-142, lado "pago") a uma nova computação de "total devido" (lado
+  "devido", que FARELO-142 explicitamente deixou de fora — ver seu próprio
+  javadoc) para que `POST /api/v1/commands/{number}/close` só permita a
+  transição para `CLOSED` quando a comanda estiver paga o suficiente.
+
+  **"Total devido" não existia em lugar nenhum do código** — confirmado
+  antes de começar, exatamente como o javadoc de
+  `PaymentService#getTotalPaid` já apontava: nem `Order` nem `OrderItem`
+  expunham nenhuma soma de `unitPrice × quantity`. Construída aqui como
+  `OrderItemRepository#sumOwedByCommand(Command, OrderStatus
+  excludedStatus)` — mesmo formato de agregação `@Query` +
+  `COALESCE(SUM(...), 0)` que `PaymentRepository#sumAmountByCommand`
+  (FARELO-142) e `InventoryMovementRepository#sumQuantityByIngredientId`
+  (FARELO-095) já usam — somando `oi.unitPrice * oi.quantity` de todo
+  `OrderItem` cujo `order.command` é a comanda dada, e exposta via
+  `OrderService#getTotalOwed(int commandNumber)` (resolve o `number` via
+  `CommandService#findByNumber`, mesmo padrão de `listByCommand`/
+  `getTotalPaid`).
+
+  **Pedidos `CANCELLED` são excluídos do total devido.** Um pedido
+  cancelado nunca foi entregue — não há nada a cobrar por ele. A exclusão
+  é por `status <> CANCELLED` (uma negação), não uma lista de inclusão dos
+  demais status — assim um `OrderStatus` novo, se algum dia for
+  adicionado, entra automaticamente no total devido a menos que um ticket
+  futuro decida excluí-lo também; mais fácil de raciocinar que enumerar
+  manualmente cada status "cobrável" hoje. Todo outro status conta,
+  inclusive os ainda em andamento (`CREATED`/`PREPARING`/`READY`) — um
+  pedido não precisa chegar a `DELIVERED` para ser devido, só não pode
+  estar `CANCELLED`.
+
+  **Onde a "computação de total devido" mora — `ordering`, não `payment`
+  nem `command`.** É fundamentalmente dado de `Order`/`OrderItem` (seus
+  preços e quantidades) — mesmo raciocínio já usado para todo outro método
+  de `OrderService` (`listByCommand`, `listQueue`). Verificado, não
+  assumido: nem `Order` nem `OrderItem` tinham essa soma antes deste
+  ticket (ver nota de escopo do FARELO-142 acima).
+
+  **A decisão arquitetural central deste ticket — onde a *comparação*
+  "pago >= devido" e a orquestração do `close()` moram, verificado contra
+  o grafo de dependências real, não assumido.** Antes deste ticket,
+  `command` não dependia de nada cross-domain, enquanto tanto `ordering`
+  (`OrderService` → `CommandService`) quanto `payment` (`PaymentService` →
+  `CommandService`) já dependiam de `command`. Fazer `CommandService`
+  chamar `PaymentService` diretamente (a leitura mais literal do título do
+  ticket) exigiria o construtor de `CommandService` aceitar um bean
+  `PaymentService` — mas o construtor de `PaymentService` já aceita um bean
+  `CommandService`, então isso é uma dependência circular real de bean do
+  Spring (`CommandService` → `PaymentService` → `CommandService`), não só
+  uma questão de estilo: com injeção via construtor e sem
+  `spring.main.allow-circular-references` (confirmado ausente de
+  `application.yml`), o contexto Spring simplesmente falharia ao subir. O
+  mesmo problema existiria para `CommandService` depender de `OrderService`
+  para o total devido (`OrderService` → `CommandService` já existe também).
+
+  **Decisão**: a orquestração mora em `PaymentService`, que ganha uma nova
+  dependência em `OrderService` — `PaymentService` → `OrderService` →
+  `CommandService` é uma linha reta, não um ciclo, já que `OrderService`
+  não depende de `PaymentService`. Novo método `PaymentService#closeCommand
+  (int commandNumber)`:
+
+  1. `CommandService#findClosable(int)` (novo, extraído do antigo corpo de
+     `close()` sem mudar comportamento/exceção) resolve a comanda e valida
+     o status fechável **antes** de qualquer cálculo de pagamento — assim
+     uma comanda ainda `AVAILABLE` continua reportando
+     `COMMAND_CANNOT_BE_CLOSED`, nunca um erro de pagamento confuso sobre
+     uma comanda que nunca teve nada pedido ou pago.
+  2. Calcula `totalOwed` (`OrderService#getTotalOwed`) e `totalPaid`
+     (`PaymentService#getTotalPaid`, reaproveitado sem alteração).
+  3. Se `totalPaid < totalOwed`, lança `CommandNotFullyPaidException`
+     (novo, pacote `command`) → `409 COMMAND_NOT_FULLY_PAID`.
+  4. Caso contrário, delega a `CommandService#close(int)` — que continua a
+     única fonte da transição/persistência real, inalterada em
+     comportamento; só passou a chamar `findClosable` internamente em vez
+     de duplicar a checagem de status.
+
+  **Semântica de comparação: `>=`, não igualdade exata.** O prompt mestre
+  seção 30 não especifica isso (é inteiramente sobre limites de
+  transação, não valores de pagamento) — decisão própria deste ticket.
+  `>=` é o padrão mais permissivo e realista para uma lanchonete: troco não
+  levado, gorjeta, arredondamento de maquininha de cartão — nenhum desses
+  deveria travar o fechamento da conta. Exigir igualdade exata deixaria
+  uma comanda paga a mais permanentemente infechável sem um lançamento
+  compensatório negativo, impossível hoje já que `Payment` é um ledger
+  append-only (ver javadoc de `Payment`). Pagar a menos, por qualquer
+  valor, continua bloqueando o fechamento.
+
+  **Comanda com zero pedidos continua fechando normalmente.** `totalOwed`
+  usa o mesmo `COALESCE(SUM(...), 0)` de `getTotalPaid` — uma comanda
+  `AVAILABLE`/`OPEN` nunca usada tem `totalOwed = 0` e, quase sempre,
+  `totalPaid = 0` também; `0 >= 0` vale trivialmente. Preserva
+  exatamente o comportamento original do FARELO-034 para esse caso —
+  confirmado com teste, não assumido.
+
+  **A rota HTTP `POST /api/v1/commands/{number}/close` moveu de
+  `CommandController` (`command.web`) para `PaymentController`
+  (`payment.web`).** Mesma URL, mesmos papéis (`ADMIN`/`MANAGER`/
+  `CASHIER`), mesma resposta (`CommandResponse`) — só a classe que atende
+  mudou. Decisão consistente com o mesmo raciocínio de direção de
+  dependência já documentado para `CommandOrdersController` (`ordering`) e
+  para o próprio `PaymentController` (`payment`) na seção FARELO-140
+  acima: deixar `command.web` chamar `PaymentService#closeCommand`
+  funcionaria no nível do Spring (nada depende de um bean de controller,
+  então não formaria ciclo), mas reintroduziria a mesma inconsistência de
+  direção de domínio (`command` dependendo de um domínio que depende
+  dele) que este código evita consistentemente em todo outro lugar.
+  `CommandController` mantém `findByNumber`/`open`; `CommandService#close`
+  permanece o primitivo de baixo nível, inalterado, ainda utilizável
+  isoladamente se um chamador futuro precisar de um close sem checagem de
+  pagamento (nenhum precisa hoje).
+
+  **Exceção nova, não reaproveitada**: `CommandNotFullyPaidException`
+  (pacote `command`, ao lado de `CommandCannotBeClosedException`) →
+  `409 Conflict`, `code: "COMMAND_NOT_FULLY_PAID"` via
+  `ApiExceptionHandler`. Verificado antes de decidir, não assumido:
+  `CommandCannotBeClosedException`'s mensagem atual fala inteiramente de
+  `status` ("expected OPEN or PAYMENT_REQUESTED") — uma comanda que falha
+  nesta nova checagem já está, por construção, num status fechável (o
+  status é checado primeiro, ver acima), então reaproveitar aquela
+  mensagem descreveria um problema de status que não existe, escondendo o
+  problema real (pagamento insuficiente). Mesmo precedente de "uma exceção
+  por motivo de falha distinto" que o javadoc de
+  `CommandCannotAcceptPaymentsException` já estabeleceu para a escolha
+  análoga em `record()`.
+
+  **Testes**: toda a suíte de testes de `close()` (antes em
+  `CommandControllerIntegrationTests`) moveu para
+  `PaymentControllerIntegrationTests`, já que o endpoint agora é atendido
+  por `PaymentController` — números de comanda 4-7 e 92 carregados
+  verbatim (o comportamento desses testes não mudou: sem pedidos/
+  pagamentos, `totalOwed = totalPaid = 0`, então `0 >= 0` sempre vale).
+  Testes novos deste ticket usam números dedicados **73-77**: comanda paga
+  exatamente o devido (fecha), comanda paga a menos (`409
+  COMMAND_NOT_FULLY_PAID`), comanda paga a mais (fecha, prova o `>=`),
+  comanda cujo único pedido é `CANCELLED` (fecha sem nenhum pagamento,
+  `totalOwed = 0`), e comanda com um pedido entregue pago + um pedido
+  cancelado muito maior não pago (fecha — prova que o pedido cancelado é
+  excluído do total devido mesmo com outros pedidos não-cancelados
+  presentes). **Nota de isolamento de teste encontrada durante a
+  implementação, mesma família já documentada para `Recipe`/`RecipeItem`/
+  `InventoryMovement` e para `OrderInventoryConsumptionIntegrationTests`**:
+  esses testes de `close()` criam `Product`/`Order`/`OrderItem` reais para
+  dar a `OrderService#getTotalOwed` algo não-zero para somar;
+  `ProductControllerIntegrationTests`/`CategoryControllerIntegrationTests`
+  fazem `productRepository.deleteAll()`/`categoryRepository.deleteAll()`
+  cegos no próprio `@BeforeEach`, que falham com violação de FK contra
+  qualquer `order_item` ainda referenciando um desses produtos. Corrigido
+  com o mesmo padrão já usado para `RecipeItem`: um `@AfterEach`
+  (`cleanUpOrderFixtures`) que deleta exatamente as linhas de `OrderItem`/
+  `Order`/`Product`/`Category` que a própria classe criou (rastreadas em
+  listas de instância), nunca a tabela inteira.
 
 ## fiscal
 
