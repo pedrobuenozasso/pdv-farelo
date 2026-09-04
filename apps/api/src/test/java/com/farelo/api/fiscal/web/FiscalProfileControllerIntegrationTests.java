@@ -255,6 +255,144 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.correlationId").exists());
     }
 
+    // FARELO-154.
+    @Test
+    void createsFiscalProfileWithValidCstAlone() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Tributado padrão", "cst": "60"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.cst").value("60"))
+                .andExpect(jsonPath("$.csosn").value(nullValue()))
+                .andReturn();
+
+        FiscalProfileResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), FiscalProfileResponse.class);
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCst()).isEqualTo("60");
+        assertThat(persisted.get().getCsosn()).isNull();
+    }
+
+    // FARELO-154.
+    @Test
+    void createsFiscalProfileWithValidCsosnAlone() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Simples Nacional", "csosn": "102"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.csosn").value("102"))
+                .andExpect(jsonPath("$.cst").value(nullValue()))
+                .andReturn();
+
+        FiscalProfileResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), FiscalProfileResponse.class);
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCsosn()).isEqualTo("102");
+        assertThat(persisted.get().getCst()).isNull();
+    }
+
+    // FARELO-154.
+    @Test
+    void createsFiscalProfileWithoutCstOrCsosn() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.cst").value(nullValue()))
+                .andExpect(jsonPath("$.csosn").value(nullValue()))
+                .andReturn();
+
+        FiscalProfileResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), FiscalProfileResponse.class);
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCst()).isNull();
+        assertThat(persisted.get().getCsosn()).isNull();
+    }
+
+    // FARELO-154: CstCsosnMutuallyExclusive rejects both being set on the
+    // same create request, same standard VALIDATION_ERROR shape as every
+    // other Bean Validation failure on this endpoint.
+    @Test
+    void rejectsFiscalProfileWithBothCstAndCsosnSetWithStandardErrorFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Inválido", "cst": "60", "csosn": "102"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // FARELO-154.
+    @Test
+    void rejectsCstWithWrongDigitCountWithStandardErrorFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento", "cst": "6"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // FARELO-154.
+    @Test
+    void rejectsNonNumericCstWithStandardErrorFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento", "cst": "6A"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // FARELO-154.
+    @Test
+    void rejectsCsosnWithWrongDigitCountWithStandardErrorFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento", "csosn": "10"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // FARELO-154.
+    @Test
+    void rejectsNonNumericCsosnWithStandardErrorFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento", "csosn": "10A"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
     @Test
     void rejectsBlankNameWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
@@ -508,6 +646,170 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                   "name": "Isento",
                   "active": true,
                   "cfop": "abc"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    // FARELO-154.
+    @Test
+    void updatesFiscalProfileSettingCst() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true,
+                  "cst": "40"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cst").value("40"))
+                .andExpect(jsonPath("$.csosn").value(nullValue()));
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(fiscalProfile.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCst()).isEqualTo("40");
+        assertThat(persisted.get().getCsosn()).isNull();
+    }
+
+    // FARELO-154.
+    @Test
+    void updatesFiscalProfileSettingCsosn() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true,
+                  "csosn": "500"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.csosn").value("500"))
+                .andExpect(jsonPath("$.cst").value(nullValue()));
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(fiscalProfile.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCsosn()).isEqualTo("500");
+        assertThat(persisted.get().getCst()).isNull();
+    }
+
+    // FARELO-154.
+    @Test
+    void updateWithoutCstClearsPreviouslySetCst() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+        fiscalProfile.setCst("60");
+        fiscalProfileRepository.save(fiscalProfile);
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cst").value(nullValue()));
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(fiscalProfile.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCst()).isNull();
+    }
+
+    // FARELO-154.
+    @Test
+    void updateWithoutCsosnClearsPreviouslySetCsosn() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+        fiscalProfile.setCsosn("102");
+        fiscalProfileRepository.save(fiscalProfile);
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.csosn").value(nullValue()));
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(fiscalProfile.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCsosn()).isNull();
+    }
+
+    // FARELO-154: CstCsosnMutuallyExclusive rejects both being set on an
+    // update request too, not just on create.
+    @Test
+    void rejectsUpdateSettingBothCstAndCsosnWithStandardErrorFormat() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true,
+                  "cst": "60",
+                  "csosn": "102"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    // FARELO-154.
+    @Test
+    void rejectsInvalidCstOnUpdateWithStandardErrorFormat() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true,
+                  "cst": "abc"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    // FARELO-154.
+    @Test
+    void rejectsInvalidCsosnOnUpdateWithStandardErrorFormat() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true,
+                  "csosn": "abc"
                 }
                 """;
 

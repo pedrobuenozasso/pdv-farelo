@@ -61,6 +61,26 @@ import java.util.UUID;
  * CST/CSOSN remains out of scope for this ticket, same discipline as above
  * (FARELO-154 still not implemented).
  *
+ * <p><b>FARELO-154 ("Adicionar CST/CSOSN") update — {@link #cst} and
+ * {@link #csosn} added.</b> The third and last of the three fiscal codes
+ * named above — but, unlike NCM/CFOP, this is <b>not</b> "the same shape,
+ * different regex". CST (Código de Situação Tributária) and CSOSN (Código
+ * de Situação da Operação no Simples Nacional) are two different,
+ * <i>mutually exclusive</i> codes, not one code with one format: CST
+ * applies to a business under "Regime Normal" (Lucro Real/Presumido),
+ * CSOSN applies to a business under "Simples Nacional" — a single fiscal
+ * profile uses one or the other depending on tax regime, never both. This
+ * is modeled as two separate nullable columns, {@link #cst} and
+ * {@link #csosn}, with a DB {@code CHECK} enforcing that at most one is set
+ * at a time ({@code ck_fiscal_profile_cst_csosn_exclusive}, see {@code
+ * V33__add_fiscal_profile_cst_csosn_columns.sql}) — see each field's own
+ * javadoc for the full reasoning, and
+ * {@code docs/domain-model.md}'s FARELO-154 subsection for the complete
+ * decision writeup, including why no tax-regime column was added to this
+ * entity to validate cst-vs-csosn correctness (same absence of textual
+ * basis that made {@code CompanyFiscalConfiguration}'s FARELO-155 decline a
+ * regime field too).
+ *
  * <p>What a {@code FiscalProfile} minimally needs to exist as a real,
  * useful row <i>before</i> any fiscal code is attached to it is just a way
  * for a business owner to name and describe a fiscal category they intend
@@ -135,6 +155,55 @@ public class FiscalProfile {
     @Column(name = "cfop", length = 4)
     private String cfop;
 
+    /**
+     * CST (Código de Situação Tributária), FARELO-154 — applies to a
+     * business under "Regime Normal" (Lucro Real/Presumido). Mutually
+     * exclusive with {@link #csosn} (never both set on the same profile;
+     * enforced by {@code ck_fiscal_profile_cst_csosn_exclusive}, see
+     * {@code V33__add_fiscal_profile_cst_csosn_columns.sql}) — a fiscal
+     * profile is configured for one tax regime, so it carries either a CST
+     * (Regime Normal) or a CSOSN (Simples Nacional), never both. Nullable,
+     * same "not configured yet, a distinct permanent state" reasoning as
+     * {@link #ncm}/{@link #cfop} — both {@code cst} and {@code csosn} being
+     * {@code null} is also a legitimate state (e.g. right after creation,
+     * before an Admin has picked which one applies).
+     *
+     * <p>Format: unlike NCM/CFOP (each a single code with one fixed,
+     * confidently-known digit count), "CST" is not one table — ICMS CST
+     * (Tabela A), IPI CST and PIS/COFINS CST are each their own table, and
+     * this column doesn't track which tax type it's for. Rather than
+     * overstate a precision this ticket doesn't actually have (e.g.
+     * asserting a single exact digit count the way {@link #ncm}/
+     * {@link #cfop} do), the format here is validated loosely: numeric,
+     * 2-to-3 digits ({@code ^[0-9]{2,3}$}), the honest structural common
+     * denominator across the CST tables in general use — see
+     * {@code docs/domain-model.md}'s FARELO-154 subsection for the full
+     * reasoning. Validated at the request DTO boundary ({@code @Pattern} on
+     * {@code FiscalProfileRequest}/{@code FiscalProfileUpdateRequest}) and
+     * backstopped by the same DB {@code CHECK} pattern as {@link #ncm}/
+     * {@link #cfop}.
+     */
+    @Column(name = "cst", length = 3)
+    private String cst;
+
+    /**
+     * CSOSN (Código de Situação da Operação no Simples Nacional),
+     * FARELO-154 — applies to a business under "Simples Nacional".
+     * Mutually exclusive with {@link #cst}, see that field's javadoc.
+     * Nullable, same reasoning as {@link #cst}.
+     *
+     * <p>Format: unlike {@link #cst}, CSOSN is a single national table
+     * (Simples Nacional, not tax-type-dependent) whose codes are always
+     * exactly 3 numeric digits (e.g. 101, 102, 103, 201, 202, 203, 300,
+     * 400, 500, 900) — same "structurally fixed, not app-specific"
+     * confidence as {@link #ncm} (8 digits)/{@link #cfop} (4 digits), so
+     * this column gets the same tight exact-length {@code @Pattern}
+     * ({@code ^[0-9]{3}$}) those got, unlike {@link #cst}'s looser
+     * validation.
+     */
+    @Column(name = "csosn", length = 3)
+    private String csosn;
+
     @Column(name = "active", nullable = false)
     private boolean active = true;
 
@@ -198,6 +267,22 @@ public class FiscalProfile {
 
     public void setCfop(String cfop) {
         this.cfop = cfop;
+    }
+
+    public String getCst() {
+        return cst;
+    }
+
+    public void setCst(String cst) {
+        this.cst = cst;
+    }
+
+    public String getCsosn() {
+        return csosn;
+    }
+
+    public void setCsosn(String csosn) {
+        this.csosn = csosn;
     }
 
     public boolean isActive() {

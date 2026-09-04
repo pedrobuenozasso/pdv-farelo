@@ -38,10 +38,31 @@ import jakarta.validation.constraints.Pattern;
  * A real CFOP is always exactly 4 numeric digits (standard Brazilian tax
  * classification code, not an app-specific format choice) — see {@code
  * FiscalProfile.cfop}'s javadoc.
+ *
+ * <p>{@code cst}/{@code csosn} (FARELO-154) are both optional, same
+ * "defaults to {@code null}, no {@code @NotNull}" shape as {@code ncm}/
+ * {@code cfop} — but, unlike those two, they're also mutually exclusive
+ * with each other ({@link CstCsosnMutuallyExclusive}, applied at the record
+ * level below): a fiscal profile carries a CST (Regime Normal) or a CSOSN
+ * (Simples Nacional), never both. {@code cst}'s {@code @Pattern(regexp =
+ * "^[0-9]{2,3}$")} is looser than {@code ncm}/{@code cfop}'s exact-digit
+ * patterns — CST tables differ by tax type (ICMS/IPI/PIS/COFINS) and this
+ * field doesn't track which one, so 2-to-3 numeric digits is the honest
+ * structural common denominator rather than a made-up single exact length.
+ * {@code csosn}'s {@code @Pattern(regexp = "^[0-9]{3}$")} is exact, same
+ * confidence level as {@code ncm}/{@code cfop} — CSOSN is a single national
+ * table (Simples Nacional) whose codes are always exactly 3 digits. See
+ * {@code FiscalProfile.cst}/{@code .csosn}'s javadoc and
+ * {@code docs/domain-model.md}'s FARELO-154 subsection for the full
+ * reasoning.
  */
+@CstCsosnMutuallyExclusive
 public record FiscalProfileRequest(
         @NotBlank String name,
         String description,
         @Pattern(regexp = "^[0-9]{8}$", message = "ncm must be exactly 8 numeric digits") String ncm,
-        @Pattern(regexp = "^[0-9]{4}$", message = "cfop must be exactly 4 numeric digits") String cfop) {
+        @Pattern(regexp = "^[0-9]{4}$", message = "cfop must be exactly 4 numeric digits") String cfop,
+        @Pattern(regexp = "^[0-9]{2,3}$", message = "cst must be 2 to 3 numeric digits") String cst,
+        @Pattern(regexp = "^[0-9]{3}$", message = "csosn must be exactly 3 numeric digits") String csosn)
+        implements FiscalProfileCstCsosnCarrier {
 }
