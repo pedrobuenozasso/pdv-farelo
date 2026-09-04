@@ -17,7 +17,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `recipe` | Ficha técnica de produtos — **implementada dentro do pacote `inventory`** (`Recipe`/`RecipeItem`, FARELO-091/092), não como pacote próprio; linha mantida por rastreabilidade com o roadmap original | Em andamento (ver `inventory`) |
 | `notification` | `Notification`, adapter WhatsApp Cloud API | Em andamento |
 | `payment` | `Payment`, múltiplos pagamentos por comanda | Em andamento |
-| `fiscal` | `FiscalProfile`, `FiscalDocument`, NFC-e (futuro) | Não iniciado |
+| `fiscal` | `FiscalProfile`, `FiscalDocument`, NFC-e (futuro) | Em andamento |
 | `reporting` | Relatórios e analytics | Não iniciado |
 | `audit` | `AuditLog` de operações sensíveis | Em andamento |
 
@@ -3726,6 +3726,150 @@ Pacote: `com.farelo.api.payment`.
   segunda asserção de forma dependente de ordem. Corrigido dedicando um
   terceiro número de comanda, nunca escrito por nenhum outro teste, só
   para a asserção de lista vazia.
+
+## fiscal
+
+Pacote: `com.farelo.api.fiscal`.
+
+- **`FiscalProfile`** (FARELO-150): entidade JPA — uma classificação
+  fiscal/tributária reutilizável (ex: "Isento", "Tributado padrão") que um
+  `Product` vai futuramente referenciar (FARELO-151, "Associar Product com
+  FiscalProfile" — ticket futuro, não este), para que produtos que
+  compartilham o mesmo tratamento tributário não precisem repetir esses
+  atributos individualmente. Primeira peça do Epic 11 (Fiscal Base, ver
+  `docs/PROMPT_MESTRE.md` seção 47: "NÃO EMITIR NFC-e ainda") — segue o
+  mesmo padrão "entidade primeiro, associações/produtores depois" já usado
+  por `PrintJob` (FARELO-071), `Notification` (FARELO-110),
+  `InventoryMovement` (FARELO-093), `AuditLog` (FARELO-125) e `Payment`
+  (FARELO-140) nos seus próprios primeiros tickets.
+
+  `id` (UUID, mesma estratégia dos demais domínios), `name` (`VARCHAR(120)
+  NOT NULL`), `description` (opcional, `TEXT`, mesmo tipo de
+  `Product.description`), `active` (default `true`, mesmo padrão de
+  `Category`/`Product`/`Ingredient`), `createdAt`/`updatedAt`
+  (`OffsetDateTime` em UTC). Tabela criada pela migration
+  `V27__create_fiscal_profile_table.sql`.
+
+  **Decisão de escopo central — deliberadamente SEM NCM/CFOP/CST/CSOSN (ou
+  qualquer outro dado fiscal da seção 24) ainda.** O prompt mestre seção 24
+  ("Dados fiscais previstos") lista NCM, CFOP, CST/CSOSN, CEST, origem,
+  cBenef, ICMS, CBS, IBS como atributos que um perfil fiscal deve
+  *futuramente* suportar — mas é literalmente isso: dados **previstos**,
+  não necessariamente deste ticket. O roadmap (seção 47, Epic 11) nomeia
+  três desses como tickets próprios, explícitos e numerados em sequência
+  logo depois deste: **FARELO-152** ("Adicionar NCM"), **FARELO-153**
+  ("Adicionar CFOP"), **FARELO-154** ("Adicionar CST/CSOSN"). Essa
+  numeração é ela mesma um sinal deliberado — a mesma disciplina de "não
+  antecipar campo de ticket futuro" já aplicada repetidamente neste código
+  (`Ingredient` só ganhou `minimumStock` no FARELO-099, não na sua criação
+  no FARELO-090; `criticalStock` continua nem existindo; `Recipe`/
+  `RecipeItem` split cabeçalho-depois-detalhe, FARELO-091/092). Construir
+  qualquer um desses campos agora violaria essa disciplina e anteciparia
+  três tickets futuros concretos cuja única razão de existir é adicionar
+  exatamente esses campos, um de cada vez. `CEST`/`origem`/`cBenef`/
+  `ICMS`/`CBS`/`IBS` nem são nomeados como tickets ainda — mais distantes
+  ainda do escopo atual.
+
+  O que um `FiscalProfile` minimamente precisa para existir como uma linha
+  real e útil *antes* de qualquer código fiscal ser anexado a ele é só uma
+  forma de um dono de negócio nomear e descrever uma categoria fiscal que
+  pretende configurar depois (ex: "Isento", "Tributado padrão", "Zona
+  Franca de Manaus") — daí este ticket adicionar só `name` (obrigatório) e
+  `description` (opcional), além dos campos de bookkeeping
+  (`active`/`createdAt`/`updatedAt`) que toda outra entidade deste código
+  já carrega. Isso espelha `Category` (FARELO-010) quase exatamente — ambas
+  são valores de lookup nomeados simples que um `Product` vai referenciar —
+  com `description` adicionado por cima porque, diferente de uma categoria
+  de cardápio ("Bebidas", autoexplicativo), o nome de um perfil fiscal
+  sozinho ("Tributado padrão") muitas vezes não é suficiente para quem for
+  configurá-lo depois lembrar quais produtos reais pertencem ali; mesmo
+  formato opcional de `Product.description`. Sem índice/constraint de
+  unicidade em `name` — mesma característica de `Category.name`, que
+  também não é única.
+
+  **Sem `updatedAt` nulo/ausente**: diferente de `Payment`/
+  `InventoryMovement`/`AuditLog` (ledgers append-only, sem `updatedAt`),
+  `FiscalProfile` é uma entidade de configuração mutável — um Admin corrige
+  nome/descrição/`active` ao longo do tempo (ver `PUT` abaixo), então
+  `updatedAt` faz sentido aqui do mesmo jeito que em `Category`/`Product`/
+  `Ingredient`.
+
+  Id gerado via `@UuidGenerator` do Hibernate, style `RANDOM` — mesma
+  estratégia de `Category`/`Product`/`Ingredient` (Hibernate 6.6 não tem
+  suporte nativo a UUIDv7).
+
+  `FiscalProfileRepository` (Spring Data JPA), sem métodos de consulta
+  próprios além do CRUD padrão do `JpaRepository` — mesmo formato de
+  `CategoryRepository`/`IngredientRepository`.
+
+  **Decisão de forma do endpoint — CRUD completo (`POST`/`GET`
+  lista/`GET {id}`/`PUT {id}`), não só leitura**: o ticket avaliou dois
+  precedentes opostos já estabelecidos neste código. `InventoryMovement`/
+  `Notification`/`AuditLog`/`Payment` construíram só leitura nos seus
+  primeiros tickets — mas todos esses domínios não têm nenhum conceito de
+  "alguém configura isso"; são fatos gerados pelo sistema (um movimento de
+  estoque, uma notificação disparada, uma linha de auditoria, um
+  pagamento registrado). `Category`/`Ingredient`, ao contrário, são valores
+  de lookup **configurados por um Admin antes de qualquer outra coisa
+  poder referenciá-los** — exatamente a situação de `FiscalProfile`: o
+  próprio FARELO-151 ("Associar Product com FiscalProfile") só faz sentido
+  se já existir pelo menos um `FiscalProfile` criável e listável por um
+  Admin. Por isso este ticket segue o precedente de `Category`/
+  `Ingredient`, não o de `Payment`/`AuditLog`.
+
+  Dentro desse precedente, a forma exata escolhida foi o CRUD completo de
+  `Ingredient` (FARELO-090: `POST`/`GET` lista/`GET {id}`/`PUT {id}`, tudo
+  num único ticket), não o par mínimo `POST`/`GET` que `Category`
+  construiu (FARELO-010 criou só a entidade; FARELO-012/013, tickets
+  *separados e posteriores*, adicionaram `POST`/`GET`). O roadmap não
+  nomeia nenhum ticket "criar endpoint POST FiscalProfile" separado deste
+  — FARELO-150 é o único ticket que estabelece este domínio, e FARELO-151
+  já assume um Admin conseguindo criar/listar/corrigir um perfil fiscal
+  quando chegar. `PUT` em particular importa mais aqui do que importaria
+  para uma entidade só-ledger: um perfil fiscal é um valor de lookup
+  digitado à mão (nome/descrição) que um Admin vai querer corrigir (typo,
+  descrição melhor) antes do FARELO-151 começar a referenciá-lo por id —
+  sem `PUT`, a única correção possível seria criar um novo perfil e deixar
+  o antigo órfão. `DELETE` fica de fora, mesmo raciocínio "fora do roadmap
+  atual" já aplicado a `Category`/`Product`/`Ingredient`.
+
+  `FiscalProfileService`: `create`/`listAll` (ordenado por `name`, mesmo
+  padrão de `IngredientService#listAll` — sem filtro `active`-only ainda,
+  YAGNI)/`getById` (lança `FiscalProfileNotFoundException`)/`update`
+  (substituição completa via `PUT`). `FiscalProfileNotFoundException`
+  (`404`/`FISCAL_PROFILE_NOT_FOUND`) registrada em `ApiExceptionHandler`,
+  mesmo formato de `IngredientNotFoundException`/`CategoryNotFoundException`.
+
+  **Decisão de RBAC — deliberadamente SEM `@RequireRole` em nenhum
+  endpoint**: mesmo precedente de "deixar os primeiros endpoints de um
+  domínio novo desprotegidos" já seguido por `Payment` (FARELO-140) e
+  `Notification`/`AuditLog` nos próprios primeiros tickets — e reforçado
+  por um precedente ainda mais direto: `IngredientController` **continua
+  inteiramente sem `@RequireRole` até hoje**, apesar de ser exatamente o
+  mesmo tipo de valor de lookup configurado por Admin que `FiscalProfile`
+  é. O FARELO-123 ("Proteger Admin") listou `IngredientController`
+  **explicitamente fora de escopo** ("RBAC de estoque, se algum dia
+  necessário, é ticket futuro e distinto" — ver subseção FARELO-123 acima)
+  mesmo sendo, por natureza, uma tela de configuração Admin — a prova de
+  que "ser Admin-configurado" sozinho não é o que decide proteção neste
+  código; é sempre um ticket dedicado e nomeado que decide *quem* pode
+  chamar *qual* endpoint (FARELO-122 mecanismo, FARELO-123 Admin,
+  FARELO-124 PDV/cozinha, FARELO-127 dois endpoints específicos de
+  `inventory`). Não existe ainda um ticket dedicado de aplicação de RBAC
+  para `fiscal`. Se/quando gerenciar perfis fiscais precisar ficar restrito
+  a `ADMIN`/`MANAGER`, isso é decisão de um ticket futuro, não deste.
+
+  **Testes**: `FiscalProfileRepositoryIntegrationTests` (mapeamento JPA
+  contra Postgres real, mesmo formato de
+  `IngredientRepositoryIntegrationTests`) e
+  `FiscalProfileControllerIntegrationTests` (HTTP real via `MockMvc`,
+  cobrindo os quatro endpoints — sucesso, validação e `404` — mesmo
+  formato de `IngredientControllerIntegrationTests`). Sem a landmine de FK
+  cross-tabela que `IngredientControllerIntegrationTests` documenta
+  (`inventory_movement` precisando ser limpo antes de `ingredient`):
+  nenhuma outra tabela referencia `fiscal_profile` ainda (FARELO-151,
+  `product.fiscal_profile_id`, é ticket futuro), então um
+  `fiscalProfileRepository.deleteAll()` simples no `@BeforeEach` é seguro.
 
 ## Outbox (infraestrutura cross-cutting)
 

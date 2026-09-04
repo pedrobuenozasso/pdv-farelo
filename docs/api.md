@@ -2021,4 +2021,131 @@ Lista vazia (`[]`) quando a comanda existe mas ainda não tem pagamentos.
 - `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
   `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
 
+### `POST /api/v1/fiscal-profiles`
+
+Cria um perfil fiscal. (FARELO-150)
+
+Primeiro endpoint do domínio `fiscal`. Sem `active` no corpo — um perfil
+novo sempre começa `true`, mesmo padrão de `Category`/`Ingredient`. Sem
+NCM/CFOP/CST/CSOSN (ou qualquer outro dado fiscal previsto na seção 24 do
+prompt mestre) — deliberadamente fora de escopo, ver
+`docs/domain-model.md`, seção `fiscal`, para o raciocínio completo (esses
+campos são FARELO-152/153/154, tickets futuros e já numerados).
+
+**Request body**
+
+```json
+{
+  "name": "Isento",
+  "description": "Produtos sem incidência de ICMS"
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
+| `description` | string | não | Texto livre; omitido/`null` = "sem descrição" |
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/fiscal-profiles/{id}`.
+
+```json
+{
+  "id": "d4a2e3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+  "name": "Isento",
+  "description": "Produtos sem incidência de ICMS",
+  "active": true,
+  "createdAt": "2026-09-02T13:00:00Z",
+  "updatedAt": "2026-09-02T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `name` ausente/em branco, no formato de erro padrão,
+  com `code: "VALIDATION_ERROR"`.
+
+### `GET /api/v1/fiscal-profiles`
+
+Lista todos os perfis fiscais (ativos e inativos), ordenados por `name`
+(asc). (FARELO-150)
+
+Sem paginação/filtro `active`-only por enquanto (YAGNI, mesmo padrão de
+`GET /api/v1/categories`/`GET /api/v1/ingredients` — mantido para um
+ticket futuro se o Admin precisar).
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "d4a2e3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+    "name": "Isento",
+    "description": "Produtos sem incidência de ICMS",
+    "active": true,
+    "createdAt": "2026-09-02T13:00:00Z",
+    "updatedAt": "2026-09-02T13:00:00Z"
+  }
+]
+```
+
+Lista vazia (`[]`) quando não há perfis fiscais cadastrados.
+
+### `GET /api/v1/fiscal-profiles/{id}`
+
+Busca um perfil fiscal pelo `id` técnico (UUID). (FARELO-150)
+
+**Response — `200 OK`**
+
+Mesmo formato de item de `GET /api/v1/fiscal-profiles`.
+
+**Erros**
+
+- `404 Not Found` — `{id}` não corresponde a nenhum perfil fiscal
+  existente, `code: "FISCAL_PROFILE_NOT_FOUND"`.
+
+### `PUT /api/v1/fiscal-profiles/{id}`
+
+Atualiza (substituição completa) um perfil fiscal existente. (FARELO-150)
+
+Fecha o CRUD básico de `FiscalProfile` — sem `DELETE` por enquanto (fora
+do roadmap atual). Mesmo raciocínio de `PUT /api/v1/ingredients/{id}`: usa
+um DTO próprio (`FiscalProfileUpdateRequest`) em vez de reaproveitar o
+request de criação, para poder exigir `active` explicitamente sem
+torná-lo opcional na criação.
+
+**Request body**
+
+```json
+{
+  "name": "Isento (revisado)",
+  "description": "Atualizado após revisão contábil",
+  "active": true
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
+| `description` | string | não | **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* uma descrição configurada anteriormente de volta para "sem descrição" — mesmo comportamento de `PUT /api/v1/ingredients/{id}` com `minimumStock` |
+| `active` | boolean | sim | |
+
+**Response — `200 OK`**
+
+`FiscalProfileResponse` com os campos atualizados (mesmo formato de
+`POST /api/v1/fiscal-profiles`).
+
+**Erros**
+
+- `400 Bad Request` — mesmas validações do `POST`, mais `active` ausente,
+  `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `{id}` do perfil fiscal não existe,
+  `code: "FISCAL_PROFILE_NOT_FOUND"`.
+
+Nenhum endpoint de `fiscal-profiles` tem a marca "Requer" — sem
+`@RequireRole` ainda, mesmo raciocínio de `IngredientController` (ver
+seção "Autenticação/RBAC" acima e `docs/domain-model.md`, seção `fiscal`,
+para o raciocínio completo).
+
 _(demais endpoints a preencher conforme implementados)_

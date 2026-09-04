@@ -7,6 +7,7 @@ import com.farelo.api.command.CommandCannotAcceptOrdersException;
 import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
+import com.farelo.api.fiscal.FiscalProfileNotFoundException;
 import com.farelo.api.inventory.IngredientNotFoundException;
 import com.farelo.api.inventory.RecipeAlreadyExistsException;
 import com.farelo.api.inventory.RecipeItemAlreadyExistsException;
@@ -157,6 +158,15 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ErrorResponse handleIngredientNotFound(IngredientNotFoundException ex) {
         return new ErrorResponse("INGREDIENT_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // FARELO-150: id given to GET/PUT /api/v1/fiscal-profiles/{id} doesn't
+    // exist — same "not found" shape as every other *NotFoundException
+    // handler in this class.
+    @ExceptionHandler(FiscalProfileNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleFiscalProfileNotFound(FiscalProfileNotFoundException ex) {
+        return new ErrorResponse("FISCAL_PROFILE_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     @ExceptionHandler(RecipeNotFoundException.class)
