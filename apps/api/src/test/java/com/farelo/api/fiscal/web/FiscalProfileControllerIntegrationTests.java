@@ -187,6 +187,74 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.correlationId").exists());
     }
 
+    // FARELO-153.
+    @Test
+    void createsFiscalProfileWithValidCfop() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Tributado padrão", "cfop": "5102"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.cfop").value("5102"))
+                .andReturn();
+
+        FiscalProfileResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), FiscalProfileResponse.class);
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCfop()).isEqualTo("5102");
+    }
+
+    // FARELO-153.
+    @Test
+    void createsFiscalProfileWithoutCfop() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.cfop").value(nullValue()))
+                .andReturn();
+
+        FiscalProfileResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), FiscalProfileResponse.class);
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCfop()).isNull();
+    }
+
+    // FARELO-153.
+    @Test
+    void rejectsCfopWithWrongDigitCountWithStandardErrorFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento", "cfop": "510"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // FARELO-153.
+    @Test
+    void rejectsNonNumericCfopWithStandardErrorFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento", "cfop": "510A"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
     @Test
     void rejectsBlankNameWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
@@ -371,6 +439,75 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                   "name": "Isento",
                   "active": true,
                   "ncm": "abc"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    // FARELO-153.
+    @Test
+    void updatesFiscalProfileSettingCfop() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true,
+                  "cfop": "6102"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cfop").value("6102"));
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(fiscalProfile.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCfop()).isEqualTo("6102");
+    }
+
+    // FARELO-153.
+    @Test
+    void updateWithoutCfopClearsPreviouslySetCfop() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+        fiscalProfile.setCfop("5102");
+        fiscalProfileRepository.save(fiscalProfile);
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cfop").value(nullValue()));
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(fiscalProfile.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCfop()).isNull();
+    }
+
+    // FARELO-153.
+    @Test
+    void rejectsInvalidCfopOnUpdateWithStandardErrorFormat() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true,
+                  "cfop": "abc"
                 }
                 """;
 

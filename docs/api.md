@@ -2226,11 +2226,11 @@ Cria um perfil fiscal. (FARELO-150)
 
 Primeiro endpoint do domínio `fiscal`. Sem `active` no corpo — um perfil
 novo sempre começa `true`, mesmo padrão de `Category`/`Ingredient`. Desde o
-FARELO-152, aceita `ncm`; CFOP/CST/CSOSN (ou qualquer outro dado fiscal
-previsto na seção 24 do prompt mestre) continuam deliberadamente fora de
-escopo — ver `docs/domain-model.md`, seção `fiscal`, para o raciocínio
-completo (esses campos são FARELO-153/154, tickets futuros e já
-numerados).
+FARELO-152, aceita `ncm`; desde o FARELO-153, aceita `cfop` também.
+CST/CSOSN (ou qualquer outro dado fiscal previsto na seção 24 do prompt
+mestre) continua deliberadamente fora de escopo — ver
+`docs/domain-model.md`, seção `fiscal`, para o raciocínio completo (esse
+campo é FARELO-154, ticket futuro e já numerado).
 
 **Request body**
 
@@ -2238,7 +2238,8 @@ numerados).
 {
   "name": "Isento",
   "description": "Produtos sem incidência de ICMS",
-  "ncm": "12345678"
+  "ncm": "12345678",
+  "cfop": "5102"
 }
 ```
 
@@ -2247,6 +2248,7 @@ numerados).
 | `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
 | `description` | string | não | Texto livre; omitido/`null` = "sem descrição" |
 | `ncm` | string | não | (FARELO-152) NCM — sempre exatamente 8 dígitos numéricos (`@Pattern`, `^[0-9]{8}$`); omitido/`null` = "sem NCM configurado" |
+| `cfop` | string | não | (FARELO-153) CFOP — sempre exatamente 4 dígitos numéricos (`@Pattern`, `^[0-9]{4}$`); omitido/`null` = "sem CFOP configurado" |
 
 **Response — `201 Created`**
 
@@ -2258,6 +2260,7 @@ Header `Location: /api/v1/fiscal-profiles/{id}`.
   "name": "Isento",
   "description": "Produtos sem incidência de ICMS",
   "ncm": "12345678",
+  "cfop": "5102",
   "active": true,
   "createdAt": "2026-09-02T13:00:00Z",
   "updatedAt": "2026-09-02T13:00:00Z"
@@ -2266,9 +2269,10 @@ Header `Location: /api/v1/fiscal-profiles/{id}`.
 
 **Erros**
 
-- `400 Bad Request` — `name` ausente/em branco, ou `ncm` enviado num
-  formato inválido (não são exatamente 8 dígitos numéricos), no formato de
-  erro padrão, com `code: "VALIDATION_ERROR"`.
+- `400 Bad Request` — `name` ausente/em branco, ou `ncm`/`cfop` enviados num
+  formato inválido (não são exatamente 8/4 dígitos numéricos,
+  respectivamente), no formato de erro padrão, com
+  `code: "VALIDATION_ERROR"`.
 
 ### `GET /api/v1/fiscal-profiles`
 
@@ -2288,6 +2292,7 @@ ticket futuro se o Admin precisar).
     "name": "Isento",
     "description": "Produtos sem incidência de ICMS",
     "ncm": "12345678",
+    "cfop": "5102",
     "active": true,
     "createdAt": "2026-09-02T13:00:00Z",
     "updatedAt": "2026-09-02T13:00:00Z"
@@ -2327,7 +2332,8 @@ torná-lo opcional na criação.
   "name": "Isento (revisado)",
   "description": "Atualizado após revisão contábil",
   "active": true,
-  "ncm": "12345678"
+  "ncm": "12345678",
+  "cfop": "5102"
 }
 ```
 
@@ -2337,6 +2343,7 @@ torná-lo opcional na criação.
 | `description` | string | não | **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* uma descrição configurada anteriormente de volta para "sem descrição" — mesmo comportamento de `PUT /api/v1/ingredients/{id}` com `minimumStock` |
 | `active` | boolean | sim | |
 | `ncm` | string | não | (FARELO-152) Sempre exatamente 8 dígitos numéricos (`@Pattern`, `^[0-9]{8}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um NCM configurado anteriormente de volta para "sem NCM configurado", mesmo comportamento de `description` acima |
+| `cfop` | string | não | (FARELO-153) Sempre exatamente 4 dígitos numéricos (`@Pattern`, `^[0-9]{4}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um CFOP configurado anteriormente de volta para "sem CFOP configurado", mesmo comportamento de `ncm`/`description` acima |
 
 **Response — `200 OK`**
 

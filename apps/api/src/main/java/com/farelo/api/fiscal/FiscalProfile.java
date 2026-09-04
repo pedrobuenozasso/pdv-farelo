@@ -51,6 +51,16 @@ import java.util.UUID;
  * this ticket, same discipline as above (FARELO-153/154 still not
  * implemented).
  *
+ * <p><b>FARELO-153 ("Adicionar CFOP") update — {@link #cfop} added.</b> The
+ * second of the three fiscal codes named above, same "one field per ticket"
+ * shape as FARELO-152. CFOP (Código Fiscal de Operações e Prestações) is a
+ * real, standardized Brazilian tax code classifying the nature of a fiscal
+ * operation (e.g. sale within-state vs. out-of-state), always exactly 4
+ * numeric digits — that shape is fixed by Brazilian tax law, not an
+ * app-specific format choice. Nullable (see {@link #cfop}'s own javadoc) —
+ * CST/CSOSN remains out of scope for this ticket, same discipline as above
+ * (FARELO-154 still not implemented).
+ *
  * <p>What a {@code FiscalProfile} minimally needs to exist as a real,
  * useful row <i>before</i> any fiscal code is attached to it is just a way
  * for a business owner to name and describe a fiscal category they intend
@@ -105,6 +115,25 @@ public class FiscalProfile {
      */
     @Column(name = "ncm", length = 8)
     private String ncm;
+
+    /**
+     * CFOP (Código Fiscal de Operações e Prestações), FARELO-153 — a real,
+     * standardized Brazilian tax code classifying the nature of a fiscal
+     * operation (e.g. sale within-state vs. out-of-state), always exactly 4
+     * numeric digits. Nullable: existing {@code FiscalProfile} rows predate
+     * this ticket and have no CFOP, and there is no meaningful "default
+     * CFOP" to backfill (unlike {@link #active}, whose default is genuinely
+     * universal) — same "null means not configured yet, a distinct,
+     * permanent state" reasoning as {@link #ncm} (FARELO-152). Format
+     * ({@code ^[0-9]{4}$}) is validated at the request DTO boundary
+     * ({@code @Pattern} on {@code FiscalProfileRequest}/{@code
+     * FiscalProfileUpdateRequest}) and backstopped by a DB {@code CHECK}
+     * constraint (see {@code V32__add_fiscal_profile_cfop_column.sql}) for
+     * any write path that bypasses the DTO — same defense-in-depth pattern
+     * as {@link #ncm}'s {@code CHECK (ncm IS NULL OR ncm ~ '^[0-9]{8}$')}.
+     */
+    @Column(name = "cfop", length = 4)
+    private String cfop;
 
     @Column(name = "active", nullable = false)
     private boolean active = true;
@@ -161,6 +190,14 @@ public class FiscalProfile {
 
     public void setNcm(String ncm) {
         this.ncm = ncm;
+    }
+
+    public String getCfop() {
+        return cfop;
+    }
+
+    public void setCfop(String cfop) {
+        this.cfop = cfop;
     }
 
     public boolean isActive() {
