@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.math.BigDecimal;
 import java.net.URI;
 import java.util.List;
 
@@ -74,6 +75,11 @@ import java.util.List;
  * justifies protecting {@code record} (same split {@code
  * InventoryMovementController} already has between its protected {@code
  * POST}s and unprotected {@code GET}s).
+ *
+ * <p><b>{@link #totalPaid} (FARELO-142) also stays unprotected</b>, same
+ * reasoning as {@link #listByCommand}: it's a read over the same ledger,
+ * exposing a derived aggregate rather than raw rows — no more sensitive
+ * than the list it's computed from.
  */
 @RestController
 @RequestMapping("/api/v1/commands")
@@ -116,6 +122,21 @@ public class PaymentController {
                 .toUri();
 
         return ResponseEntity.created(location).body(PaymentResponse.from(payment));
+    }
+
+    // FARELO-142 ("Permitir múltiplos pagamentos por comanda"). A separate
+    // sibling endpoint under the same .../payments collection, rather than
+    // reshaping listByCommand's existing response — the least disruptive
+    // way to expose "total paid" without breaking any existing consumer of
+    // the plain array GET .../payments already returns. Same "dedicated
+    // endpoint for a derived aggregate, separate from the ledger listing"
+    // shape as GET /api/v1/ingredients/{ingredientId}/balance (FARELO-095)
+    // — see PaymentService#getTotalPaid's javadoc for the full reasoning,
+    // including why this does not also expose "total owed"/"fully paid".
+    @GetMapping("/{number}/payments/total")
+    public PaymentTotalResponse totalPaid(@PathVariable int number) {
+        BigDecimal totalPaid = paymentService.getTotalPaid(number);
+        return PaymentTotalResponse.of(number, totalPaid);
     }
 
 }

@@ -1978,9 +1978,7 @@ Sempre `200 OK` — sem parâmetro de path a validar.
 Lista todos os pagamentos registrados contra uma comanda, mais antigo
 primeiro (`createdAt` asc). (FARELO-140)
 
-Somente leitura. **Nenhum produtor real existe ainda** — nada neste ticket
-cria um `Payment` de verdade; registrar pagamento manual (FARELO-141) é um
-ticket futuro e distinto. Sem marca "Requer" — este endpoint não exige
+Somente leitura. Sem marca "Requer" — este endpoint não exige
 nenhuma autenticação, mesmo padrão não-protegido de todo endpoint de
 primeiro corte deste projeto até aqui (ver seção "Autenticação/RBAC" acima
 e `docs/domain-model.md`, seção `payment`, para o raciocínio completo dessa
@@ -1990,8 +1988,9 @@ decisão e da colocação do controller no próprio pacote `payment`, não em
 Sem paginação — mesma lógica YAGNI já aplicada em
 `GET /api/v1/commands/{number}/orders`/`GET
 /api/v1/ingredients/{ingredientId}/movements`: o número de pagamentos por
-comanda é naturalmente pequeno (FARELO-142 permite múltiplos, mas não um
-fluxo ilimitado deles).
+comanda é naturalmente pequeno (FARELO-142 permite múltiplos — e já
+permitia mecanicamente desde FARELO-140/141 — mas não um fluxo ilimitado
+deles).
 
 **Response — `200 OK`**
 
@@ -2036,8 +2035,11 @@ documento para o formato do header e das respostas `401`/`403`, e a
 subseção FARELO-141 de `docs/domain-model.md` para o raciocínio completo.
 
 Não soma pagamentos já registrados contra a comanda nem valida um total
-pago — isso é FARELO-142/FARELO-143, tickets futuros e distintos. Este
-endpoint só registra o pagamento passado nesta chamada, um por requisição.
+pago antes de fechar — a soma agora existe (`GET
+/api/v1/commands/{number}/payments/total`, FARELO-142, ver abaixo), mas
+validar o total pago antes de fechar continua sendo FARELO-143, um ticket
+futuro e distinto. Este endpoint só registra o pagamento passado nesta
+chamada, um por requisição.
 
 **Request body**
 
@@ -2098,6 +2100,45 @@ REST `coleção/{id}`.
 - `400 Bad Request` — `amount` ausente/zero/negativo, ou `method`
   ausente/inválido, `code: "VALIDATION_ERROR"` (mesmo formato padrão de
   validação usado em todo o resto da API).
+
+### `GET /api/v1/commands/{number}/payments/total`
+
+Retorna o total já pago contra uma comanda — a soma de `amount` de todo
+`Payment` registrado para ela. (FARELO-142, "Permitir múltiplos pagamentos
+por comanda")
+
+Endpoint irmão dedicado, separado da listagem (`GET
+/api/v1/commands/{number}/payments` acima) em vez de reformatar a resposta
+dela — estritamente aditivo, não quebra nenhum consumidor existente do
+array puro que a listagem já retorna. Mesmo formato que `GET
+/api/v1/ingredients/{ingredientId}/balance` (FARELO-095) já usa para expor
+um agregado derivado separado da listagem do ledger que ele soma. Ver
+`docs/domain-model.md`, subseção FARELO-142 de `payment`, para o
+raciocínio completo, incluindo por que este endpoint não expõe "total
+devido"/"totalmente pago" (isso é FARELO-143).
+
+Somente leitura, sem marca "Requer" — mesmo padrão não-protegido de
+`GET .../payments` acima (leitura sobre o mesmo ledger, sem a natureza de
+manuseio de caixa que justifica proteger `POST .../payments`).
+
+**Response — `200 OK`**
+
+```json
+{
+  "commandNumber": 1,
+  "totalPaid": 33.50
+}
+```
+
+| Campo | Observações |
+|---|---|
+| `commandNumber` | Número de negócio da comanda — mesma convenção de `PaymentResponse.commandNumber`. |
+| `totalPaid` | `BigDecimal`, soma de todo `Payment.amount` registrado contra a comanda. `0` (nunca `null`) quando a comanda ainda não tem nenhum pagamento. |
+
+**Erros**
+
+- `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
+  `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
 
 ### `POST /api/v1/fiscal-profiles`
 
