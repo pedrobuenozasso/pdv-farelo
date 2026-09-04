@@ -2299,4 +2299,94 @@ Nenhum endpoint de `fiscal-profiles` tem a marca "Requer" — sem
 seção "Autenticação/RBAC" acima e `docs/domain-model.md`, seção `fiscal`,
 para o raciocínio completo).
 
+### `GET /api/v1/company-fiscal-configuration`
+
+Retorna a identidade/configuração fiscal da própria empresa (a que um dia
+emitirá NFC-e) — **não** confundir com `fiscal-profiles`, que classifica
+produtos. (FARELO-155)
+
+Caminho **singular, sem `{id}`** — só existe uma configuração. Ver
+`docs/domain-model.md`, seção `fiscal`, subseção FARELO-155, para o
+raciocínio completo por trás da forma do endpoint (`GET`/`PUT` em vez do
+CRUD genérico de `fiscal-profiles`).
+
+**Response — `200 OK`**
+
+```json
+{
+  "id": "e5a3f4b2-8e1c-4c3d-8a4b-2b3c4d5e6f81",
+  "cnpj": "12.345.678/0001-90",
+  "legalName": "Farelo Comércio de Alimentos LTDA",
+  "tradeName": "Farelo Café",
+  "stateRegistration": "123.456.789.112",
+  "address": "Rua das Flores, 123 - São Paulo/SP",
+  "createdAt": "2026-09-02T13:00:00Z",
+  "updatedAt": "2026-09-02T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `404 Not Found` — nenhum `PUT` foi feito ainda (configuração ainda não
+  existe), `code: "COMPANY_FISCAL_CONFIGURATION_NOT_FOUND"`. Nenhuma
+  migration semeia uma linha padrão — este código não conhece o CNPJ/razão
+  social reais de nenhuma empresa para inventar um valor inicial.
+
+### `PUT /api/v1/company-fiscal-configuration`
+
+Define (primeira chamada) ou substitui por completo (chamadas seguintes) a
+configuração fiscal da empresa. (FARELO-155)
+
+**Sem `POST`** — este é o único endpoint de escrita do domínio.
+`PUT` é *create-or-replace*: a primeira chamada cria a única linha, toda
+chamada seguinte substitui essa mesma linha (localizada internamente por
+`findFirstByOrderByCreatedAtAsc()`, nunca por um `{id}` no path) — nunca
+uma segunda linha. Ver `docs/domain-model.md`, seção `fiscal`, subseção
+FARELO-155, para o raciocínio completo (inclusive por que o invariante
+"no máximo uma linha" é mantido pela camada de aplicação, não por uma
+constraint de banco).
+
+**Request body**
+
+```json
+{
+  "cnpj": "12.345.678/0001-90",
+  "legalName": "Farelo Comércio de Alimentos LTDA",
+  "tradeName": "Farelo Café",
+  "stateRegistration": "123.456.789.112",
+  "address": "Rua das Flores, 123 - São Paulo/SP"
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `cnpj` | string | sim | Não pode ser vazio/branco (`@NotBlank`). Sem validação de formato/dígito verificador — prompt mestre não define uma regra, ver javadoc de `CompanyFiscalConfiguration` |
+| `legalName` | string | sim | Não pode ser vazio/branco (`@NotBlank`) — razão social |
+| `tradeName` | string | não | Nome fantasia; omitido/`null` = "sem nome fantasia" |
+| `stateRegistration` | string | não | Inscrição estadual; omitido/`null` = "sem inscrição" (empresa isenta) |
+| `address` | string | não | Texto livre (não estruturado); omitido/`null` = "sem endereço" |
+
+**Substituição completa**: omitir `tradeName`/`stateRegistration`/`address`
+(ou enviar `null`) *limpa* um valor configurado anteriormente — mesmo
+comportamento de `PUT /api/v1/fiscal-profiles/{id}` com `description`.
+
+**Response — `200 OK`**
+
+`CompanyFiscalConfigurationResponse` com os campos atualizados (mesmo
+formato de `GET /api/v1/company-fiscal-configuration`). Sempre `200`,
+mesmo na primeira chamada (que efetivamente cria a linha) — não há
+distinção de status entre "criou" e "substituiu", já que do ponto de vista
+do cliente a operação é sempre "definir a configuração atual".
+
+**Erros**
+
+- `400 Bad Request` — `cnpj`/`legalName` ausente/em branco, no formato de
+  erro padrão, `code: "VALIDATION_ERROR"`.
+
+Nenhum endpoint de `company-fiscal-configuration` tem a marca "Requer" —
+sem `@RequireRole` ainda, mesmo raciocínio de `fiscal-profiles`/
+`IngredientController` (ver seção "Autenticação/RBAC" acima e
+`docs/domain-model.md`, seção `fiscal`, subseção FARELO-155, para o
+raciocínio completo).
+
 _(demais endpoints a preencher conforme implementados)_

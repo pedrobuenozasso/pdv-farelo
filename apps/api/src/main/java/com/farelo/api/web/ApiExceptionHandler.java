@@ -8,6 +8,7 @@ import com.farelo.api.command.CommandCannotAcceptPaymentsException;
 import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
+import com.farelo.api.fiscal.CompanyFiscalConfigurationNotFoundException;
 import com.farelo.api.fiscal.FiscalProfileNotFoundException;
 import com.farelo.api.inventory.IngredientNotFoundException;
 import com.farelo.api.inventory.RecipeAlreadyExistsException;
@@ -176,6 +177,16 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ErrorResponse handleFiscalProfileNotFound(FiscalProfileNotFoundException ex) {
         return new ErrorResponse("FISCAL_PROFILE_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // FARELO-155: GET /api/v1/company-fiscal-configuration before PUT has
+    // ever been called — same "not found" shape as every other
+    // *NotFoundException handler above, but with no id (there is nothing
+    // to identify, only "configured" vs. "not configured yet").
+    @ExceptionHandler(CompanyFiscalConfigurationNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleCompanyFiscalConfigurationNotFound(CompanyFiscalConfigurationNotFoundException ex) {
+        return new ErrorResponse("COMPANY_FISCAL_CONFIGURATION_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     @ExceptionHandler(RecipeNotFoundException.class)
