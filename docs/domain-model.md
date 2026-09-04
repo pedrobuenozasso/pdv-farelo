@@ -4588,6 +4588,188 @@ criar uma segunda, `count() == 1`). Diferente de
 de teste faz só um `deleteAll()` direto, sem a landmine de limpeza
 cross-tabela documentada para `fiscal_profile`/`product`.
 
+### FARELO-156 — Criar `FiscalDocument`
+
+Terceira entidade do domínio `fiscal` — **distinta de `FiscalProfile`
+(classificação tributária de produto) e de `CompanyFiscalConfiguration`
+(identidade fiscal da empresa)**. `FiscalDocument` é um registro durável
+representando um documento fiscal (uma NFC-e, quando o Epic 12
+eventualmente emitir uma de verdade) associado a uma comanda/venda. Quarta
+peça do Epic 11 (Fiscal Base — prompt mestre seção 47: "NÃO EMITIR NFC-e
+ainda"), depois de FARELO-150/151/155. Segue o mesmo padrão "entidade
+primeiro, produtores/emissão de verdade depois" já usado por `PrintJob`
+(FARELO-071), `Notification` (FARELO-110), `InventoryMovement`
+(FARELO-093), `AuditLog` (FARELO-125), `Payment` (FARELO-140) e
+`FiscalProfile` (FARELO-150) nos seus próprios primeiros tickets.
+
+**Fronteira de escopo crítica — nenhuma lógica de emissão.** O Epic 12
+("NFC-e", FARELO-170-178) é o epic que de fato emite documentos reais
+(geração de XML, assinatura digital, transmissão SEFAZ, tratamento de
+autorização/rejeição) e é explicitamente gated: "Somente iniciar após
+validação contábil". Este ticket, portanto, não inicia o Epic 12 — não há
+cliente SEFAZ, geração de XML/assinatura, nem máquina de estados
+conduzindo o documento até "transmitido". `FiscalDocument` é modelado
+apenas como a *forma* que um futuro ticket FARELO-170+ vai eventualmente
+popular e conduzir pelo próprio ciclo de vida — mesma relação que
+`PrintJob` (FARELO-071) teve com `PENDING`/`PRINTED`/`FAILED` antes de
+FARELO-072-079 construírem qualquer lógica real de impressão/retry.
+
+**Relação com `Command`, não `Order` — `@ManyToOne` unidirecional,
+espelhando `Payment.command`.** Prompt mestre seção 25 modela o fluxo da
+NFC-e como `Close Command → Payment → Fiscal Service → NFC-e → SEFAZ →
+AUTHORIZED` — o gatilho para emitir um documento fiscal é o fechamento da
+comanda (liquidar a conta inteira), exatamente a mesma unidade faturável
+que `Payment` (FARELO-140) já havia decidido usar em vez de `Order`, e
+pelo mesmo motivo: o exemplo de transação da seção 30 é sobre *criar um
+pedido*, mas "fechar a conta"/emitir documento fiscal é um evento por
+comanda, não por pedido isolado. Uma comanda pode ter vários pedidos
+(várias idas ao balcão), mas é faturada, paga e — eventualmente —
+documentada fiscalmente como uma unidade só. `command` é, portanto, um
+`@ManyToOne` obrigatório, a mesma forma de `Payment.command`/
+`Order.command`. Sem `@OneToMany` de volta em `Command` — mesmo
+raciocínio que o javadoc de `Payment` já documenta por completo: nada
+aqui precisa de uma superfície de gerenciamento de coleção (regras de
+cascade, orphan removal, armadilhas de coleção lazy); uma futura consulta
+"esta comanda tem documento fiscal?" lê através de
+`FiscalDocumentRepository`, com chave em `command`.
+
+**`status` — vocabulário literal do prompt mestre, não inventado.**
+Diferente de `FiscalProfile.name`/`description` (inferidos) e mais
+parecido com `PaymentMethod` (lista literal e completa), a seção 25 do
+prompt mestre ("NFC-e") nomeia os seis valores explicitamente: "Estados:
+`PENDING`, `PROCESSING`, `AUTHORIZED`, `REJECTED`, `CANCELLED`,
+`CONTINGENCY`." Usados verbatim, como enum fechado
+(`FiscalDocumentStatus`) — mesma situação em que `InventoryMovementType`/
+`PaymentMethod` já estavam quando viraram enums fechados: o roadmap já dá
+o vocabulário completo para esta entidade específica, então não há nada a
+"adivinhar". Confirmado por busca textual: nenhum outro termo de status
+fiscal (ex: "denegado", "inutilizado") aparece em
+`docs/PROMPT_MESTRE.md`. Default `PENDING` ("ainda não emitido") — o único
+estado que faz sentido antes de qualquer lógica real de emissão existir.
+
+**Deliberadamente SEM lógica de transição — `FARELO-157` é ticket
+separado.** O roadmap nomeia, logo depois deste ticket na mesma seção 47
+(Epic 11), **FARELO-157** ("Criar estados fiscais") — um ticket distinto,
+presumivelmente sobre a máquina de estados/regras de transição entre os
+seis valores acima. Essa numeração separada é ela mesma o sinal (mesma
+disciplina "não antecipar campo/lógica de ticket futuro" já aplicada
+repetidamente neste código — ver a subseção FARELO-150 acima para o
+exemplo mais recente, NCM/CFOP/CST/CSOSN adiados para FARELO-152/153/154)
+de que este ticket não deveria construir nenhuma regra de
+transição/validação de estado. Por isso `FiscalDocument.setStatus(...)` é
+um mutador simples e sem validação — sem métodos de domínio nomeados como
+`markAuthorized()`/`markRejected()` (contraste deliberado com
+`PrintJob.markPrinted()`/`markFailed()`/`retry()`, que já existem porque
+aquelas transições específicas — imprimir/falhar/retentar — são exatamente o
+que a seção 10 do prompt mestre descreve como o fluxo completo de
+`PrintJob`; a seção 25 não descreve as regras de transição entre os seis
+estados fiscais, apenas os lista). Mesmo formato "campo simples, service
+decide as regras depois" que `Command.setStatus(CommandStatus)` já usa.
+
+**Campos identificadores — apenas placeholders nuláveis, nenhuma lógica
+associada.** A seção 24 ("Dados fiscais previstos") e a seção 25 ("NFC-e")
+do prompt mestre, juntas, antecipam os seguintes dados que um documento
+fiscal real eventualmente carrega: número do documento/série, chave de
+acesso (44 dígitos), número de protocolo, conteúdo XML e data de
+autorização. Todos modelados aqui como colunas nuláveis
+(`documentNumber`/`series`/`accessKey`/`protocolNumber`/`xmlContent`/
+`authorizedAt`) — nenhuma delas é populada por este ticket, já que nada
+neste código ainda computa, valida ou transmite qualquer uma delas (isso é
+Epic 12). `accessKey` é uma `String` simples, sem validação de formato de
+44 dígitos — mesma disciplina de contenção já aplicada a
+`CompanyFiscalConfiguration.cnpj` (sem dígito verificador, já que o
+prompt mestre não define essa regra e inventá-la seria além do texto).
+`xmlContent` é `TEXT`, mesma convenção de blob de texto não estruturado de
+`Product.description`/`CompanyFiscalConfiguration.address`.
+
+**Deliberadamente mutável, diferente de `Payment`.** `Payment` é um ledger
+append-only porque um pagamento *registrado* já é um fato completo no
+instante em que é escrito (ver javadoc de `Payment`). Um `FiscalDocument`
+é o oposto: nasce como um placeholder (`PENDING`, todo campo
+identificador nulo) que um futuro processo de emissão (Epic 12) vai
+preencher e conduzir através de `status` ao longo do tempo. Por isso,
+diferente de `Payment`, as colunas aqui não são `updatable = false` e esta
+classe carrega `updatedAt` (mesmo formato `createdAt`/`updatedAt` +
+`@PreUpdate` de `PrintJob`, outra entidade com `status` e ciclo de vida
+futuro genuíno).
+
+Id gerado via `@UuidGenerator` do Hibernate, style `RANDOM` — mesma
+estratégia de todo o resto deste código. Tabela criada pela migration
+`V30__create_fiscal_document_table.sql`.
+
+`FiscalDocumentRepository` (Spring Data JPA) adiciona um único método de
+consulta próprio, `findByCommandOrderByCreatedAtAsc` — com `JOIN FETCH
+command`, mesmo raciocínio de `PaymentRepository#findByCommandOrderByCreatedAtAsc`/
+`OrderRepository#findByCommandOrderByCreatedAtAsc` (a lição do FARELO-055):
+`open-in-view` é `false` (`application.yml`), e `FiscalDocumentResponse#from`
+lê `fiscalDocument.getCommand().getNumber()` no controller, depois que a
+transação (curta) do método do repository já fechou.
+
+`FiscalDocumentService`: só um método, `listByCommand(int)` — resolve o
+`number` de negócio da comanda via `CommandService#findByNumber` (404
+`COMMAND_NOT_FOUND`, reaproveitando `CommandNotFoundException` já
+existente, mesma exceção que `PaymentService#listByCommand`/
+`OrderService#listByCommand` já usam) e então lista os documentos, mais
+antigo primeiro. **Sem método `create`**: nada neste ticket produz um
+`FiscalDocument` de verdade — isso é Epic 12, explicitamente fora de
+escopo.
+
+**Decisão de forma do endpoint — só leitura, mesmo precedente de
+`InventoryMovement`/`Notification`/`AuditLog`/`Payment`.** `GET
+/api/v1/commands/{number}/fiscal-documents` — somente leitura, o único
+endpoint que este ticket adiciona. `FiscalDocument` é um fato gerado pelo
+sistema (uma vez que algo eventualmente o produza — Epic 12), não algo que
+um Admin configura, então não há superfície `POST`/`PUT` aqui (contraste
+com `FiscalProfile`/`CompanyFiscalConfiguration`, ambos valores de lookup
+configurados por Admin). Implementado em `FiscalDocumentController`,
+dentro do próprio pacote `fiscal` (`com.farelo.api.fiscal.web`), não em
+`com.farelo.api.command.web.CommandController` — mesmo raciocínio de
+direção de dependência que o javadoc de `PaymentController` já documenta
+para a escolha análoga: `fiscal` já depende de `command`
+(`FiscalDocument.command` é um `@ManyToOne` obrigatório, e
+`FiscalDocumentService` chama `CommandService` para resolver o `number`),
+então manter o controller aqui também mantém essa dependência numa
+direção só.
+
+**Decisão de RBAC — deliberadamente SEM `@RequireRole`**: mesmo precedente
+de "deixar o primeiro endpoint de leitura de um domínio novo desprotegido"
+já seguido por `Notification` (FARELO-110), `AuditLog` (FARELO-125) e o
+próprio `Payment#listByCommand` (FARELO-140) nos seus primeiros tickets —
+não existe ainda um ticket dedicado de aplicação de RBAC para `fiscal`.
+
+**Testes**: `FiscalDocumentRepositoryIntegrationTests` (mapeamento JPA
+contra Postgres real, mesmo formato de
+`PaymentRepositoryIntegrationTests` — cobrindo round-trip contra uma
+`Command` real, os seis valores de `FiscalDocumentStatus`, persistência
+dos campos mutáveis depois de setados, e `findByCommandOrderByCreatedAtAsc`
+ordenado e escopado à comanda certa) e `FiscalDocumentControllerIntegrationTests`
+(HTTP real via `MockMvc`, cobrindo lista vazia, `404 COMMAND_NOT_FOUND`
+para número inexistente, e listagem ordenada/escopada à comanda certa).
+Usa os números de comanda seedados 21, 23-25
+(`FiscalDocumentRepositoryIntegrationTests`) e 35-37
+(`FiscalDocumentControllerIntegrationTests`) — livres per o registro
+mantido ao longo desta suíte (ver javadoc de
+`PaymentRepositoryIntegrationTests`/`PaymentControllerIntegrationTests`
+para o registro mais completo até FARELO-143).
+
+**Landmine de isolamento de teste encontrada durante a implementação**
+(mesma família já documentada para outros domínios neste arquivo): a
+primeira versão de `FiscalDocumentRepositoryIntegrationTests` reaproveitava
+`SEEDED_COMMAND_NUMBER` (21) tanto para os testes de round-trip/mutação
+quanto para `findByCommandOrderByCreatedAtAscReturnsOldestFirstScopedToCommand`
+— como JUnit não garante ordem entre métodos de teste na mesma classe, os
+outros métodos podiam já ter gravado documentos fiscais na comanda 21 antes
+desse teste rodar, quebrando sua asserção `hasSize(2)` (falha real
+observada: `Expected size: 2 but was: 3`). Corrigido dedicando um par de
+números só seus, nunca escritos por nenhum outro método desta classe —
+`ORDER_COMMAND_NUMBER` (24) / `ORDER_OTHER_COMMAND_NUMBER` (25) — enquanto
+os três métodos que só verificam linhas por `id` próprio (não por contagem
+exata) continuam seguros compartilhando 21. Nenhuma FK cross-tabela
+nova é introduzida por este ticket além de `fiscal_document.command_id`
+(que já aponta para uma tabela, `command`, sem `deleteAll()` cego em
+nenhum teste deste projeto), então nenhuma landmine de limpeza nova surge
+aqui.
+
 ## Outbox (infraestrutura cross-cutting)
 
 Pacote: `com.farelo.api.outbox`. **Não é um domínio de negócio** —

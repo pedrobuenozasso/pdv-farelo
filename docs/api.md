@@ -2437,4 +2437,62 @@ sem `@RequireRole` ainda, mesmo raciocínio de `fiscal-profiles`/
 `docs/domain-model.md`, seção `fiscal`, subseção FARELO-155, para o
 raciocínio completo).
 
+### `GET /api/v1/commands/{number}/fiscal-documents`
+
+Lista todos os documentos fiscais registrados contra uma comanda, mais
+antigo primeiro (`createdAt` asc). (FARELO-156, "Criar FiscalDocument")
+
+Somente leitura — nada neste código produz um `FiscalDocument` de verdade
+ainda (isso é Epic 12, "NFC-e", gated em "Somente iniciar após validação
+contábil"). Sem marca "Requer" — este endpoint não exige nenhuma
+autenticação, mesmo padrão não-protegido de todo endpoint de primeiro
+corte deste projeto até aqui (ver seção "Autenticação/RBAC" acima e
+`docs/domain-model.md`, seção `fiscal`, subseção FARELO-156, para o
+raciocínio completo e para a colocação do controller no próprio pacote
+`fiscal`, não em `command`).
+
+Sem paginação — mesma lógica YAGNI já aplicada em
+`GET /api/v1/commands/{number}/payments`/`GET
+/api/v1/commands/{number}/orders`: o número de documentos fiscais por
+comanda é naturalmente pequeno.
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "c4a2d3f1-7d0b-5b3c-af4b-2b3c4d5e6f70",
+    "commandNumber": 1,
+    "status": "PENDING",
+    "documentNumber": null,
+    "series": null,
+    "accessKey": null,
+    "protocolNumber": null,
+    "xmlContent": null,
+    "authorizedAt": null,
+    "createdAt": "2026-09-02T13:00:00Z",
+    "updatedAt": "2026-09-02T13:00:00Z"
+  }
+]
+```
+
+| Campo | Observações |
+|---|---|
+| `commandNumber` | Número de negócio da comanda (não o `id` técnico) — mesma convenção de `PaymentResponse.commandNumber`. |
+| `status` | Um de `PENDING`/`PROCESSING`/`AUTHORIZED`/`REJECTED`/`CANCELLED`/`CONTINGENCY` (vocabulário literal do prompt mestre, seção 25). Sempre `PENDING` hoje — nada ainda move um documento para outro estado (isso é FARELO-157/Epic 12). |
+| `documentNumber`/`series`/`accessKey`/`protocolNumber`/`xmlContent`/`authorizedAt` | Placeholders nuláveis para o que uma NFC-e real eventualmente carrega — sempre `null` hoje, já que nada neste código ainda computa/valida/transmite nenhum desses dados (Epic 12). |
+
+Diferente de `Payment`, este documento **é** mutável ao longo do tempo (um
+futuro processo de emissão vai preencher/avançar `status` e os campos
+identificadores) — por isso carrega `updatedAt`, não só `createdAt`. Ver
+`docs/domain-model.md`, seção `fiscal`, subseção FARELO-156.
+
+Lista vazia (`[]`) quando a comanda existe mas ainda não tem nenhum
+documento fiscal.
+
+**Erros**
+
+- `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
+  `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
+
 _(demais endpoints a preencher conforme implementados)_
