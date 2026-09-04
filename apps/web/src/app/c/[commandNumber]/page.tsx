@@ -1,3 +1,4 @@
+import { LogoBadge } from "@/components/logo-badge";
 import { ApiError } from "@/lib/api/client";
 import { listCategories } from "@/lib/api/categories";
 import {
@@ -26,9 +27,9 @@ const MAX_COMMAND_NUMBER = 100;
 // jargão de staff como "AVAILABLE"/"OPEN" cru.
 const STATUS_LABEL: Record<CommandStatus, string> = {
   AVAILABLE: "Disponível — você já pode fazer seu pedido.",
-  OPEN: "Em atendimento.",
-  PAYMENT_REQUESTED: "Fechando a conta.",
-  CLOSED: "Encerrada.",
+  OPEN: "Em atendimento",
+  PAYMENT_REQUESTED: "Fechando a conta",
+  CLOSED: "Encerrada",
   BLOCKED: "Indisponível no momento — peça ajuda no balcão.",
 };
 
@@ -93,42 +94,77 @@ async function loadMenu(): Promise<MenuLookupResult> {
   }
 }
 
+function BrandHeader({ subtitle }: { subtitle?: string }) {
+  return (
+    <div className="bg-primary text-primary-ink rounded-b-[28px] px-5 pt-6 pb-8">
+      <div className="flex items-center gap-3">
+        <LogoBadge size={52} />
+        <div>
+          <div className="font-serif text-xl font-semibold italic">
+            Farelo de Bolo
+          </div>
+          <div className="text-primary-ink/85 mt-0.5 text-[11px] tracking-wide uppercase">
+            Quintal e Café
+          </div>
+        </div>
+      </div>
+      {subtitle ? (
+        <p className="text-primary-ink/90 mt-3 text-sm">{subtitle}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function CenteredMessage({
+  title,
+  message,
+}: {
+  title: string;
+  message: string;
+}) {
+  return (
+    <main className="bg-bg flex min-h-screen flex-col">
+      <BrandHeader />
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
+        <h1 className="font-serif text-xl font-semibold">{title}</h1>
+        <p className="text-ink-soft max-w-sm text-sm">{message}</p>
+      </div>
+    </main>
+  );
+}
+
 function NotFoundMessage() {
   return (
-    <main className="flex min-h-full flex-1 flex-col items-center justify-center gap-2 bg-zinc-50 p-8 text-center dark:bg-black">
-      <h1 className="text-xl font-semibold text-black dark:text-zinc-50">
-        Comanda não encontrada
-      </h1>
-      <p className="max-w-sm text-sm text-zinc-600 dark:text-zinc-400">
-        Confira o número ou peça ajuda no balcão.
-      </p>
-    </main>
+    <CenteredMessage
+      title="Comanda não encontrada"
+      message="Confira o número ou peça ajuda no balcão."
+    />
   );
 }
 
 function GenericErrorMessage() {
   return (
-    <main className="flex min-h-full flex-1 flex-col items-center justify-center gap-2 bg-zinc-50 p-8 text-center dark:bg-black">
-      <h1 className="text-xl font-semibold text-black dark:text-zinc-50">
-        Não foi possível abrir sua comanda
-      </h1>
-      <p className="max-w-sm text-sm text-zinc-600 dark:text-zinc-400">
-        Tente novamente em instantes ou peça ajuda no balcão.
-      </p>
-    </main>
+    <CenteredMessage
+      title="Não foi possível abrir sua comanda"
+      message="Tente novamente em instantes ou peça ajuda no balcão."
+    />
   );
 }
 
-function CommandHeader({ command }: { command: Command }) {
+function CommandPill({ command }: { command: Command }) {
   return (
-    <div className="flex flex-col items-center gap-1 text-center">
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">Bem-vindo(a)!</p>
-      <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-        Comanda {command.number}
-      </h1>
-      <p className="max-w-sm text-sm text-zinc-600 dark:text-zinc-400">
+    <div className="border-line bg-surface relative mx-5 -mt-5 flex items-center justify-between rounded-2xl border px-4 py-3.5 shadow-[0_10px_24px_oklch(30%_0.05_45_/_12%)]">
+      <div>
+        <div className="text-ink-faint text-[11px] tracking-wide uppercase">
+          Sua comanda
+        </div>
+        <div className="mt-0.5 font-serif text-[17px] font-semibold">
+          Comanda {command.number}
+        </div>
+      </div>
+      <span className="bg-primary-soft text-primary-dark rounded-full px-2.5 py-1 text-[11px] font-bold">
         {STATUS_LABEL[command.status]}
-      </p>
+      </span>
     </div>
   );
 }
@@ -137,15 +173,17 @@ function CommandHeader({ command }: { command: Command }) {
 // (fechando a conta, encerrada, bloqueada) — só a confirmação/status.
 function CommandStatusOnly({ command }: { command: Command }) {
   return (
-    <main className="flex min-h-full flex-1 flex-col items-center justify-center gap-2 bg-zinc-50 p-8 dark:bg-black">
-      <CommandHeader command={command} />
+    <main className="bg-bg flex min-h-screen flex-col">
+      <BrandHeader />
+      <CommandPill command={command} />
+      <div className="flex flex-1 items-center justify-center p-8" />
     </main>
   );
 }
 
 function MenuUnavailableMessage() {
   return (
-    <p className="text-center text-sm text-zinc-500 dark:text-zinc-400">
+    <p className="text-ink-soft px-5 text-center text-sm">
       Não foi possível carregar o cardápio agora. Peça ajuda no balcão.
     </p>
   );
@@ -153,7 +191,7 @@ function MenuUnavailableMessage() {
 
 function EmptyMenuMessage() {
   return (
-    <p className="text-center text-sm text-zinc-500 dark:text-zinc-400">
+    <p className="text-ink-soft px-5 text-center text-sm">
       O cardápio ainda não está disponível. Peça ajuda no balcão.
     </p>
   );
@@ -168,15 +206,18 @@ function CommandWithMenu({
   menu: MenuLookupResult;
 }) {
   return (
-    <main className="mx-auto flex min-h-full w-full max-w-2xl flex-col gap-6 bg-zinc-50 p-6 dark:bg-black">
-      <CommandHeader command={command} />
-      {menu.outcome === "error" ? (
-        <MenuUnavailableMessage />
-      ) : menu.sections.length === 0 ? (
-        <EmptyMenuMessage />
-      ) : (
-        <Menu sections={menu.sections} commandNumber={command.number} />
-      )}
+    <main className="bg-bg mx-auto flex min-h-screen w-full max-w-md flex-col">
+      <BrandHeader subtitle="Preparo em 30–60 minutos" />
+      <CommandPill command={command} />
+      <div className="flex flex-1 flex-col pt-5">
+        {menu.outcome === "error" ? (
+          <MenuUnavailableMessage />
+        ) : menu.sections.length === 0 ? (
+          <EmptyMenuMessage />
+        ) : (
+          <Menu sections={menu.sections} commandNumber={command.number} />
+        )}
+      </div>
     </main>
   );
 }

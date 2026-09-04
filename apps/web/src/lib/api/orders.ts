@@ -13,7 +13,7 @@
 // section and docs/api.md's note on POST /api/v1/orders). Both are
 // optional on the wire and nullable on the response.
 
-import { parseResponse } from "./client";
+import { authHeaders, parseResponse } from "./client";
 
 export type OrderStatus =
   "CREATED" | "CONFIRMED" | "PREPARING" | "READY" | "DELIVERED" | "CANCELLED";
@@ -62,6 +62,7 @@ export async function listCommandOrders(
 ): Promise<Order[]> {
   const response = await fetch(`/api/v1/commands/${commandNumber}/orders`, {
     cache: "no-store",
+    headers: authHeaders(),
   });
   return parseResponse<Order[]>(response);
 }
@@ -72,7 +73,10 @@ export async function listCommandOrders(
 // app/kds/page.tsx with polling), same relative-path/no-store convention
 // as listCommandOrders above.
 export async function listKitchenQueue(): Promise<Order[]> {
-  const response = await fetch("/api/v1/orders", { cache: "no-store" });
+  const response = await fetch("/api/v1/orders", {
+    cache: "no-store",
+    headers: authHeaders(),
+  });
   return parseResponse<Order[]>(response);
 }
 
@@ -84,6 +88,7 @@ export async function listKitchenQueue(): Promise<Order[]> {
 export async function markOrderPreparing(orderId: string): Promise<Order> {
   const response = await fetch(`/api/v1/orders/${orderId}/preparing`, {
     method: "POST",
+    headers: authHeaders(),
   });
   return parseResponse<Order>(response);
 }
@@ -91,6 +96,7 @@ export async function markOrderPreparing(orderId: string): Promise<Order> {
 export async function markOrderReady(orderId: string): Promise<Order> {
   const response = await fetch(`/api/v1/orders/${orderId}/ready`, {
     method: "POST",
+    headers: authHeaders(),
   });
   return parseResponse<Order>(response);
 }
@@ -106,6 +112,7 @@ export async function markOrderReady(orderId: string): Promise<Order> {
 export async function markOrderDelivered(orderId: string): Promise<Order> {
   const response = await fetch(`/api/v1/orders/${orderId}/deliver`, {
     method: "POST",
+    headers: authHeaders(),
   });
   return parseResponse<Order>(response);
 }
@@ -113,6 +120,7 @@ export async function markOrderDelivered(orderId: string): Promise<Order> {
 export async function markOrderCancelled(orderId: string): Promise<Order> {
   const response = await fetch(`/api/v1/orders/${orderId}/cancel`, {
     method: "POST",
+    headers: authHeaders(),
   });
   return parseResponse<Order>(response);
 }

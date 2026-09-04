@@ -1,15 +1,20 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Lora, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Farelo OS's brand type pairing: Lora (serif) for brand/display moments
+// — the menu header, screen titles, comanda numbers on the KDS — Plus
+// Jakarta Sans (sans) for everything operational (body copy, forms,
+// tables). See the design canvas (Sistema.dc.html) for the full system.
+const lora = Lora({
+  variable: "--font-lora",
   subsets: ["latin"],
+  style: ["normal", "italic"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const plusJakartaSans = Plus_Jakarta_Sans({
+  variable: "--font-plus-jakarta-sans",
   subsets: ["latin"],
 });
 
@@ -21,10 +26,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      lang="pt-BR"
+      className={`${lora.variable} ${plusJakartaSans.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">
+      <body className="bg-bg text-ink flex min-h-full flex-col">
         <Providers>{children}</Providers>
       </body>
     </html>

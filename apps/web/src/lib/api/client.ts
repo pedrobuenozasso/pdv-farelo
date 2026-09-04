@@ -3,6 +3,23 @@
 // go through the Next.js rewrite in next.config.ts — the frontend never
 // talks to the backend's absolute URL directly (see AGENTS.md / FARELO-018).
 
+import { getSession } from "@/lib/auth";
+
+// Attach the logged-in staff member's bearer token (FARELO-121/122) to a
+// request's headers, when one exists. Spread into every internal-tool
+// (PDV/Admin/Kitchen) fetch call, including ones the backend leaves
+// public today (e.g. GET /api/v1/categories) — harmless there since
+// nothing reads it without a `@RequireRole`, and it keeps every call site
+// identical rather than tracking which endpoints are protected today
+// (that list changes ticket to ticket; see docs/api.md's per-endpoint
+// "Requer" notes for the current, authoritative list). Never used by the
+// public customer menu (app/c/[commandNumber]) — there is no session to
+// attach there.
+export function authHeaders(): Record<string, string> {
+  const session = getSession();
+  return session ? { Authorization: `Bearer ${session.token}` } : {};
+}
+
 /**
  * Backend error body, per AGENTS.md:
  * `{ "code": "...", "message": "...", "correlationId": "..." }`.

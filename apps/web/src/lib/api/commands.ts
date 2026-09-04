@@ -10,7 +10,7 @@
 // relative path through the rewrite in the browser, absolute URL via
 // API_BASE_URL during SSR, decided at runtime by `typeof window`.
 
-import { parseResponse } from "./client";
+import { authHeaders, parseResponse } from "./client";
 
 const API_BASE_URL =
   typeof window === "undefined"
@@ -42,6 +42,7 @@ export async function getCommand(number: number): Promise<Command> {
 export async function openCommand(number: number): Promise<Command> {
   const response = await fetch(`${COMMANDS_URL}/${number}/open`, {
     method: "POST",
+    headers: authHeaders(),
   });
   return parseResponse<Command>(response);
 }
@@ -49,6 +50,7 @@ export async function openCommand(number: number): Promise<Command> {
 export async function closeCommand(number: number): Promise<Command> {
   const response = await fetch(`${COMMANDS_URL}/${number}/close`, {
     method: "POST",
+    headers: authHeaders(),
   });
   return parseResponse<Command>(response);
 }

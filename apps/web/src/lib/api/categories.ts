@@ -10,7 +10,7 @@
 // tells them apart at runtime — same module, same functions, either
 // context.
 
-import { parseResponse } from "./client";
+import { authHeaders, parseResponse } from "./client";
 
 export { ApiError } from "./client";
 
@@ -45,7 +45,7 @@ export async function createCategory(
 ): Promise<Category> {
   const response = await fetch(CATEGORIES_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(input),
   });
   return parseResponse<Category>(response);

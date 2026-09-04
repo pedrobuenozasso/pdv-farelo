@@ -5,7 +5,7 @@
 // next.config.ts rewrite) and from the customer menu page's Server
 // Component (absolute backend URL during SSR).
 
-import { parseResponse } from "./client";
+import { authHeaders, parseResponse } from "./client";
 
 export type Product = {
   id: string;
@@ -62,7 +62,7 @@ export async function createProduct(
 ): Promise<Product> {
   const response = await fetch(PRODUCTS_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(input),
   });
   return parseResponse<Product>(response);
@@ -74,7 +74,7 @@ export async function updateProduct(
 ): Promise<Product> {
   const response = await fetch(`${PRODUCTS_URL}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(input),
   });
   return parseResponse<Product>(response);

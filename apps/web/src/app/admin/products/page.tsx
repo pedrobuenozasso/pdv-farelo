@@ -6,6 +6,12 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { AdminShell } from "@/components/admin-shell";
+import { AuthGuard } from "@/components/auth-guard";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { ApiError, listCategories, type Category } from "@/lib/api/categories";
 import {
   createProduct,
@@ -21,6 +27,9 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
 });
+
+const inputClass =
+  "rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-primary";
 
 // price/imageUrl are kept as raw strings from the inputs and
 // parsed/validated here — avoids fighting native <input> string values vs.
@@ -67,6 +76,7 @@ function apiErrorMessageFor(error: unknown, fallback: string) {
 export default function ProductsAdminPage() {
   const queryClient = useQueryClient();
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const productsQuery = useQuery({
     queryKey: PRODUCTS_QUERY_KEY,
@@ -104,6 +114,7 @@ export default function ProductsAdminPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
       reset();
+      setCreateOpen(false);
     },
   });
 
@@ -123,224 +134,271 @@ export default function ProductsAdminPage() {
   );
 
   return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-8 p-8">
-      <div>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Admin</p>
-        <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-          Produtos
-        </h1>
-      </div>
+    <AuthGuard>
+      <AdminShell>
+        <div className="mx-auto flex max-w-4xl flex-col gap-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="font-serif text-2xl font-semibold">Produtos</h1>
+              <p className="text-ink-soft mt-0.5 text-sm">
+                {productsQuery.data?.length ?? 0} produtos cadastrados
+              </p>
+            </div>
+            <Button onClick={() => setCreateOpen((open) => !open)}>
+              {createOpen ? "Fechar" : "Novo produto"}
+            </Button>
+          </div>
 
-      <form
-        onSubmit={onSubmit}
-        noValidate
-        className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
-      >
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="name"
-            className="text-sm font-medium text-black dark:text-zinc-50"
-          >
-            Nome
-          </label>
-          <input
-            id="name"
-            type="text"
-            placeholder="Ex: Café Espresso"
-            className="rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-black"
-            {...register("name")}
-          />
-          {errors.name ? (
-            <p className="text-sm text-red-600 dark:text-red-400">
-              {errors.name.message}
-            </p>
-          ) : null}
-        </div>
+          {createOpen ? (
+            <Card>
+              <form
+                onSubmit={onSubmit}
+                noValidate
+                className="flex flex-col gap-3"
+              >
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="name" className="text-sm font-medium">
+                    Nome
+                  </label>
+                  <input
+                    id="name"
+                    type="text"
+                    placeholder="Ex: Café Espresso"
+                    className={inputClass}
+                    {...register("name")}
+                  />
+                  {errors.name ? (
+                    <p className="text-red text-sm">{errors.name.message}</p>
+                  ) : null}
+                </div>
 
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="description"
-            className="text-sm font-medium text-black dark:text-zinc-50"
-          >
-            Descrição (opcional)
-          </label>
-          <input
-            id="description"
-            type="text"
-            placeholder="Ex: Espresso curto, torra média"
-            className="rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-black"
-            {...register("description")}
-          />
-        </div>
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="description" className="text-sm font-medium">
+                    Descrição (opcional)
+                  </label>
+                  <input
+                    id="description"
+                    type="text"
+                    placeholder="Ex: Espresso curto, torra média"
+                    className={inputClass}
+                    {...register("description")}
+                  />
+                </div>
 
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="price"
-            className="text-sm font-medium text-black dark:text-zinc-50"
-          >
-            Preço (R$)
-          </label>
-          <input
-            id="price"
-            type="number"
-            step="0.01"
-            min="0"
-            placeholder="Ex: 7.50"
-            className="rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-black"
-            {...register("price")}
-          />
-          {errors.price ? (
-            <p className="text-sm text-red-600 dark:text-red-400">
-              {errors.price.message}
-            </p>
-          ) : null}
-        </div>
+                <div className="flex gap-3">
+                  <div className="flex flex-1 flex-col gap-1">
+                    <label htmlFor="price" className="text-sm font-medium">
+                      Preço (R$)
+                    </label>
+                    <input
+                      id="price"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Ex: 7.50"
+                      className={inputClass}
+                      {...register("price")}
+                    />
+                    {errors.price ? (
+                      <p className="text-red text-sm">{errors.price.message}</p>
+                    ) : null}
+                  </div>
 
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="categoryId"
-            className="text-sm font-medium text-black dark:text-zinc-50"
-          >
-            Categoria
-          </label>
-          <select
-            id="categoryId"
-            className="rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-black"
-            {...register("categoryId")}
-          >
-            <option value="">Selecione uma categoria</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-          {errors.categoryId ? (
-            <p className="text-sm text-red-600 dark:text-red-400">
-              {errors.categoryId.message}
-            </p>
-          ) : null}
-          {categoriesQuery.data && categories.length === 0 ? (
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Nenhuma categoria cadastrada ainda — crie uma em /admin/categories
-              antes de cadastrar produtos.
-            </p>
-          ) : null}
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="imageUrl"
-            className="text-sm font-medium text-black dark:text-zinc-50"
-          >
-            URL da imagem (opcional)
-          </label>
-          <input
-            id="imageUrl"
-            type="text"
-            placeholder="https://..."
-            className="rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-black"
-            {...register("imageUrl")}
-          />
-          {errors.imageUrl ? (
-            <p className="text-sm text-red-600 dark:text-red-400">
-              {errors.imageUrl.message}
-            </p>
-          ) : null}
-        </div>
-
-        {apiErrorMessage ? (
-          <p className="text-sm text-red-600 dark:text-red-400">
-            {apiErrorMessage}
-          </p>
-        ) : null}
-
-        <button
-          type="submit"
-          disabled={isSubmitting || createProductMutation.isPending}
-          className="self-start rounded bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
-        >
-          {createProductMutation.isPending
-            ? "Salvando..."
-            : "Adicionar produto"}
-        </button>
-      </form>
-
-      <div className="flex flex-col gap-2">
-        {productsQuery.isLoading ? (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Carregando...
-          </p>
-        ) : null}
-        {productsQuery.isError ? (
-          <p className="text-sm text-red-600 dark:text-red-400">
-            Não foi possível carregar os produtos.
-          </p>
-        ) : null}
-        {productsQuery.data && productsQuery.data.length === 0 ? (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Nenhum produto cadastrado.
-          </p>
-        ) : null}
-        <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
-          {productsQuery.data?.map((product: Product) =>
-            editingProductId === product.id ? (
-              <li key={product.id} className="py-2">
-                <ProductEditForm
-                  product={product}
-                  categories={categories}
-                  onCancel={() => setEditingProductId(null)}
-                  onSaved={() => setEditingProductId(null)}
-                />
-              </li>
-            ) : (
-              <li key={product.id} className="flex flex-col gap-0.5 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium text-black dark:text-zinc-50">
-                    {product.name}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={
-                        product.active
-                          ? "text-xs text-green-600 dark:text-green-400"
-                          : "text-xs text-zinc-400"
-                      }
+                  <div className="flex flex-1 flex-col gap-1">
+                    <label htmlFor="categoryId" className="text-sm font-medium">
+                      Categoria
+                    </label>
+                    <select
+                      id="categoryId"
+                      className={inputClass}
+                      {...register("categoryId")}
                     >
-                      {product.active ? "Ativo" : "Inativo"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setEditingProductId(product.id)}
-                      className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
-                    >
-                      Editar
-                    </button>
+                      <option value="">Selecione uma categoria</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                    {errors.categoryId ? (
+                      <p className="text-red text-sm">
+                        {errors.categoryId.message}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
-                <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-                  <span>
-                    {categoryNameById.get(product.categoryId) ??
-                      product.categoryId}
-                  </span>
-                  <span>{currencyFormatter.format(product.price)}</span>
+                {categoriesQuery.data && categories.length === 0 ? (
+                  <p className="text-ink-faint text-sm">
+                    Nenhuma categoria cadastrada ainda — crie uma em
+                    /admin/categories antes de cadastrar produtos.
+                  </p>
+                ) : null}
+
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="imageUrl" className="text-sm font-medium">
+                    URL da imagem (opcional)
+                  </label>
+                  <input
+                    id="imageUrl"
+                    type="text"
+                    placeholder="https://..."
+                    className={inputClass}
+                    {...register("imageUrl")}
+                  />
+                  {errors.imageUrl ? (
+                    <p className="text-red text-sm">
+                      {errors.imageUrl.message}
+                    </p>
+                  ) : null}
                 </div>
-                <div className="flex gap-3 text-xs text-zinc-400">
-                  <span>
-                    Cardápio: {product.availableOnMenu ? "sim" : "não"}
-                  </span>
-                  <span>PDV: {product.availableOnPos ? "sim" : "não"}</span>
-                </div>
-              </li>
-            ),
-          )}
-        </ul>
-      </div>
-    </main>
+
+                {apiErrorMessage ? (
+                  <p className="text-red text-sm">{apiErrorMessage}</p>
+                ) : null}
+
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || createProductMutation.isPending}
+                  className="self-start"
+                >
+                  {createProductMutation.isPending
+                    ? "Salvando..."
+                    : "Adicionar produto"}
+                </Button>
+              </form>
+            </Card>
+          ) : null}
+
+          <div className="border-line bg-surface overflow-hidden rounded-2xl border">
+            {productsQuery.isLoading ? (
+              <p className="text-ink-faint p-5 text-sm">Carregando...</p>
+            ) : null}
+            {productsQuery.isError ? (
+              <p className="text-red p-5 text-sm">
+                Não foi possível carregar os produtos.
+              </p>
+            ) : null}
+            {productsQuery.data && productsQuery.data.length === 0 ? (
+              <p className="text-ink-faint p-5 text-sm">
+                Nenhum produto cadastrado.
+              </p>
+            ) : null}
+            {productsQuery.data && productsQuery.data.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-left">
+                  <thead>
+                    <tr>
+                      <th className="text-ink-faint px-5 pt-4 pb-2.5 text-[11px] font-bold tracking-wide uppercase">
+                        Nome
+                      </th>
+                      <th className="text-ink-faint px-3 pt-4 pb-2.5 text-[11px] font-bold tracking-wide uppercase">
+                        Categoria
+                      </th>
+                      <th className="text-ink-faint px-3 pt-4 pb-2.5 text-[11px] font-bold tracking-wide uppercase">
+                        Preço
+                      </th>
+                      <th className="text-ink-faint px-3 pt-4 pb-2.5 text-[11px] font-bold tracking-wide uppercase">
+                        Cardápio
+                      </th>
+                      <th className="text-ink-faint px-3 pt-4 pb-2.5 text-[11px] font-bold tracking-wide uppercase">
+                        PDV
+                      </th>
+                      <th className="text-ink-faint px-3 pt-4 pb-2.5 text-[11px] font-bold tracking-wide uppercase">
+                        Status
+                      </th>
+                      <th className="px-5 pt-4 pb-2.5" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productsQuery.data.map((product: Product) =>
+                      editingProductId === product.id ? (
+                        <ProductEditRow
+                          key={product.id}
+                          product={product}
+                          categories={categories}
+                          onCancel={() => setEditingProductId(null)}
+                          onSaved={() => setEditingProductId(null)}
+                        />
+                      ) : (
+                        <tr key={product.id} className="border-line border-t">
+                          <td className="px-5 py-3.5 text-sm font-semibold">
+                            {product.name}
+                          </td>
+                          <td className="text-ink-soft px-3 py-3.5 text-sm">
+                            {categoryNameById.get(product.categoryId) ??
+                              product.categoryId}
+                          </td>
+                          <td className="px-3 py-3.5 text-sm font-semibold">
+                            {currencyFormatter.format(product.price)}
+                          </td>
+                          <td className="px-3 py-3.5">
+                            <ReadonlyDot on={product.availableOnMenu} />
+                          </td>
+                          <td className="px-3 py-3.5">
+                            <ReadonlyDot on={product.availableOnPos} />
+                          </td>
+                          <td className="px-3 py-3.5">
+                            <Badge tone={product.active ? "green" : "red"}>
+                              {product.active ? "Ativo" : "Inativo"}
+                            </Badge>
+                          </td>
+                          <td className="px-5 py-3.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => setEditingProductId(product.id)}
+                              className="text-ink-faint hover:text-primary"
+                              aria-label="Editar"
+                            >
+                              <svg
+                                width="17"
+                                height="17"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M12 20h9" />
+                                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                              </svg>
+                            </button>
+                          </td>
+                        </tr>
+                      ),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </AdminShell>
+    </AuthGuard>
   );
 }
 
-function ProductEditForm({
+function ReadonlyDot({ on }: { on: boolean }) {
+  return (
+    <span
+      className={
+        on
+          ? "bg-primary inline-block h-[19px] w-[34px] rounded-full"
+          : "bg-line inline-block h-[19px] w-[34px] rounded-full"
+      }
+    >
+      <span
+        className={
+          on
+            ? "bg-primary-ink block h-[15px] w-[15px] translate-x-[17px] translate-y-[2px] rounded-full"
+            : "bg-surface block h-[15px] w-[15px] translate-x-[2px] translate-y-[2px] rounded-full"
+        }
+      />
+    </span>
+  );
+}
+
+function ProductEditRow({
   product,
   categories,
   onCancel,
@@ -399,123 +457,114 @@ function ProductEditForm({
   );
 
   return (
-    <form
-      onSubmit={onSubmit}
-      noValidate
-      className="flex flex-col gap-2 rounded border border-zinc-300 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-900"
-    >
-      <div className="flex flex-col gap-1">
-        <input
-          type="text"
-          placeholder="Nome"
-          aria-label="Nome"
-          className="rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-black"
-          {...register("name")}
-        />
-        {errors.name ? (
-          <p className="text-xs text-red-600 dark:text-red-400">
-            {errors.name.message}
-          </p>
-        ) : null}
-      </div>
+    <tr className="border-line bg-primary-soft/40 border-t">
+      <td colSpan={7} className="p-4">
+        <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-3">
+            <div className="flex min-w-[180px] flex-1 flex-col gap-1">
+              <input
+                type="text"
+                placeholder="Nome"
+                aria-label="Nome"
+                className={inputClass}
+                {...register("name")}
+              />
+              {errors.name ? (
+                <p className="text-red text-xs">{errors.name.message}</p>
+              ) : null}
+            </div>
+            <div className="flex min-w-[180px] flex-1 flex-col gap-1">
+              <input
+                type="text"
+                placeholder="Descrição (opcional)"
+                aria-label="Descrição"
+                className={inputClass}
+                {...register("description")}
+              />
+            </div>
+            <div className="flex w-28 flex-col gap-1">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="Preço"
+                aria-label="Preço"
+                className={inputClass}
+                {...register("price")}
+              />
+              {errors.price ? (
+                <p className="text-red text-xs">{errors.price.message}</p>
+              ) : null}
+            </div>
+            <div className="flex min-w-[160px] flex-1 flex-col gap-1">
+              <select
+                aria-label="Categoria"
+                className={inputClass}
+                {...register("categoryId")}
+              >
+                <option value="">Selecione uma categoria</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+              {errors.categoryId ? (
+                <p className="text-red text-xs">{errors.categoryId.message}</p>
+              ) : null}
+            </div>
+            <div className="flex min-w-[180px] flex-1 flex-col gap-1">
+              <input
+                type="text"
+                placeholder="URL da imagem (opcional)"
+                aria-label="URL da imagem"
+                className={inputClass}
+                {...register("imageUrl")}
+              />
+              {errors.imageUrl ? (
+                <p className="text-red text-xs">{errors.imageUrl.message}</p>
+              ) : null}
+            </div>
+          </div>
 
-      <input
-        type="text"
-        placeholder="Descrição (opcional)"
-        aria-label="Descrição"
-        className="rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-black"
-        {...register("description")}
-      />
+          <div className="flex flex-wrap items-center gap-6 text-sm font-medium">
+            <label className="flex items-center gap-2">
+              <Switch {...register("active")} />
+              Ativo
+            </label>
+            <label className="flex items-center gap-2">
+              <Switch {...register("availableOnMenu")} />
+              Cardápio
+            </label>
+            <label className="flex items-center gap-2">
+              <Switch {...register("availableOnPos")} />
+              PDV
+            </label>
+          </div>
 
-      <div className="flex flex-col gap-1">
-        <input
-          type="number"
-          step="0.01"
-          min="0"
-          placeholder="Preço (R$)"
-          aria-label="Preço"
-          className="rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-black"
-          {...register("price")}
-        />
-        {errors.price ? (
-          <p className="text-xs text-red-600 dark:text-red-400">
-            {errors.price.message}
-          </p>
-        ) : null}
-      </div>
+          {apiErrorMessage ? (
+            <p className="text-red text-sm">{apiErrorMessage}</p>
+          ) : null}
 
-      <div className="flex flex-col gap-1">
-        <select
-          aria-label="Categoria"
-          className="rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-black"
-          {...register("categoryId")}
-        >
-          <option value="">Selecione uma categoria</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
-        {errors.categoryId ? (
-          <p className="text-xs text-red-600 dark:text-red-400">
-            {errors.categoryId.message}
-          </p>
-        ) : null}
-      </div>
-
-      <div className="flex flex-col gap-1">
-        <input
-          type="text"
-          placeholder="URL da imagem (opcional)"
-          aria-label="URL da imagem"
-          className="rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-black"
-          {...register("imageUrl")}
-        />
-        {errors.imageUrl ? (
-          <p className="text-xs text-red-600 dark:text-red-400">
-            {errors.imageUrl.message}
-          </p>
-        ) : null}
-      </div>
-
-      <div className="flex flex-wrap gap-4 text-sm text-black dark:text-zinc-50">
-        <label className="flex items-center gap-1.5">
-          <input type="checkbox" {...register("active")} />
-          Ativo
-        </label>
-        <label className="flex items-center gap-1.5">
-          <input type="checkbox" {...register("availableOnMenu")} />
-          Disponível no cardápio
-        </label>
-        <label className="flex items-center gap-1.5">
-          <input type="checkbox" {...register("availableOnPos")} />
-          Disponível no PDV
-        </label>
-      </div>
-
-      {apiErrorMessage ? (
-        <p className="text-sm text-red-600 dark:text-red-400">
-          {apiErrorMessage}
-        </p>
-      ) : null}
-
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={isSubmitting || updateProductMutation.isPending}
-          className="rounded bg-black px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
-        >
-          {updateProductMutation.isPending ? "Salvando..." : "Salvar"}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-black dark:border-zinc-700 dark:text-zinc-50"
-        >
-          Cancelar
-        </button>
-      </div>
-    </form>
+          <div className="flex gap-2">
+            <Button
+              type="submit"
+              disabled={isSubmitting || updateProductMutation.isPending}
+              className="px-4 py-2 text-[13px]"
+            >
+              {updateProductMutation.isPending ? "Salvando..." : "Salvar"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+              className="px-4 py-2 text-[13px]"
+            >
+              Cancelar
+            </Button>
+          </div>
+        </form>
+      </td>
+    </tr>
   );
 }

@@ -5,6 +5,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { AdminShell } from "@/components/admin-shell";
+import { AuthGuard } from "@/components/auth-guard";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   ApiError,
   createCategory,
@@ -58,91 +63,82 @@ export default function CategoriesAdminPage() {
         : null;
 
   return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-8 p-8">
-      <div>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Admin</p>
-        <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-          Categorias
-        </h1>
-      </div>
+    <AuthGuard>
+      <AdminShell>
+        <div className="mx-auto flex max-w-2xl flex-col gap-6">
+          <div>
+            <h1 className="font-serif text-2xl font-semibold">Categorias</h1>
+            <p className="text-ink-soft mt-0.5 text-sm">
+              {categoriesQuery.data?.length ?? 0} categorias cadastradas
+            </p>
+          </div>
 
-      <form
-        onSubmit={onSubmit}
-        noValidate
-        className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
-      >
-        <label
-          htmlFor="name"
-          className="text-sm font-medium text-black dark:text-zinc-50"
-        >
-          Nome
-        </label>
-        <input
-          id="name"
-          type="text"
-          placeholder="Ex: Bebidas"
-          className="rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-black"
-          {...register("name")}
-        />
-        {errors.name ? (
-          <p className="text-sm text-red-600 dark:text-red-400">
-            {errors.name.message}
-          </p>
-        ) : null}
-        {apiErrorMessage ? (
-          <p className="text-sm text-red-600 dark:text-red-400">
-            {apiErrorMessage}
-          </p>
-        ) : null}
-        <button
-          type="submit"
-          disabled={isSubmitting || createCategoryMutation.isPending}
-          className="self-start rounded bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
-        >
-          {createCategoryMutation.isPending
-            ? "Salvando..."
-            : "Adicionar categoria"}
-        </button>
-      </form>
-
-      <div className="flex flex-col gap-2">
-        {categoriesQuery.isLoading ? (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Carregando...
-          </p>
-        ) : null}
-        {categoriesQuery.isError ? (
-          <p className="text-sm text-red-600 dark:text-red-400">
-            Não foi possível carregar as categorias.
-          </p>
-        ) : null}
-        {categoriesQuery.data && categoriesQuery.data.length === 0 ? (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Nenhuma categoria cadastrada.
-          </p>
-        ) : null}
-        <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
-          {categoriesQuery.data?.map((category: Category) => (
-            <li
-              key={category.id}
-              className="flex items-center justify-between py-2"
+          <Card>
+            <form
+              onSubmit={onSubmit}
+              noValidate
+              className="flex flex-col gap-3"
             >
-              <span className="text-sm text-black dark:text-zinc-50">
-                {category.name}
-              </span>
-              <span
-                className={
-                  category.active
-                    ? "text-xs text-green-600 dark:text-green-400"
-                    : "text-xs text-zinc-400"
-                }
+              <div className="flex flex-col gap-1">
+                <label htmlFor="name" className="text-sm font-medium">
+                  Nome
+                </label>
+                <input
+                  id="name"
+                  type="text"
+                  placeholder="Ex: Bebidas"
+                  className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+                  {...register("name")}
+                />
+                {errors.name ? (
+                  <p className="text-red text-sm">{errors.name.message}</p>
+                ) : null}
+              </div>
+              {apiErrorMessage ? (
+                <p className="text-red text-sm">{apiErrorMessage}</p>
+              ) : null}
+              <Button
+                type="submit"
+                disabled={isSubmitting || createCategoryMutation.isPending}
+                className="self-start"
               >
-                {category.active ? "Ativa" : "Inativa"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </main>
+                {createCategoryMutation.isPending
+                  ? "Salvando..."
+                  : "Adicionar categoria"}
+              </Button>
+            </form>
+          </Card>
+
+          <div className="border-line bg-surface overflow-hidden rounded-2xl border">
+            {categoriesQuery.isLoading ? (
+              <p className="text-ink-faint p-5 text-sm">Carregando...</p>
+            ) : null}
+            {categoriesQuery.isError ? (
+              <p className="text-red p-5 text-sm">
+                Não foi possível carregar as categorias.
+              </p>
+            ) : null}
+            {categoriesQuery.data && categoriesQuery.data.length === 0 ? (
+              <p className="text-ink-faint p-5 text-sm">
+                Nenhuma categoria cadastrada.
+              </p>
+            ) : null}
+            <ul className="divide-line flex flex-col divide-y">
+              {categoriesQuery.data?.map((category: Category) => (
+                <li
+                  key={category.id}
+                  className="flex items-center justify-between px-5 py-3.5"
+                >
+                  <span className="text-sm font-semibold">{category.name}</span>
+                  <Badge tone={category.active ? "green" : "neutral"}>
+                    {category.active ? "Ativa" : "Inativa"}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </AdminShell>
+    </AuthGuard>
   );
 }
