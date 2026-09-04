@@ -16,10 +16,11 @@ public class FiscalProfileService {
         this.fiscalProfileRepository = fiscalProfileRepository;
     }
 
-    public FiscalProfile create(String name, String description, String ncm) {
+    public FiscalProfile create(String name, String description, String ncm, String cfop) {
         FiscalProfile fiscalProfile = new FiscalProfile(name);
         fiscalProfile.setDescription(description);
         fiscalProfile.setNcm(ncm);
+        fiscalProfile.setCfop(cfop);
         return fiscalProfileRepository.save(fiscalProfile);
     }
 
@@ -36,13 +37,14 @@ public class FiscalProfileService {
     }
 
     @Transactional
-    public FiscalProfile update(UUID id, String name, String description, boolean active, String ncm) {
+    public FiscalProfile update(UUID id, String name, String description, boolean active, String ncm, String cfop) {
         FiscalProfile fiscalProfile = getById(id);
 
         fiscalProfile.setName(name);
         fiscalProfile.setDescription(description);
         fiscalProfile.setActive(active);
         fiscalProfile.setNcm(ncm);
+        fiscalProfile.setCfop(cfop);
 
         return fiscalProfileRepository.save(fiscalProfile);
     }

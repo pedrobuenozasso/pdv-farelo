@@ -4503,6 +4503,80 @@ de `description`/`Ingredient.minimumStock`.
 documentado na seção `FiscalProfile` acima (aplicação de RBAC é sempre um
 ticket dedicado e distinto, ainda não nomeado para `fiscal`).
 
+### FARELO-153 — Adicionar CFOP
+
+Segundo dos três campos fiscais nomeados como tickets próprios na seção
+`FiscalProfile` acima (FARELO-152/153/154). Adiciona **apenas** `cfop` —
+CST/CSOSN (FARELO-154) continua fora de escopo, mesma disciplina "um campo
+por ticket" já aplicada pelo FARELO-152. Estruturalmente quase idêntico ao
+FARELO-152 ("Adicionar NCM"), só trocando o código fiscal.
+
+**O que é CFOP**: Código Fiscal de Operações e Prestações, um código de
+classificação tributária brasileiro real e padronizado que classifica a
+**natureza** de uma operação fiscal (ex: venda dentro do estado vs. venda
+para fora do estado) — não confundir com NCM (FARELO-152), que classifica o
+**produto** em si. Sempre exatamente 4 dígitos numéricos, nunca letras,
+nunca outro tamanho — esse formato é uma característica fixa da legislação
+tributária brasileira, não uma escolha específica desta aplicação; prompt
+mestre seção 24 só nomeia "CFOP" sem especificar formato, então o formato
+usado aqui vem de conhecimento de domínio (lei tributária brasileira), não
+de uma suposição arbitrária.
+
+**`cfop` em `FiscalProfile`**: `String`, `@Column(name = "cfop", length =
+4)`, **nullable** — mesmo raciocínio central do FARELO-152: `FiscalProfile`
+já existe com linhas sem CFOP (criadas antes deste ticket), e não existe
+"CFOP default" que faça sentido. `NULL` significa "CFOP ainda não
+configurado para este perfil fiscal", mesmo estado distinto e permanente já
+estabelecido por `ncm`.
+
+**Onde a validação de formato vive — nos dois lugares (DTO + `CHECK`),
+mesmo padrão do FARELO-152**:
+
+- **DTO** (`FiscalProfileRequest`/`FiscalProfileUpdateRequest`):
+  `@Pattern(regexp = "^[0-9]{4}$")` em `cfop`, sem `@NotNull` — mesmo padrão
+  de `ncm`. Erro `400`/`code: "VALIDATION_ERROR"`, mesmo formato genérico já
+  usado por `ncm`/`@NotBlank` em `name` — nenhum handler novo precisou ser
+  escrito.
+- **DB** (migration `V32__add_fiscal_profile_cfop_column.sql`):
+  `CHECK (cfop IS NULL OR cfop ~ '^[0-9]{4}$')` — backstop de defesa em
+  profundidade, mesmo raciocínio exato de `ncm` (V30): CFOP também não é uma
+  enumeração fixa pequena o bastante para a convenção `VARCHAR + CHECK (col
+  IN (...))` usada por colunas enum-backed deste schema (ex:
+  `ingredient.unit`, V16) — é uma tabela governamental externa de centenas
+  de códigos válidos, então o banco só garante a propriedade estrutural
+  permanente (exatos 4 dígitos), não pertencimento à tabela CFOP vigente
+  (integração/lookup futura, fora de escopo).
+
+**`FiscalProfileRequest`/`FiscalProfileUpdateRequest`**: ambos ganham
+`cfop` opcional (`String`, sem `@NotNull`) — mesmo formato opcional de
+`ncm`. Em `FiscalProfileUpdateRequest`, `cfop` segue a mesma convenção
+"`PUT` é substituição completa" já estabelecida por `description`/`ncm`:
+omitir o campo (ou enviar `null`) no `PUT` **limpa** um CFOP previamente
+configurado de volta para "não configurado" — comportamento coberto por
+`updateWithoutCfopClearsPreviouslySetCfop` em
+`FiscalProfileControllerIntegrationTests`.
+
+**`FiscalProfileResponse`**: ganha `cfop` (posicionado depois de `ncm`,
+antes de `active`). **`FiscalProfileService`**: `create`/`update` ganham um
+parâmetro `cfop` a mais, repassado direto para `FiscalProfile.setCfop(...)`
+— nenhuma lógica de negócio nova além de persistir o valor já validado pelo
+DTO.
+
+**Testes**: `FiscalProfileRepositoryIntegrationTests` ganha
+`savesAndFindsFiscalProfileWithCfop`/`savesFiscalProfileWithoutCfop`.
+`FiscalProfileControllerIntegrationTests` ganha
+`createsFiscalProfileWithValidCfop`/`createsFiscalProfileWithoutCfop`/
+`rejectsCfopWithWrongDigitCountWithStandardErrorFormat`/
+`rejectsNonNumericCfopWithStandardErrorFormat` (criação) e
+`updatesFiscalProfileSettingCfop`/`updateWithoutCfopClearsPreviouslySetCfop`/
+`rejectsInvalidCfopOnUpdateWithStandardErrorFormat` (atualização) — mesmo
+formato de sucesso/validação/limpar-campo-opcional já usado pelos testes de
+`ncm`.
+
+**RBAC**: nenhuma mudança — `FiscalProfileController` continua sem
+`@RequireRole` em nenhum endpoint, mesmo raciocínio/precedente já
+documentado na seção `FiscalProfile` acima.
+
 ### FARELO-155 — Criar `CompanyFiscalConfiguration`
 
 Segunda entidade do domínio `fiscal` — **distinta de `FiscalProfile`**, não

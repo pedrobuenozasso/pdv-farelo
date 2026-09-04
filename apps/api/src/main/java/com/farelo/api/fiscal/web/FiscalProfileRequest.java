@@ -31,9 +31,17 @@ import jakarta.validation.constraints.Pattern;
  * exactly 8 numeric digits (standard Brazilian tax classification code,
  * not an app-specific format choice) — see {@code FiscalProfile.ncm}'s
  * javadoc.
+ *
+ * <p>{@code cfop} (FARELO-153) is optional too, same reasoning and shape as
+ * {@code ncm} above: defaults to {@code null} ("no CFOP configured") when
+ * omitted, {@code @Pattern(regexp = "^[0-9]{4}$")} without {@code @NotNull}.
+ * A real CFOP is always exactly 4 numeric digits (standard Brazilian tax
+ * classification code, not an app-specific format choice) — see {@code
+ * FiscalProfile.cfop}'s javadoc.
  */
 public record FiscalProfileRequest(
         @NotBlank String name,
         String description,
-        @Pattern(regexp = "^[0-9]{8}$", message = "ncm must be exactly 8 numeric digits") String ncm) {
+        @Pattern(regexp = "^[0-9]{8}$", message = "ncm must be exactly 8 numeric digits") String ncm,
+        @Pattern(regexp = "^[0-9]{4}$", message = "cfop must be exactly 4 numeric digits") String cfop) {
 }

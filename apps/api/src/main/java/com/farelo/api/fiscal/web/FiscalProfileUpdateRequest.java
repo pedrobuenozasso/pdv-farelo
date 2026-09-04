@@ -33,10 +33,18 @@ import jakarta.validation.constraints.Pattern;
  * profile with no NCM yet is a legitimate, common state (see {@code
  * FiscalProfile.ncm}'s javadoc), so forcing every {@code PUT} to always
  * re-send an NCM would make "clear it" impossible to express.
+ *
+ * <p>{@code cfop} (FARELO-153) is optional too, same reasoning and same
+ * {@code @Pattern} shape as {@code ncm} above — omitting it (or sending
+ * {@code null}) clears a previously-set CFOP back to "not configured". Not
+ * {@code @NotNull}, same reasoning as {@code ncm}: a fiscal profile with no
+ * CFOP yet is a legitimate, common state (see {@code FiscalProfile.cfop}'s
+ * javadoc).
  */
 public record FiscalProfileUpdateRequest(
         @NotBlank String name,
         String description,
         @NotNull Boolean active,
-        @Pattern(regexp = "^[0-9]{8}$", message = "ncm must be exactly 8 numeric digits") String ncm) {
+        @Pattern(regexp = "^[0-9]{8}$", message = "ncm must be exactly 8 numeric digits") String ncm,
+        @Pattern(regexp = "^[0-9]{4}$", message = "cfop must be exactly 4 numeric digits") String cfop) {
 }

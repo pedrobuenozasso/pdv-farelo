@@ -79,4 +79,31 @@ class FiscalProfileRepositoryIntegrationTests extends AbstractIntegrationTest {
         assertThat(found.get().getNcm()).isNull();
     }
 
+    // FARELO-153.
+    @Test
+    void savesAndFindsFiscalProfileWithCfop() {
+        FiscalProfile fiscalProfile = new FiscalProfile("Tributado padrão");
+        fiscalProfile.setCfop("5102");
+
+        FiscalProfile saved = fiscalProfileRepository.saveAndFlush(fiscalProfile);
+
+        Optional<FiscalProfile> found = fiscalProfileRepository.findById(saved.getId());
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getCfop()).isEqualTo("5102");
+    }
+
+    // FARELO-153.
+    @Test
+    void savesFiscalProfileWithoutCfop() {
+        FiscalProfile fiscalProfile = new FiscalProfile("Isento");
+
+        FiscalProfile saved = fiscalProfileRepository.saveAndFlush(fiscalProfile);
+
+        Optional<FiscalProfile> found = fiscalProfileRepository.findById(saved.getId());
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getCfop()).isNull();
+    }
+
 }
