@@ -21,6 +21,16 @@ export type TotalPaid = {
   totalPaid: number;
 };
 
+// FARELO-223: totalOwed/totalPaid/remaining computed entirely server-side —
+// backs GET .../payments/balance. Replaces the client-side
+// sum-orders-then-subtract-paid logic apps/pdv/page.tsx used to do itself.
+export type PaymentBalance = {
+  commandNumber: number;
+  totalOwed: number;
+  totalPaid: number;
+  remaining: number;
+};
+
 export type RecordPaymentInput = {
   amount: number;
   method: PaymentMethod;
@@ -32,6 +42,16 @@ export async function getTotalPaid(commandNumber: number): Promise<TotalPaid> {
     { cache: "no-store", headers: authHeaders() },
   );
   return parseResponse<TotalPaid>(response);
+}
+
+export async function getPaymentBalance(
+  commandNumber: number,
+): Promise<PaymentBalance> {
+  const response = await fetch(
+    `/api/v1/commands/${commandNumber}/payments/balance`,
+    { cache: "no-store", headers: authHeaders() },
+  );
+  return parseResponse<PaymentBalance>(response);
 }
 
 export async function recordPayment(

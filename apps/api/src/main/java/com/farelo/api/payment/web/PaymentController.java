@@ -3,6 +3,7 @@ package com.farelo.api.payment.web;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.web.CommandResponse;
 import com.farelo.api.payment.Payment;
+import com.farelo.api.payment.PaymentBalance;
 import com.farelo.api.payment.PaymentService;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.rbac.RequireRole;
@@ -157,6 +158,19 @@ public class PaymentController {
     public PaymentTotalResponse totalPaid(@PathVariable int number) {
         BigDecimal totalPaid = paymentService.getTotalPaid(number);
         return PaymentTotalResponse.of(number, totalPaid);
+    }
+
+    // FARELO-223 ("Calcular saldo restante"). Same unprotected precedent as
+    // listByCommand/totalPaid above — a pure read over the same
+    // order/payment data, no more sensitive than either. See
+    // PaymentService#getBalance's javadoc for why this exists as a
+    // dedicated backend computation: before this ticket, apps/web derived
+    // totalOwed/remaining itself from raw order data, which the ticket's
+    // own requirement ("backend deve ser fonte de verdade") rules out.
+    @GetMapping("/{number}/payments/balance")
+    public PaymentBalanceResponse balance(@PathVariable int number) {
+        PaymentBalance balance = paymentService.getBalance(number);
+        return PaymentBalanceResponse.from(number, balance);
     }
 
     // FARELO-143 ("Validar total pago antes de fechar") — see this class's

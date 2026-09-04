@@ -136,6 +136,13 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
     private static final int TOTAL_OTHER_COMMAND_FOR_LEAK_CHECK = 71;
     private static final int TOTAL_COMMAND_WITHOUT_PAYMENTS = 72;
 
+    // FARELO-223: GET .../payments/balance tests below — 82-84, free per
+    // this class's own registry above (46-49, 60-72, 4-7, 73-77, 92
+    // already taken).
+    private static final int BALANCE_EMPTY_NUMBER = 82;
+    private static final int BALANCE_PARTIAL_NUMBER = 83;
+    private static final int BALANCE_OVERPAID_NUMBER = 84;
+
     // FARELO-143 (POST .../close) — moved verbatim from
     // CommandControllerIntegrationTests (4-7, 92), plus new numbers (73-77)
     // for the payment-sufficiency tests this ticket adds. See class javadoc.
@@ -567,6 +574,51 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
                 .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // --- FARELO-223: GET .../payments/balance -------------------------------
+
+    @Test
+    void balanceReturnsZeroTotalsWhenCommandHasNoOrdersOrPayments() throws Exception {
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_EMPTY_NUMBER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.commandNumber").value(BALANCE_EMPTY_NUMBER))
+                .andExpect(jsonPath("$.totalOwed").value(0))
+                .andExpect(jsonPath("$.totalPaid").value(0))
+                .andExpect(jsonPath("$.remaining").value(0));
+    }
+
+    @Test
+    void balanceComputesRemainingAsOwedMinusPaid() throws Exception {
+        createOrder(BALANCE_PARTIAL_NUMBER, new BigDecimal("25.00"), 1, OrderStatus.DELIVERED);
+        paymentRepository.save(new Payment(command(BALANCE_PARTIAL_NUMBER), new BigDecimal("10.00"), PaymentMethod.CASH));
+
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_PARTIAL_NUMBER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalOwed").value(25.00))
+                .andExpect(jsonPath("$.totalPaid").value(10.00))
+                .andExpect(jsonPath("$.remaining").value(15.00));
+    }
+
+    // Same >= / floor-at-zero semantics as PaymentService#closeCommand — an
+    // overpaid comanda reports remaining = 0, never a negative amount.
+    @Test
+    void balanceFloorsRemainingAtZeroWhenOverpaid() throws Exception {
+        createOrder(BALANCE_OVERPAID_NUMBER, new BigDecimal("20.00"), 1, OrderStatus.DELIVERED);
+        paymentRepository.save(new Payment(command(BALANCE_OVERPAID_NUMBER), new BigDecimal("30.00"), PaymentMethod.CASH));
+
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_OVERPAID_NUMBER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalOwed").value(20.00))
+                .andExpect(jsonPath("$.totalPaid").value(30.00))
+                .andExpect(jsonPath("$.remaining").value(0));
+    }
+
+    @Test
+    void balanceReturnsNotFoundForUnknownCommandNumber() throws Exception {
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", 999))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"));
     }
 
     // --- FARELO-143: POST .../close -----------------------------------------

@@ -139,6 +139,32 @@ public class PaymentService {
     }
 
     /**
+     * FARELO-223 ("Calcular saldo restante"): a comanda's {@link
+     * PaymentBalance} — {@code totalOwed}/{@code totalPaid}/{@code
+     * remaining}, all computed here rather than by a caller. See {@link
+     * PaymentBalance}'s javadoc for why this method exists at all: before
+     * it, nothing in this codebase computed {@code totalOwed} except
+     * {@link #closeCommand(int)}'s internal validation, and {@code
+     * remaining} wasn't computed anywhere server-side — the PDV frontend
+     * derived both itself from raw order/payment data. Backs {@code GET
+     * /api/v1/commands/{number}/payments/balance}.
+     *
+     * <p>Same "not status-gated" reasoning as {@link #getTotalPaid(int)}/
+     * {@link OrderService#getTotalOwed(int)} — a pure read, callable
+     * regardless of the comanda's current status (e.g. still useful to
+     * inspect after a comanda is already {@code CLOSED}).
+     *
+     * @throws com.farelo.api.command.CommandNotFoundException {@code
+     *     commandNumber} doesn't exist.
+     */
+    @Transactional(readOnly = true)
+    public PaymentBalance getBalance(int commandNumber) {
+        BigDecimal totalOwed = orderService.getTotalOwed(commandNumber);
+        BigDecimal totalPaid = getTotalPaid(commandNumber);
+        return PaymentBalance.of(totalOwed, totalPaid);
+    }
+
+    /**
      * FARELO-143 ("Validar total pago antes de fechar"): closes a comanda,
      * but only after validating its total paid ({@link #getTotalPaid(int)},
      * FARELO-142) covers its total owed ({@link

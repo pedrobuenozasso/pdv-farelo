@@ -54,7 +54,7 @@ import {
   type OrderStatus,
 } from "@/lib/api/orders";
 import {
-  getTotalPaid,
+  getPaymentBalance,
   recordPayment,
   type PaymentMethod,
 } from "@/lib/api/payments";
@@ -197,9 +197,9 @@ function CommandDetail({
     queryFn: () => listCommandOrders(number),
   });
 
-  const totalPaidQuery = useQuery({
-    queryKey: ["pdv", "command", number, "paymentsTotal"],
-    queryFn: () => getTotalPaid(number),
+  const balanceQuery = useQuery({
+    queryKey: ["pdv", "command", number, "paymentBalance"],
+    queryFn: () => getPaymentBalance(number),
   });
 
   const invalidateCommand = () =>
@@ -229,25 +229,12 @@ function CommandDetail({
     "Não foi possível fechar a comanda.",
   );
 
-  const orders = ordersQuery.data ?? [];
-  // FARELO-200/201: a cancelled item must not count toward the total owed
-  // even when its parent order is otherwise still live — mirrors the
-  // exclusion OrderItemRepository#sumOwedByCommand applies server-side.
-  const totalOwed = orders
-    .filter((order) => order.status !== "CANCELLED")
-    .reduce(
-      (sum, order) =>
-        sum +
-        order.items
-          .filter((item) => !item.cancelled)
-          .reduce(
-            (itemSum, item) => itemSum + item.unitPrice * item.quantity,
-            0,
-          ),
-      0,
-    );
-  const totalPaid = totalPaidQuery.data?.totalPaid ?? 0;
-  const remaining = Math.max(totalOwed - totalPaid, 0);
+  // FARELO-223: totalOwed/totalPaid/remaining all come from the backend
+  // (GET .../payments/balance) — no client-side sum/subtraction anymore,
+  // per that ticket's "backend deve ser fonte de verdade" requirement.
+  const totalOwed = balanceQuery.data?.totalOwed ?? 0;
+  const totalPaid = balanceQuery.data?.totalPaid ?? 0;
+  const remaining = balanceQuery.data?.remaining ?? 0;
 
   return (
     <Card className="flex flex-col gap-5">
@@ -335,7 +322,7 @@ function CommandDetail({
               commandNumber={number}
               onAdded={() =>
                 // Partial-match invalidation: also catches "orders" and
-                // "paymentsTotal" (both nested under this same key prefix)
+                // "paymentBalance" (both nested under this same key prefix)
                 // in one call — and the command status itself, since
                 // adding the first item auto-opens an AVAILABLE comanda
                 // (CommandService#openForOrdering) and the header badge
@@ -732,7 +719,7 @@ function PaymentPanel({
       reset();
       setFormOpen(false);
       queryClient.invalidateQueries({
-        queryKey: ["pdv", "command", commandNumber, "paymentsTotal"],
+        queryKey: ["pdv", "command", commandNumber, "paymentBalance"],
       });
     },
   });
