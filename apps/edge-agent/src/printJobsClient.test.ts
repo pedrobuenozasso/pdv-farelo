@@ -32,18 +32,43 @@ import {
 } from "./printJobsClient.js";
 
 // Fixture: exatamente o JSON de exemplo do contrato do endpoint
-// (docs/PROMPT_MESTRE.md / ticket FARELO-076).
+// (docs/PROMPT_MESTRE.md / ticket FARELO-076; type/commandNumber/
+// commandCheckContent adicionados no FARELO-210/211 — ver PrintJobResponse
+// no backend).
 const validResponseFixture = [
   {
     id: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    type: "KITCHEN_TICKET",
     orderId: "a1b2c3d4-1234-4562-b3fc-2c963f66afa6",
+    commandNumber: null,
     content: {
       commandNumber: 37,
       productionStation: "BAR",
       items: [{ productName: "Cappuccino", quantity: 2 }],
     },
+    commandCheckContent: null,
     status: "PENDING",
     createdAt: "2026-01-01T12:00:00Z",
+  },
+];
+
+// Fixture de um job COMMAND_CHECK (FARELO-210/211) — mesma comanda 37.
+const commandCheckResponseFixture = [
+  {
+    id: "8f14e45f-ceea-4d38-b4f8-2d7e63b3c5a1",
+    type: "COMMAND_CHECK",
+    orderId: null,
+    commandNumber: 37,
+    content: null,
+    commandCheckContent: {
+      commandNumber: 37,
+      items: [
+        { productName: "Cappuccino", quantity: 2, unitPrice: 8, lineTotal: 16 },
+      ],
+      total: 16,
+    },
+    status: "PENDING",
+    createdAt: "2026-01-01T12:05:00Z",
   },
 ];
 
@@ -53,12 +78,15 @@ describe("parsePrintJobs", () => {
 
     assert.equal(jobs.length, 1);
     assert.equal(jobs[0]?.id, "3fa85f64-5717-4562-b3fc-2c963f66afa6");
+    assert.equal(jobs[0]?.type, "KITCHEN_TICKET");
     assert.equal(jobs[0]?.orderId, "a1b2c3d4-1234-4562-b3fc-2c963f66afa6");
+    assert.equal(jobs[0]?.commandNumber, null);
+    assert.equal(jobs[0]?.commandCheckContent, null);
     assert.equal(jobs[0]?.status, "PENDING");
     assert.equal(jobs[0]?.createdAt, "2026-01-01T12:00:00Z");
-    assert.equal(jobs[0]?.content.commandNumber, 37);
-    assert.equal(jobs[0]?.content.productionStation, "BAR");
-    assert.deepEqual(jobs[0]?.content.items, [
+    assert.equal(jobs[0]?.content?.commandNumber, 37);
+    assert.equal(jobs[0]?.content?.productionStation, "BAR");
+    assert.deepEqual(jobs[0]?.content?.items, [
       { productName: "Cappuccino", quantity: 2 },
     ]);
   });
@@ -79,15 +107,22 @@ describe("parsePrintJobs", () => {
     ];
 
     const jobs = parsePrintJobs(unassigned);
-    assert.equal(jobs[0]?.content.productionStation, null);
+    assert.equal(jobs[0]?.content?.productionStation, null);
   });
 
   it("lança um erro quando o corpo não é um array", () => {
     assert.throws(() => parsePrintJobs({ not: "an array" }), /não é um array/);
   });
 
-  it("lança um erro quando um PrintJob não tem os campos esperados", () => {
-    assert.throws(() => parsePrintJobs([{ id: "only-id" }]), /orderId/);
+  it("lança um erro quando um PrintJob não tem \"type\" válido", () => {
+    assert.throws(() => parsePrintJobs([{ id: "only-id" }]), /"type"/);
+  });
+
+  it("lança um erro quando um KITCHEN_TICKET não tem os campos esperados", () => {
+    assert.throws(
+      () => parsePrintJobs([{ id: "only-id", type: "KITCHEN_TICKET", status: "PENDING", createdAt: "2026-01-01T12:00:00Z" }]),
+      /orderId/,
+    );
   });
 
   it("lança um erro quando um item de content.items é malformado", () => {
@@ -102,6 +137,24 @@ describe("parsePrintJobs", () => {
     ];
 
     assert.throws(() => parsePrintJobs(malformed), /quantity/);
+  });
+
+  it("interpreta um PrintJob COMMAND_CHECK (FARELO-210/211)", () => {
+    const jobs = parsePrintJobs(commandCheckResponseFixture);
+
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0]?.type, "COMMAND_CHECK");
+    assert.equal(jobs[0]?.orderId, null);
+    assert.equal(jobs[0]?.content, null);
+    assert.equal(jobs[0]?.commandNumber, 37);
+    assert.equal(jobs[0]?.commandCheckContent?.total, 16);
+    assert.equal(jobs[0]?.commandCheckContent?.items[0]?.productName, "Cappuccino");
+    assert.equal(jobs[0]?.commandCheckContent?.items[0]?.lineTotal, 16);
+  });
+
+  it("lança um erro quando um COMMAND_CHECK não tem commandCheckContent", () => {
+    const malformed = [{ ...commandCheckResponseFixture[0], commandCheckContent: null }];
+    assert.throws(() => parsePrintJobs(malformed), /commandCheckContent/);
   });
 });
 
@@ -141,6 +194,15 @@ describe("formatPrintJobLog", () => {
     ]);
 
     assert.match(formatPrintJobLog(job!), /\(sem itens\)/);
+  });
+
+  it("formata um PrintJob COMMAND_CHECK como conferência com total (FARELO-210/211)", () => {
+    const [job] = parsePrintJobs(commandCheckResponseFixture);
+    const line = formatPrintJobLog(job!);
+
+    assert.match(line, /conferência comanda 37/);
+    assert.match(line, /1 item\(ns\)/);
+    assert.match(line, /R\$ 16\.00/);
   });
 });
 

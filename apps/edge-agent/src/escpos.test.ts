@@ -12,8 +12,8 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildEscPosTicket } from "./escpos.js";
-import type { PrintJobContent } from "./printJobsClient.js";
+import { buildEscPosTicket, buildCommandCheckEscPosTicket } from "./escpos.js";
+import type { CommandCheckContent, PrintJobContent } from "./printJobsClient.js";
 
 const baseContent: PrintJobContent = {
   commandNumber: 37,
@@ -153,5 +153,57 @@ describe("buildEscPosTicket", () => {
       ticket.includes(cafeBytes),
       "bytes latin1 de 'Café' não encontrados no ticket",
     );
+  });
+});
+
+describe("buildCommandCheckEscPosTicket", () => {
+  const checkContent: CommandCheckContent = {
+    commandNumber: 37,
+    items: [
+      { productName: "Cappuccino", quantity: 2, unitPrice: 8, lineTotal: 16 },
+      { productName: "Croissant", quantity: 1, unitPrice: 9, lineTotal: 9 },
+    ],
+    total: 25,
+  };
+
+  it("retorna um Buffer terminado no comando de corte GS V 0x00", () => {
+    const ticket = buildCommandCheckEscPosTicket(checkContent);
+    assert.ok(Buffer.isBuffer(ticket));
+    assert.deepEqual(
+      ticket.subarray(ticket.length - 3),
+      Buffer.from([0x1d, 0x56, 0x00]),
+    );
+  });
+
+  it("inclui o número da comanda com o rótulo CONFERENCIA", () => {
+    const text = buildCommandCheckEscPosTicket(checkContent).toString("ascii");
+    assert.match(text, /CONFERENCIA - COMANDA 37/);
+  });
+
+  it("lista cada item com quantidade, nome, preço unitário e total da linha em vírgula decimal", () => {
+    const text = buildCommandCheckEscPosTicket(checkContent).toString("ascii");
+
+    assert.match(text, /2x Cappuccino/);
+    assert.match(text, /8,00 x 2 = 16,00/);
+    assert.match(text, /1x Croissant/);
+    assert.match(text, /9,00 x 1 = 9,00/);
+  });
+
+  it("inclui a linha de total geral", () => {
+    const text = buildCommandCheckEscPosTicket(checkContent).toString("ascii");
+    assert.match(text, /TOTAL: R\$ 25,00/);
+  });
+
+  it("indica ausência de itens quando a lista está vazia", () => {
+    const text = buildCommandCheckEscPosTicket({
+      ...checkContent,
+      items: [],
+    }).toString("ascii");
+    assert.match(text, /\(sem itens\)/);
+  });
+
+  it("não inclui nenhuma linha de estação (diferente de buildEscPosTicket)", () => {
+    const text = buildCommandCheckEscPosTicket(checkContent).toString("ascii");
+    assert.doesNotMatch(text, /Estacao:/);
   });
 });

@@ -23,6 +23,16 @@
  * não tem regra de negócio de pedidos. `parsePrintJobs` só valida o formato
  * mínimo necessário para não deixar o restante do código lidar com `unknown`
  * — não interpreta nem decide nada sobre o conteúdo do pedido.
+ *
+ * `type` (FARELO-210/211): um `PrintJob` agora vem em dois formatos —
+ * `"KITCHEN_TICKET"` (o original, por pedido, `orderId`/`content`
+ * populados) ou `"COMMAND_CHECK"` ("conferência", por comanda inteira,
+ * `commandNumber`/`commandCheckContent` populados). Exatamente um par é
+ * populado por job — o outro fica `null` — mesma exclusividade que o
+ * backend garante via `ck_print_job_type_scope`
+ * (V36__add_print_job_type_and_command_columns.sql). `poller.ts` decide o
+ * que fazer (endereço de impressora, formatação ESC/POS) a partir de
+ * `type`, nunca inferindo do que está populado.
  */
 
 export type PrintJobItem = {
@@ -40,10 +50,33 @@ export type PrintJobContent = {
   items: PrintJobItem[];
 };
 
+// FARELO-210/211: conteúdo de uma "conferência" (COMMAND_CHECK) — pré-conta
+// da comanda inteira, com preços e total (diferente de PrintJobContent, que
+// só tem nome/quantidade — um ticket de cozinha não precisa de preço).
+export type CommandCheckItem = {
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+};
+
+export type CommandCheckContent = {
+  commandNumber: number;
+  items: CommandCheckItem[];
+  total: number;
+};
+
+export type PrintJobType = "KITCHEN_TICKET" | "COMMAND_CHECK";
+
 export type PrintJob = {
   id: string;
-  orderId: string;
-  content: PrintJobContent;
+  type: PrintJobType;
+  // Exatamente um de cada par é não-nulo, conforme `type` — ver comentário
+  // do topo deste arquivo.
+  orderId: string | null;
+  commandNumber: number | null;
+  content: PrintJobContent | null;
+  commandCheckContent: CommandCheckContent | null;
   status: string;
   createdAt: string;
 };
@@ -68,13 +101,15 @@ function parsePrintJob(raw: unknown, index: number): PrintJob {
     throw new Error(`PrintJob no índice ${index} não é um objeto`);
   }
 
-  const { id, orderId, content, status, createdAt } = raw;
+  const { id, type, orderId, commandNumber, content, commandCheckContent, status, createdAt } = raw;
 
   if (typeof id !== "string") {
     throw new Error(`PrintJob no índice ${index} não tem "id" (string)`);
   }
-  if (typeof orderId !== "string") {
-    throw new Error(`PrintJob "${id}" não tem "orderId" (string)`);
+  if (type !== "KITCHEN_TICKET" && type !== "COMMAND_CHECK") {
+    throw new Error(
+      `PrintJob "${id}" não tem "type" válido ("KITCHEN_TICKET" ou "COMMAND_CHECK")`,
+    );
   }
   if (typeof status !== "string") {
     throw new Error(`PrintJob "${id}" não tem "status" (string)`);
@@ -83,10 +118,32 @@ function parsePrintJob(raw: unknown, index: number): PrintJob {
     throw new Error(`PrintJob "${id}" não tem "createdAt" (string)`);
   }
 
+  if (type === "KITCHEN_TICKET") {
+    if (typeof orderId !== "string") {
+      throw new Error(`PrintJob "${id}" (KITCHEN_TICKET) não tem "orderId" (string)`);
+    }
+    return {
+      id,
+      type,
+      orderId,
+      commandNumber: null,
+      content: parsePrintJobContent(content, id),
+      commandCheckContent: null,
+      status,
+      createdAt,
+    };
+  }
+
+  if (typeof commandNumber !== "number") {
+    throw new Error(`PrintJob "${id}" (COMMAND_CHECK) não tem "commandNumber" (number)`);
+  }
   return {
     id,
-    orderId,
-    content: parsePrintJobContent(content, id),
+    type,
+    orderId: null,
+    commandNumber,
+    content: null,
+    commandCheckContent: parseCommandCheckContent(commandCheckContent, id),
     status,
     createdAt,
   };
@@ -154,21 +211,100 @@ function parsePrintJobItem(
   return { productName, quantity };
 }
 
+// FARELO-210/211: parser de CommandCheckContent, mesmo nível de validação
+// campo-a-campo que parsePrintJobContent/parsePrintJobItem acima.
+function parseCommandCheckContent(
+  raw: unknown,
+  printJobId: string,
+): CommandCheckContent {
+  if (!isRecord(raw)) {
+    throw new Error(`PrintJob "${printJobId}" não tem "commandCheckContent" (objeto)`);
+  }
+
+  const { commandNumber, items, total } = raw;
+
+  if (typeof commandNumber !== "number") {
+    throw new Error(
+      `PrintJob "${printJobId}".commandCheckContent não tem "commandNumber" (number)`,
+    );
+  }
+  if (!Array.isArray(items)) {
+    throw new Error(`PrintJob "${printJobId}".commandCheckContent não tem "items" (array)`);
+  }
+  if (typeof total !== "number") {
+    throw new Error(`PrintJob "${printJobId}".commandCheckContent não tem "total" (number)`);
+  }
+
+  return {
+    commandNumber,
+    items: items.map((item, index) => parseCommandCheckItem(item, printJobId, index)),
+    total,
+  };
+}
+
+function parseCommandCheckItem(
+  raw: unknown,
+  printJobId: string,
+  index: number,
+): CommandCheckItem {
+  if (!isRecord(raw)) {
+    throw new Error(
+      `PrintJob "${printJobId}".commandCheckContent.items[${index}] não é um objeto`,
+    );
+  }
+
+  const { productName, quantity, unitPrice, lineTotal } = raw;
+
+  if (typeof productName !== "string") {
+    throw new Error(
+      `PrintJob "${printJobId}".commandCheckContent.items[${index}] não tem "productName" (string)`,
+    );
+  }
+  if (typeof quantity !== "number") {
+    throw new Error(
+      `PrintJob "${printJobId}".commandCheckContent.items[${index}] não tem "quantity" (number)`,
+    );
+  }
+  if (typeof unitPrice !== "number") {
+    throw new Error(
+      `PrintJob "${printJobId}".commandCheckContent.items[${index}] não tem "unitPrice" (number)`,
+    );
+  }
+  if (typeof lineTotal !== "number") {
+    throw new Error(
+      `PrintJob "${printJobId}".commandCheckContent.items[${index}] não tem "lineTotal" (number)`,
+    );
+  }
+
+  return { productName, quantity, unitPrice, lineTotal };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
 /** Uma linha legível por `PrintJob`, para o log do polling. */
 export function formatPrintJobLog(job: PrintJob): string {
-  const itemsSummary = job.content.items
+  if (job.type === "COMMAND_CHECK") {
+    // Não-nulo por construção — ver parsePrintJob (branch COMMAND_CHECK).
+    const content = job.commandCheckContent!;
+    return (
+      `PrintJob ${job.id} — conferência comanda ${content.commandNumber}: ` +
+      `${content.items.length} item(ns), total R$ ${content.total.toFixed(2)}`
+    );
+  }
+
+  // Não-nulo por construção — ver parsePrintJob (branch KITCHEN_TICKET).
+  const content = job.content!;
+  const itemsSummary = content.items
     .map((item) => `${item.quantity}x ${item.productName}`)
     .join(", ");
   // null vira um rótulo legível em vez do literal "null" na interpolação de
   // string — mesmo caso de itens sem estação atribuída descrito no type acima.
-  const station = job.content.productionStation ?? "sem estação atribuída";
+  const station = content.productionStation ?? "sem estação atribuída";
 
   return (
-    `PrintJob ${job.id} — comanda ${job.content.commandNumber} ` +
+    `PrintJob ${job.id} — comanda ${content.commandNumber} ` +
     `[${station}]: ${itemsSummary || "(sem itens)"}`
   );
 }

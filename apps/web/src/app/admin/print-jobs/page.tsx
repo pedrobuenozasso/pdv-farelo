@@ -68,24 +68,36 @@ export default function PrintJobsAdminPage() {
 }
 
 function PrintJobRow({ job }: { job: PrintJob }) {
+  // FARELO-210/211: a COMMAND_CHECK job has no productionStation (it isn't
+  // scoped to a production station) and its items carry prices — content
+  // vs. commandCheckContent, branched by type (see PrintJob's javadoc on
+  // the backend for why exactly one of each pair is populated).
+  const isCommandCheck = job.type === "COMMAND_CHECK";
+  const commandNumber = isCommandCheck
+    ? job.commandNumber
+    : job.content?.commandNumber;
+  const summary = isCommandCheck
+    ? `Conferência · ${job.commandCheckContent?.items
+        .map((item) => `${item.quantity}× ${item.productName}`)
+        .join(", ")}`
+    : job.content?.items
+        .map((item) => `${item.quantity}× ${item.productName}`)
+        .join(", ");
+
   return (
     <div className="border-line flex items-center gap-4 border-t px-5 py-3.5 first:border-t-0">
       <div className="flex-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold">
-            Comanda {job.content.commandNumber}
+            Comanda {commandNumber}
           </span>
-          {job.content.productionStation ? (
+          {!isCommandCheck && job.content?.productionStation ? (
             <span className="text-ink-faint text-xs">
               {job.content.productionStation === "BAR" ? "Bar" : "Cozinha"}
             </span>
           ) : null}
         </div>
-        <p className="text-ink-soft mt-0.5 text-sm">
-          {job.content.items
-            .map((item) => `${item.quantity}× ${item.productName}`)
-            .join(", ")}
-        </p>
+        <p className="text-ink-soft mt-0.5 text-sm">{summary}</p>
         <div className="text-ink-faint mt-1 text-xs">
           {dateTimeFormatter.format(new Date(job.createdAt))}
         </div>

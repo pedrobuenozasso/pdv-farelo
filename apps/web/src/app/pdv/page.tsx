@@ -58,6 +58,7 @@ import {
   recordPayment,
   type PaymentMethod,
 } from "@/lib/api/payments";
+import { printConference } from "@/lib/api/print-jobs";
 import { listProducts, type Product } from "@/lib/api/products";
 import { cn } from "@/lib/cn";
 
@@ -768,6 +769,8 @@ function PaymentPanel({
         </div>
       </div>
 
+      <PrintConferenceButton commandNumber={commandNumber} />
+
       {formOpen ? (
         <form
           onSubmit={handleSubmit((values) =>
@@ -848,6 +851,43 @@ function PaymentPanel({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+// FARELO-211/212: queues a COMMAND_CHECK PrintJob for the comanda — the
+// actual printing happens asynchronously via the Edge Agent (same as
+// every kitchen ticket), so this button only confirms the job was queued,
+// not that paper has come out of a printer yet.
+function PrintConferenceButton({ commandNumber }: { commandNumber: number }) {
+  const printConferenceMutation = useMutation({
+    mutationFn: () => printConference(commandNumber),
+  });
+
+  const errorMessage = apiErrorMessage(
+    printConferenceMutation.error,
+    "Não foi possível enviar a conferência para impressão.",
+  );
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Button
+        variant="outline"
+        disabled={printConferenceMutation.isPending}
+        onClick={() => printConferenceMutation.mutate()}
+      >
+        {printConferenceMutation.isPending
+          ? "Enviando..."
+          : "Imprimir Conferência"}
+      </Button>
+      {printConferenceMutation.isSuccess ? (
+        <p className="text-ink-faint text-center text-xs">
+          Conferência enviada para impressão.
+        </p>
+      ) : null}
+      {errorMessage ? (
+        <p className="text-red text-center text-xs">{errorMessage}</p>
+      ) : null}
     </div>
   );
 }

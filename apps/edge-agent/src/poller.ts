@@ -41,8 +41,22 @@ import {
   type PrintJob,
 } from "./printJobsClient.js";
 import { resolvePrinterAddress as resolvePrinterAddressImpl } from "./config.js";
-import { buildEscPosTicket as buildEscPosTicketImpl } from "./escpos.js";
+import {
+  buildEscPosTicket as buildEscPosTicketImpl,
+  buildCommandCheckEscPosTicket as buildCommandCheckEscPosTicketImpl,
+} from "./escpos.js";
 import { printOverTcp as printOverTcpImpl } from "./printerTransport.js";
+
+// FARELO-210/211: "estação" fictícia usada para resolver o endereço de
+// impressora de uma conferência (COMMAND_CHECK) através do mesmo mecanismo
+// de config.ts#resolvePrinterAddress já usado para productionStation — ver
+// esse arquivo para a convenção FARELO_PRINTER_<ESTAÇÃO>_HOST/_PORT. Uma
+// conferência não tem productionStation (não pertence a nenhuma estação de
+// produção), mas reaproveitar o mesmo mecanismo (com fallback automático
+// para FARELO_PRINTER_DEFAULT_HOST/_PORT quando FARELO_PRINTER_CONFERENCE_*
+// não está configurado) evita inventar uma segunda convenção de variável de
+// ambiente só para este caso.
+const CONFERENCE_STATION_KEY = "CONFERENCE";
 
 export type PollerOptions = {
   apiBaseUrl: string;
@@ -55,6 +69,7 @@ export type PollerDeps = {
   reportPrintJobFailed: typeof reportPrintJobFailedImpl;
   resolvePrinterAddress: typeof resolvePrinterAddressImpl;
   buildEscPosTicket: typeof buildEscPosTicketImpl;
+  buildCommandCheckEscPosTicket: typeof buildCommandCheckEscPosTicketImpl;
   printOverTcp: typeof printOverTcpImpl;
 };
 
@@ -64,6 +79,7 @@ const defaultDeps: PollerDeps = {
   reportPrintJobFailed: reportPrintJobFailedImpl,
   resolvePrinterAddress: resolvePrinterAddressImpl,
   buildEscPosTicket: buildEscPosTicketImpl,
+  buildCommandCheckEscPosTicket: buildCommandCheckEscPosTicketImpl,
   printOverTcp: printOverTcpImpl,
 };
 
@@ -84,16 +100,25 @@ async function printJob(
   deps: PollerDeps,
 ): Promise<void> {
   try {
-    const address = deps.resolvePrinterAddress(job.content.productionStation);
+    // FARELO-210/211: qual estação resolve o endereço da impressora, e qual
+    // formatador monta o ticket, depende de job.type — nunca inferido do
+    // que está populado (content vs. commandCheckContent), mesmo princípio
+    // documentado em printJobsClient.ts.
+    const station =
+      job.type === "COMMAND_CHECK" ? CONFERENCE_STATION_KEY : job.content!.productionStation;
+    const address = deps.resolvePrinterAddress(station);
     if (!address) {
       throw new Error(
         `Nenhum endereço de impressora configurado para a estação ` +
-          `"${job.content.productionStation ?? "sem estação"}" (nem fallback ` +
+          `"${station ?? "sem estação"}" (nem fallback ` +
           `FARELO_PRINTER_DEFAULT_HOST/FARELO_PRINTER_DEFAULT_PORT).`,
       );
     }
 
-    const ticket = deps.buildEscPosTicket(job.content);
+    const ticket =
+      job.type === "COMMAND_CHECK"
+        ? deps.buildCommandCheckEscPosTicket(job.commandCheckContent!)
+        : deps.buildEscPosTicket(job.content!);
     await deps.printOverTcp(address.host, address.port, ticket);
 
     await deps.reportPrintJobPrinted(apiBaseUrl, job.id);

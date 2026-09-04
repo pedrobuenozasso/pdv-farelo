@@ -3,11 +3,14 @@ package com.farelo.api.printing;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.farelo.api.catalog.ProductionStation;
+import com.farelo.api.command.Command;
+import com.farelo.api.command.CommandService;
 import com.farelo.api.ordering.Order;
 import com.farelo.api.ordering.OrderItem;
 import com.farelo.api.ordering.OrderItemRepository;
 import com.farelo.api.ordering.OrderNotFoundException;
 import com.farelo.api.ordering.OrderRepository;
+import com.farelo.api.ordering.OrderStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -154,16 +157,19 @@ public class PrintJobService {
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final PrintJobRepository printJobRepository;
+    private final CommandService commandService;
     private final ObjectMapper objectMapper;
 
     public PrintJobService(
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
             PrintJobRepository printJobRepository,
+            CommandService commandService,
             ObjectMapper objectMapper) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.printJobRepository = printJobRepository;
+        this.commandService = commandService;
         this.objectMapper = objectMapper;
     }
 
@@ -204,9 +210,51 @@ public class PrintJobService {
         List<PrintJob> printJobs = new ArrayList<>();
         for (Map.Entry<ProductionStation, List<OrderItem>> group : itemsByStation.entrySet()) {
             PrintJobContent content = PrintJobContent.from(order, group.getKey(), group.getValue());
-            printJobs.add(printJobRepository.save(new PrintJob(order, serialize(content, orderId))));
+            printJobs.add(printJobRepository.save(new PrintJob(order, serialize(content, "order " + orderId))));
         }
         return printJobs;
+    }
+
+    /**
+     * Creates and persists one {@code PENDING}, {@link
+     * PrintJobType#COMMAND_CHECK} {@link PrintJob} for a comanda's
+     * "conferência" (FARELO-211) — a customer-facing pre-bill listing every
+     * non-cancelled item across every non-{@code CANCELLED} order of the
+     * command, with prices and a total. Backs {@code POST
+     * /api/v1/commands/{number}/print-conference} (FARELO-212).
+     *
+     * <p>Excludes cancelled orders and, within a live order, individually
+     * cancelled items — the exact same exclusion {@code
+     * OrderItemRepository#sumOwedByCommand} applies for "what's owed"
+     * (FARELO-200/201), reused here (via {@link CommandCheckContent#from})
+     * rather than re-derived, per the project's Single Source of Truth
+     * rule for a comanda's total/items.
+     *
+     * <p>Unlike {@link #createForOrder(UUID)} (triggered automatically by
+     * {@code OutboxWorker} on {@code OrderCreated}), this is a deliberate,
+     * on-demand staff action — a comanda may be "conferida" any number of
+     * times as items are added, so there is no automatic trigger to hang
+     * this off of.
+     *
+     * @throws com.farelo.api.command.CommandNotFoundException if no
+     *         command exists for {@code commandNumber}.
+     */
+    @Transactional
+    public PrintJob createCommandCheck(int commandNumber) {
+        Command command = commandService.findByNumber(commandNumber);
+
+        List<Order> orders = orderRepository.findByCommandOrderByCreatedAtAsc(command).stream()
+                .filter(order -> order.getStatus() != OrderStatus.CANCELLED)
+                .toList();
+
+        List<OrderItem> items = orders.stream()
+                .flatMap(order -> orderItemRepository.findByOrder(order).stream())
+                .filter(item -> !item.isCancelled())
+                .toList();
+
+        CommandCheckContent content = CommandCheckContent.from(command, items);
+        return printJobRepository.save(
+                new PrintJob(command, serialize(content, "command " + commandNumber)));
     }
 
     /**
@@ -235,7 +283,7 @@ public class PrintJobService {
     // job.getOrder().getId() in the controller, after this read's own
     // transaction has already closed.
     public PrintJob getById(UUID id) {
-        return printJobRepository.findByIdWithOrder(id)
+        return printJobRepository.findByIdWithAssociations(id)
                 .orElseThrow(() -> new PrintJobNotFoundException(id));
     }
 
@@ -335,15 +383,19 @@ public class PrintJobService {
         return printJobRepository.save(job);
     }
 
-    private String serialize(PrintJobContent content, UUID orderId) {
+    // FARELO-210/211: takes Object (PrintJobContent or CommandCheckContent)
+    // + a plain label for the error message, rather than two near-identical
+    // overloads — the serialization/error-wrapping logic itself doesn't
+    // care which record it's given.
+    private String serialize(Object content, String context) {
         try {
             return objectMapper.writeValueAsString(content);
         } catch (JsonProcessingException e) {
-            // Same reasoning as OutboxPublisher#serialize: PrintJobContent
-            // is a simple record built from already-persisted data, so
-            // reaching here means Jackson genuinely can't serialize it —
-            // an invariant violation, not an expected runtime condition.
-            throw new IllegalStateException("Failed to serialize print job content for order " + orderId, e);
+            // Same reasoning as OutboxPublisher#serialize: content is a
+            // simple record built from already-persisted data, so reaching
+            // here means Jackson genuinely can't serialize it — an
+            // invariant violation, not an expected runtime condition.
+            throw new IllegalStateException("Failed to serialize print job content for " + context, e);
         }
     }
 

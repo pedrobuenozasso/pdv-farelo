@@ -1,5 +1,6 @@
 package com.farelo.api.printing;
 
+import com.farelo.api.command.Command;
 import com.farelo.api.ordering.Order;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -110,6 +111,23 @@ import java.util.UUID;
  * PrintJobService#retry(UUID)} for the full design rationale: why this is a
  * manual endpoint rather than an automatic scheduled retry, and why {@code
  * retryCount} exists with a maximum.
+ *
+ * <h2>Design decision 5 — {@code type} and the optional {@code order}/
+ * {@code command} (FARELO-210/211)</h2>
+ *
+ * A second kind of job — {@link PrintJobType#COMMAND_CHECK}, the
+ * "conferência" (customer-facing pre-bill for a whole {@link Command}, see
+ * {@link CommandCheckContent}) — doesn't fit the original {@code
+ * KITCHEN_TICKET} shape's assumption that a job always belongs to exactly
+ * one {@link Order}: a conferência spans every order of a comanda. Rather
+ * than a separate entity/table (which would mean the Edge Agent polling
+ * two endpoints, and a second PENDING/PRINTED/FAILED/retry lifecycle to
+ * keep in sync with this one), {@code order} became optional and a new
+ * optional {@code command} was added alongside it — {@code type} says
+ * which of the two is populated. The two constructors below each set
+ * exactly one, and {@code ck_print_job_type_scope}
+ * (V36__add_print_job_type_and_command_columns.sql) enforces that
+ * exclusivity at the database level too, not just by convention.
  */
 @Entity
 @Table(name = "print_job")
@@ -120,12 +138,27 @@ public class PrintJob {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "order_id", nullable = false)
+    // Populated for KITCHEN_TICKET, null for COMMAND_CHECK — see class
+    // javadoc, "Design decision 5".
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "order_id", nullable = true)
     private Order order;
 
+    // Populated for COMMAND_CHECK, null for KITCHEN_TICKET — see class
+    // javadoc, "Design decision 5".
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "command_id", nullable = true)
+    private Command command;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "type", nullable = false)
+    private PrintJobType type;
+
     // Frozen at creation time — never re-derived from order/order items.
-    // See class javadoc, "Design decision 2".
+    // See class javadoc, "Design decision 2". Holds a serialized
+    // PrintJobContent (KITCHEN_TICKET) or CommandCheckContent
+    // (COMMAND_CHECK) depending on type — see PrintJobResponse#from for
+    // where that branch happens.
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "content", nullable = false, updatable = false, columnDefinition = "jsonb")
     private String content;
@@ -153,6 +186,15 @@ public class PrintJob {
 
     public PrintJob(Order order, String content) {
         this.order = order;
+        this.type = PrintJobType.KITCHEN_TICKET;
+        this.content = content;
+    }
+
+    // FARELO-210/211: the COMMAND_CHECK counterpart — see class javadoc,
+    // "Design decision 5".
+    public PrintJob(Command command, String content) {
+        this.command = command;
+        this.type = PrintJobType.COMMAND_CHECK;
         this.content = content;
     }
 
@@ -213,6 +255,14 @@ public class PrintJob {
 
     public Order getOrder() {
         return order;
+    }
+
+    public Command getCommand() {
+        return command;
+    }
+
+    public PrintJobType getType() {
+        return type;
     }
 
     public String getContent() {

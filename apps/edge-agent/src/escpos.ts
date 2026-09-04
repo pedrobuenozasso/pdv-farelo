@@ -5,6 +5,11 @@
  * bytes exatos a enviar para a impressora térmica (`printerTransport.ts`
  * cuida do transporte de rede).
  *
+ * `buildCommandCheckEscPosTicket` (FARELO-210/211) é a contraparte para a
+ * "conferência" (`CommandCheckContent`) — mesmas constantes/convenções ESC/
+ * POS deste arquivo, layout diferente (preço por item + total, sem linha
+ * de estação).
+ *
  * **Decisão — comandos ESC/POS escritos à mão, sem lib nova**: ADR-002
  * cogitou `node-thermal-printer`/`escpos` como opção futura, mas o conjunto
  * de comandos necessário aqui é pequeno e bem documentado/padronizado (ESC @
@@ -25,7 +30,7 @@
  * não consulta preço, não interpreta o pedido.
  */
 
-import type { PrintJobContent } from "./printJobsClient.js";
+import type { CommandCheckContent, PrintJobContent } from "./printJobsClient.js";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -130,6 +135,60 @@ export function buildEscPosTicket(content: PrintJobContent): Buffer {
       parts.push(textLine(`${item.quantity}x ${item.productName}`));
     }
   }
+
+  parts.push(textLine(""));
+  parts.push(textLine(""));
+  parts.push(CUT);
+
+  return Buffer.concat(parts);
+}
+
+/** `12.5` → `"12,50"` — separador decimal brasileiro, sempre 2 casas. */
+function formatCurrency(value: number): string {
+  return value.toFixed(2).replace(".", ",");
+}
+
+/**
+ * Monta os bytes ESC/POS de uma "conferência" (FARELO-210/211) — a
+ * pré-conta de uma comanda inteira, a partir de um `CommandCheckContent`:
+ * mesma estrutura visual de `buildEscPosTicket` (inicialização, número da
+ * comanda em destaque, separador, corte no final), mas cada linha de item
+ * traz preço unitário/total (que um ticket de cozinha não precisa) e uma
+ * linha de total geral no fim da lista — não há linha de estação (uma
+ * conferência não pertence a nenhuma estação de produção).
+ *
+ * Função pura — mesma garantia de `buildEscPosTicket` (sem I/O). Testável
+ * só com asserções sobre os bytes retornados (ver `escpos.test.ts`).
+ */
+export function buildCommandCheckEscPosTicket(content: CommandCheckContent): Buffer {
+  const parts: Buffer[] = [
+    INIT,
+    SELECT_CODEPAGE_WPC1252,
+    ALIGN_CENTER,
+    PRINT_MODE_COMMAND_HIGHLIGHT,
+    textLine(`CONFERENCIA - COMANDA ${content.commandNumber}`),
+    PRINT_MODE_NORMAL,
+    ALIGN_LEFT,
+    textLine(SEPARATOR),
+  ];
+
+  if (content.items.length === 0) {
+    parts.push(textLine("(sem itens)"));
+  } else {
+    for (const item of content.items) {
+      parts.push(textLine(`${item.quantity}x ${item.productName}`));
+      parts.push(
+        textLine(
+          `  ${formatCurrency(item.unitPrice)} x ${item.quantity} = ${formatCurrency(item.lineTotal)}`,
+        ),
+      );
+    }
+  }
+
+  parts.push(textLine(SEPARATOR));
+  parts.push(PRINT_MODE_COMMAND_HIGHLIGHT);
+  parts.push(textLine(`TOTAL: R$ ${formatCurrency(content.total)}`));
+  parts.push(PRINT_MODE_NORMAL);
 
   parts.push(textLine(""));
   parts.push(textLine(""));

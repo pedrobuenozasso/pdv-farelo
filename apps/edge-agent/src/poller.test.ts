@@ -19,11 +19,34 @@ import type { PrintJob } from "./printJobsClient.js";
 function makeJob(overrides: Partial<PrintJob> = {}): PrintJob {
   return {
     id: "job-1",
+    type: "KITCHEN_TICKET",
     orderId: "order-1",
+    commandNumber: null,
     content: {
       commandNumber: 37,
       productionStation: "BAR",
       items: [{ productName: "Cappuccino", quantity: 2 }],
+    },
+    commandCheckContent: null,
+    status: "PENDING",
+    createdAt: "2026-01-01T12:00:00Z",
+    ...overrides,
+  };
+}
+
+// FARELO-210/211: fixture de um job COMMAND_CHECK, mesmo padrão de makeJob
+// acima — usado pelo teste que confirma o branch por job.type em printJob.
+function makeCommandCheckJob(overrides: Partial<PrintJob> = {}): PrintJob {
+  return {
+    id: "job-conference-1",
+    type: "COMMAND_CHECK",
+    orderId: null,
+    commandNumber: 37,
+    content: null,
+    commandCheckContent: {
+      commandNumber: 37,
+      items: [{ productName: "Cappuccino", quantity: 2, unitPrice: 8, lineTotal: 16 }],
+      total: 16,
     },
     status: "PENDING",
     createdAt: "2026-01-01T12:00:00Z",
@@ -55,6 +78,7 @@ describe("pollOnce", () => {
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterAddress: () => ({ host: "192.168.0.10", port: 9100 }),
       buildEscPosTicket: () => Buffer.from("ticket-bytes"),
+      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
       printOverTcp: async (host, port, ticket) => {
         printOverTcpCalls.push({ host, port, ticket });
       },
@@ -81,6 +105,7 @@ describe("pollOnce", () => {
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterAddress: () => null,
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
+      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
       printOverTcp: neverCalled("printOverTcp"),
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
       reportPrintJobFailed: async (_apiBaseUrl, jobId) => {
@@ -101,6 +126,7 @@ describe("pollOnce", () => {
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterAddress: () => ({ host: "192.168.0.10", port: 9100 }),
       buildEscPosTicket: () => Buffer.from("ticket-bytes"),
+      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
       printOverTcp: async () => {
         throw new Error("ECONNREFUSED (impressora offline, simulado)");
       },
@@ -122,6 +148,7 @@ describe("pollOnce", () => {
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterAddress: () => null,
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
+      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
       printOverTcp: neverCalled("printOverTcp"),
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
       reportPrintJobFailed: async () => {
@@ -140,6 +167,7 @@ describe("pollOnce", () => {
       },
       resolvePrinterAddress: neverCalled("resolvePrinterAddress"),
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
+      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
       printOverTcp: neverCalled("printOverTcp"),
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
       reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
@@ -166,6 +194,7 @@ describe("pollOnce", () => {
       resolvePrinterAddress: (station) =>
         station === "BAR" ? { host: "192.168.0.10", port: 9100 } : null,
       buildEscPosTicket: () => Buffer.from("ticket-bytes"),
+      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
       printOverTcp: async () => {},
       reportPrintJobPrinted: async (_apiBaseUrl, jobId) => {
         printedCalls.push(jobId);
@@ -179,5 +208,42 @@ describe("pollOnce", () => {
 
     assert.deepEqual(printedCalls, ["job-ok"]);
     assert.deepEqual(failedCalls, ["job-fail"]);
+  });
+
+  // FARELO-210/211: um job COMMAND_CHECK usa buildCommandCheckEscPosTicket
+  // (não buildEscPosTicket) e resolve o endereço de impressora pela
+  // "estação" fictícia "CONFERENCE" (ver poller.ts), não por
+  // job.content.productionStation (que é null para este tipo de job).
+  it("imprime uma conferência (COMMAND_CHECK) usando o formatador e a estação corretos", async () => {
+    const job = makeCommandCheckJob();
+    const printedCalls: string[] = [];
+    const resolveCalls: (string | null)[] = [];
+    const printOverTcpCalls: { host: string; port: number; ticket: Buffer }[] = [];
+
+    const deps: PollerDeps = {
+      fetchPendingPrintJobs: async () => [job],
+      resolvePrinterAddress: (station) => {
+        resolveCalls.push(station);
+        return { host: "192.168.0.20", port: 9100 };
+      },
+      buildEscPosTicket: neverCalled("buildEscPosTicket"),
+      buildCommandCheckEscPosTicket: () => Buffer.from("conference-ticket-bytes"),
+      printOverTcp: async (host, port, ticket) => {
+        printOverTcpCalls.push({ host, port, ticket });
+      },
+      reportPrintJobPrinted: async (_apiBaseUrl, jobId) => {
+        printedCalls.push(jobId);
+      },
+      reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
+    };
+
+    await pollOnce("http://localhost:8080", deps);
+
+    assert.deepEqual(printedCalls, ["job-conference-1"]);
+    assert.deepEqual(resolveCalls, ["CONFERENCE"]);
+    assert.deepEqual(
+      printOverTcpCalls[0]?.ticket,
+      Buffer.from("conference-ticket-bytes"),
+    );
   });
 });
