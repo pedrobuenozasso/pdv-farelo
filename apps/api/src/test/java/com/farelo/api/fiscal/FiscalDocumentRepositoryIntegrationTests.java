@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Verifies that {@link FiscalDocument} maps correctly onto the table created
- * by {@code V30__create_fiscal_document_table.sql}, against a real
+ * by {@code V31__create_fiscal_document_table.sql}, against a real
  * PostgreSQL instance — including that it round-trips against a real
  * {@link Command}, defaults to {@link FiscalDocumentStatus#PENDING} with
  * every identifying field {@code null}, that its mutable fields persist

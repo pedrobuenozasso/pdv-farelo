@@ -4695,7 +4695,7 @@ futuro genuíno).
 
 Id gerado via `@UuidGenerator` do Hibernate, style `RANDOM` — mesma
 estratégia de todo o resto deste código. Tabela criada pela migration
-`V30__create_fiscal_document_table.sql`.
+`V31__create_fiscal_document_table.sql`.
 
 `FiscalDocumentRepository` (Spring Data JPA) adiciona um único método de
 consulta próprio, `findByCommandOrderByCreatedAtAsc` — com `JOIN FETCH

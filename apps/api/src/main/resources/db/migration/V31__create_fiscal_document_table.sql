@@ -1,4 +1,4 @@
--- V30__create_fiscal_document_table.sql
+-- V31__create_fiscal_document_table.sql
 -- Fiscal domain (FARELO-156): a durable record representing a fiscal
 -- document (an NFC-e, once Epic 12 eventually emits real ones) associated
 -- with a comanda/sale. See FiscalDocument's javadoc for the full design
