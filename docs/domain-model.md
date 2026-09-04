@@ -3878,6 +3878,101 @@ Pacote: `com.farelo.api.payment`.
   `PaymentControllerIntegrationTests`), 60-66 (`POST`/`record` em
   `PaymentControllerIntegrationTests`, FARELO-141).
 
+### FARELO-142 — Permitir múltiplos pagamentos por comanda
+
+  **Leitura literal do título contra o que já existe**: `Payment`
+  (FARELO-140) já modela uma comanda tendo muitos pagamentos (`@ManyToOne`
+  para `Command`, sem nenhuma constraint de unicidade), e `PaymentService#record`
+  (FARELO-141) já podia ser chamado mais de uma vez para a mesma comanda —
+  múltiplos pagamentos por comanda já eram mecanicamente possíveis *antes*
+  deste ticket, sem nenhuma mudança. O que faltava não era "permitir" (isso
+  já estava permitido), era **expor uma computação real de "quanto já foi
+  pago nesta comanda"** — o roadmap confirma isso: o próprio próximo ticket,
+  FARELO-143 ("Validar total pago antes de fechar"), só faz sentido se
+  existir algo assim para ele consumir. Este ticket constrói exatamente essa
+  peça: a soma dos pagamentos de uma comanda, computável e exposta via API.
+
+  **`PaymentRepository#sumAmountByCommand`**: mesmo formato exato de
+  `InventoryMovementRepository#sumQuantityByIngredientId` (FARELO-095) — uma
+  `@Query` de agregação (`SELECT COALESCE(SUM(p.amount), 0) FROM Payment p
+  WHERE p.command = :command`), retornando `BigDecimal`, nunca `null`
+  (`COALESCE(..., 0)`, mesma razão: uma comanda sem nenhum pagamento reporta
+  total `0`, não `null`/erro). Recebe um `Command` (não um `UUID` solto) pelo
+  mesmo motivo `findByCommandOrderByCreatedAtAsc` já recebe um `Command`:
+  `PaymentService` já resolve o `number` de negócio via `CommandService`
+  antes de consultar o repositório, então já tem o `Command` em mãos.
+
+  **`PaymentService#getTotalPaid(int commandNumber)`**: resolve a comanda via
+  `CommandService#findByNumber` (mesmo método que `listByCommand` já usa,
+  **não** `findForPayment`) e soma via `sumAmountByCommand`. Deliberadamente
+  **não** gated por status — diferente de `record` (que exige `OPEN`/
+  `PAYMENT_REQUESTED`), esta é uma leitura pura sobre um ledger já gravado;
+  faz sentido perguntar "quanto foi pago" mesmo para uma comanda já
+  `CLOSED`. `404 COMMAND_NOT_FOUND` para número inexistente, mesmo
+  tratamento que todo outro método deste domínio.
+
+  **Endpoint — `GET /api/v1/commands/{number}/payments/total`, endpoint
+  irmão dedicado, não reformatação da listagem existente.** Decisão de
+  desenho central deste ticket: como expor "total pago" sem quebrar quem já
+  consome `GET /api/v1/commands/{number}/payments` (que retorna um array
+  puro de pagamentos, FARELO-140) — envolver esse array numa resposta
+  `{ payments: [...], totalPaid: ... }` mudaria o *shape* da resposta
+  existente, quebrando qualquer consumidor atual que espera um array na
+  raiz. Um endpoint novo e dedicado é estritamente aditivo, zero risco de
+  quebra. Mesmo raciocínio e mesmo formato que `IngredientBalanceResponse`/
+  `GET /api/v1/ingredients/{ingredientId}/balance` (FARELO-095) já resolveu
+  para o problema análogo "expor um agregado derivado, separado da listagem
+  do ledger que ele soma" — `GET .../balance` não reformata `GET
+  .../movements`, vive num endpoint próprio. `PaymentTotalResponse
+  (commandNumber, totalPaid)` é o DTO equivalente, em
+  `com.farelo.api.payment.web`, ao lado de `PaymentResponse`. Path escolhido
+  (`.../payments/total`, sibling sob a mesma coleção `payments`, em vez de
+  `.../total-paid` direto sob `commands/{number}`) porque o total é
+  logicamente um agregado *dos pagamentos*, não um atributo de `Command`
+  em si — e mantém o endpoint no mesmo `PaymentController`, sem exigir
+  `command.web` a depender de `payment` (mesmo raciocínio de direção de
+  dependência já documentado na seção FARELO-140 acima).
+
+  **Sem `@RequireRole`**: mesmo raciocínio de `listByCommand` — leitura sobre
+  o mesmo ledger, sem a natureza de "manuseio de caixa" que justifica
+  proteger `record` (FARELO-141). Expor um agregado somado não é mais
+  sensível que expor as linhas somadas.
+
+  **Decisão de escopo — "total devido"/"totalmente pago" fica de fora,
+  deliberadamente.** O ticket pede literalmente "permitir múltiplos
+  pagamentos por comanda", não "calcular total devido". Verificado antes de
+  assumir esse escopo (não adivinhado): nem `Order` nem `OrderItem` expõem
+  hoje nenhuma noção de "total da comanda" — não existe nenhuma consulta de
+  soma de `OrderItem.unitPrice * quantity` em lugar nenhum de `ordering`
+  (`OrderRepository`/`OrderItemRepository` não têm nada parecido com
+  `sumAmountByCommand`). Essa computação simplesmente não existe ainda em
+  lugar nenhum deste código — construí-la aqui seria escopo alheio ao nome
+  deste ticket, e precisamente o trabalho que FARELO-143 ("Validar total
+  pago antes de fechar") precisa fazer de qualquer forma: comparar "quanto
+  foi pago" (este ticket) contra "quanto é devido" (uma computação nova que
+  FARELO-143 terá que construir do zero) para decidir se uma comanda está
+  totalmente paga, antes de permitir `CommandService#close`. FARELO-142
+  constrói só o lado "pago"; FARELO-143 constrói o lado "devido" e a
+  comparação entre os dois. `CommandService#close` **não foi tocado por
+  este ticket** — continua exatamente como FARELO-034/141 o deixaram, sem
+  nenhuma validação de total pago.
+
+  **Testes**: `PaymentRepositoryIntegrationTests` ganhou testes para
+  `sumAmountByCommand` — soma correta de múltiplos pagamentos com métodos/
+  valores diferentes, escopada à comanda certa (sem vazar pagamento de outra
+  comanda, mesmo formato de teste que `findByCommandOrderByCreatedAtAsc` já
+  usa), e `0` (nunca `null`) para uma comanda sem nenhum pagamento. Usa
+  números de comanda dedicados **67-69** — não reaproveita 44/45/48
+  (já usados por outros testes desta mesma classe sem limpeza entre
+  métodos, o que tornaria uma asserção de soma exata dependente da ordem de
+  execução dos métodos do JUnit; ver javadoc atualizado da classe).
+  `PaymentControllerIntegrationTests` ganhou testes HTTP para `GET
+  .../payments/total` — soma correta escopada à comanda (sem vazar),
+  `0` para comanda sem pagamentos, e `404 COMMAND_NOT_FOUND` para número
+  inexistente. Usa números de comanda dedicados **70-72** — próximos livres
+  depois de todos os já reservados nesta suíte (44-49, 60-66; ver javadoc
+  atualizado da classe para o registro completo).
+
 ## fiscal
 
 Pacote: `com.farelo.api.fiscal`.

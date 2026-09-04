@@ -33,18 +33,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Integration test for {@code GET}/{@code POST
- * /api/v1/commands/{number}/payments} (FARELO-140/141), against a real
+ * /api/v1/commands/{number}/payments} (FARELO-140/141) and {@code GET
+ * /api/v1/commands/{number}/payments/total} (FARELO-142), against a real
  * PostgreSQL instance (Testcontainers).
  *
- * <p>Uses dedicated seeded command numbers (46-47, 49) for the {@code GET}
- * tests, and 60-66 for the new {@code POST} ({@link #record}) tests below —
- * distinct from every number already reserved elsewhere in this suite,
- * including {@link com.farelo.api.payment.PaymentRepositoryIntegrationTests}'
- * own 44-45, 48 (see that class's javadoc for the fuller registry) and,
- * critically, {@code CommandSeedIntegrationTests}' sampled numbers (1, 50,
- * 100 — asserted to stay {@code AVAILABLE} forever; 50 was the first choice
- * here and had to move once that collision surfaced as a test failure). Each
- * mutated number is reset back to {@code AVAILABLE} in {@code
+ * <p>Uses dedicated seeded command numbers (46-47, 49) for the {@code GET
+ * .../payments} tests, 60-66 for the {@code POST} ({@link #record}) tests,
+ * and 70-72 for the new {@code GET .../payments/total} ({@link #totalPaid})
+ * tests below — distinct from every number already reserved elsewhere in
+ * this suite, including {@link com.farelo.api.payment.PaymentRepositoryIntegrationTests}'
+ * own 44-45, 48, 67-69 (see that class's javadoc for the fuller registry)
+ * and, critically, {@code CommandSeedIntegrationTests}' sampled numbers (1,
+ * 50, 100 — asserted to stay {@code AVAILABLE} forever; 50 was the first
+ * choice here and had to move once that collision surfaced as a test
+ * failure). Each mutated number is reset back to {@code AVAILABLE} in {@code
  * resetMutatedTestCommands()} below, same {@code @AfterEach} pattern {@code
  * CommandControllerIntegrationTests} uses, since these commands are shared
  * state across this whole suite via the singleton Postgres container (see
@@ -53,11 +55,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * here — the "must not leak into another command's list" fixture below uses
  * a separate number (49) instead of 47, specifically so that assertion stays
  * true regardless of JUnit's (unspecified) method execution order within
- * this class. Each of 60-66 is used by exactly one {@code record}-related
- * test method (never shared), for the same order-independence reason.
+ * this class. Each of 60-66 and 70-72 is used by exactly one test method
+ * (never shared), for the same order-independence reason.
  *
- * <p><b>{@link #listByCommand} stays unprotected</b> — see {@link
- * PaymentController}'s javadoc for why, same precedent as {@code
+ * <p><b>{@link #listByCommand} and {@link #totalPaid} stay unprotected</b> —
+ * see {@link PaymentController}'s javadoc for why, same precedent as {@code
  * NotificationControllerIntegrationTests}/{@code
  * AuditLogControllerIntegrationTests}. No token/{@code Authorization} header
  * is sent by any {@code GET} test below, and none is required.
@@ -83,6 +85,11 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
     private static final int RECORD_VALIDATION_NUMBER = 64;
     private static final int RECORD_RBAC_NUMBER = 65;
     private static final int RECORD_BLOCKED_NUMBER = 66;
+
+    // FARELO-142 (GET .../payments/total) — see class javadoc.
+    private static final int TOTAL_COMMAND_WITH_PAYMENTS = 70;
+    private static final int TOTAL_OTHER_COMMAND_FOR_LEAK_CHECK = 71;
+    private static final int TOTAL_COMMAND_WITHOUT_PAYMENTS = 72;
 
     private static final String PASSWORD = "senha-forte-123";
 
@@ -391,6 +398,41 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                                 {"amount": 10.00, "method": "CASH"}
                                 """))
                 .andExpect(status().isCreated());
+    }
+
+    // --- FARELO-142: GET .../payments/total ---------------------------------
+
+    @Test
+    void totalPaidReturnsZeroWhenCommandHasNoPayments() throws Exception {
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/total", TOTAL_COMMAND_WITHOUT_PAYMENTS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.commandNumber").value(TOTAL_COMMAND_WITHOUT_PAYMENTS))
+                .andExpect(jsonPath("$.totalPaid").value(0));
+    }
+
+    @Test
+    void totalPaidSumsMultiplePaymentsScopedToCommand() throws Exception {
+        Command command = command(TOTAL_COMMAND_WITH_PAYMENTS);
+        Command otherCommand = command(TOTAL_OTHER_COMMAND_FOR_LEAK_CHECK);
+
+        paymentRepository.save(new Payment(command, new BigDecimal("12.00"), PaymentMethod.CASH));
+        paymentRepository.save(new Payment(command, new BigDecimal("8.75"), PaymentMethod.PIX));
+        // A payment on a different command must not leak into this total.
+        paymentRepository.save(new Payment(otherCommand, new BigDecimal("500.00"), PaymentMethod.OTHER));
+
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/total", TOTAL_COMMAND_WITH_PAYMENTS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.commandNumber").value(TOTAL_COMMAND_WITH_PAYMENTS))
+                .andExpect(jsonPath("$.totalPaid").value(20.75));
+    }
+
+    @Test
+    void totalPaidReturnsNotFoundForUnknownCommandNumber() throws Exception {
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/total", 999))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
     }
 
 }
