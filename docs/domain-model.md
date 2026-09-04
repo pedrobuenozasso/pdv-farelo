@@ -4412,6 +4412,97 @@ Pacote: `com.farelo.api.fiscal`.
   toda outra classe limpar suas próprias linhas primeiro. Ver a subseção
   FARELO-151 na seção `catalog` para o resto da mudança.
 
+### FARELO-152 — Adicionar NCM
+
+Primeiro dos três campos fiscais nomeados como tickets próprios na seção
+`FiscalProfile` acima (FARELO-152/153/154). Adiciona **apenas** `ncm` —
+CFOP (FARELO-153) e CST/CSOSN (FARELO-154) continuam fora de escopo,
+mesma disciplina "um campo por ticket" já documentada acima.
+
+**O que é NCM**: Nomenclatura Comum do Mercosul, um código de classificação
+tributária brasileiro real e padronizado — sempre exatamente 8 dígitos
+numéricos, nunca letras, nunca outro tamanho. Esse formato é uma
+característica fixa da legislação/nomenclatura aduaneira brasileira, não
+uma escolha específica desta aplicação; prompt mestre seção 24 só nomeia
+"NCM" sem especificar formato, então o formato usado aqui vem de
+conhecimento de domínio (lei tributária brasileira), não de uma suposição
+arbitrária.
+
+**`ncm` em `FiscalProfile`**: `String`, `@Column(name = "ncm", length = 8)`,
+**nullable** — decisão central deste ticket. `FiscalProfile` já existe
+desde o FARELO-150 com linhas sem NCM (criadas antes deste ticket); tornar
+a coluna `NOT NULL` agora exigiria um valor default de migração para essas
+linhas existentes, e não existe "NCM default" que faça sentido (diferente
+de `active`, cujo default `true` é genuinely universal). `NULL` significa
+"NCM ainda não configurado para este perfil fiscal", um estado distinto e
+permanente — mesmo raciocínio null-vs-valor já estabelecido por
+`Ingredient.minimumStock` (FARELO-099): `null` não é um placeholder
+temporário forçado pela migration, é um valor de negócio legítimo (um
+Admin pode muito bem criar/manter um perfil fiscal sem NCM atribuído por
+um tempo).
+
+**Onde a validação de formato vive — nos dois lugares (DTO + `CHECK`),
+mesmo padrão "validação na borda do DTO + `CHECK` de defesa em
+profundidade" já estabelecido por `Ingredient.minimumStock`**:
+
+- **DTO** (`FiscalProfileRequest`/`FiscalProfileUpdateRequest`):
+  `@Pattern(regexp = "^[0-9]{8}$")` em `ncm`, sem `@NotNull` — mesmo padrão
+  de `IngredientRequest.minimumStock` (`@DecimalMin` sem `@NotNull`): Bean
+  Validation só roda uma constraint contra um valor não-nulo, então isso
+  rejeita um NCM malformado quando enviado (contagem de dígitos errada,
+  não-numérico) mas continua permitindo o campo totalmente ausente. Erro
+  `400`/`code: "VALIDATION_ERROR"`, mesmo formato genérico já usado por
+  `@NotBlank` em `name` nesses mesmos DTOs — nenhum handler novo precisou
+  ser escrito.
+- **DB** (migration `V30__add_fiscal_profile_ncm_column.sql`):
+  `CHECK (ncm IS NULL OR ncm ~ '^[0-9]{8}$')` — backstop de defesa em
+  profundidade para qualquer caminho de escrita que não passe pelo DTO
+  (ex: um `save` direto no repositório, uma futura migração/importação de
+  dados), mesmo raciocínio exato de `CHECK (minimum_stock IS NULL OR
+  minimum_stock >= 0)` em `ingredient.minimum_stock` (V24: "esta coluna não
+  tem validação equivalente do lado do request guardando todo caminho de
+  escrita possível de outra forma"). Uma `CHECK` com regex, não a
+  convenção `VARCHAR + CHECK (col IN (...))` usada para colunas
+  enum-backed deste schema (ex: `ingredient.unit`, V16) — NCM não é uma
+  enumeração fixa pequena, é uma tabela governamental externa grande (e
+  mutável ao longo do tempo) de milhares de códigos válidos, então o banco
+  só garante a propriedade que é de fato estrutural e permanente (exatos 8
+  dígitos), não pertencimento à tabela NCM vigente (isso seria uma
+  integração/lookup futura, fora de escopo deste ticket).
+
+**`FiscalProfileRequest`/`FiscalProfileUpdateRequest`**: ambos ganham
+`ncm` opcional (`String`, sem `@NotNull`) — mesmo formato opcional de
+`description`/`IngredientRequest.minimumStock`. Em
+`FiscalProfileUpdateRequest`, `ncm` segue a mesma convenção "`PUT` é
+substituição completa" já estabelecida por `description` e por
+`IngredientUpdateRequest.minimumStock`: omitir o campo (ou enviar
+`null`) no `PUT` **limpa** um NCM previamente configurado de volta para
+"não configurado" — comportamento coberto por
+`updateWithoutNcmClearsPreviouslySetNcm` em
+`FiscalProfileControllerIntegrationTests`.
+
+**`FiscalProfileResponse`**: ganha `ncm` (posicionado entre `description`
+e `active`). **`FiscalProfileService`**: `create`/`update` ganham um
+parâmetro `ncm` a mais, repassado direto para
+`FiscalProfile.setNcm(...)` — nenhuma lógica de negócio nova além de
+persistir o valor já validado pelo DTO.
+
+**Testes**: `FiscalProfileRepositoryIntegrationTests` ganha
+`savesAndFindsFiscalProfileWithNcm`/`savesFiscalProfileWithoutNcm`.
+`FiscalProfileControllerIntegrationTests` ganha
+`createsFiscalProfileWithValidNcm`/`createsFiscalProfileWithoutNcm`/
+`rejectsNcmWithWrongDigitCountWithStandardErrorFormat`/
+`rejectsNonNumericNcmWithStandardErrorFormat` (criação) e
+`updatesFiscalProfileSettingNcm`/`updateWithoutNcmClearsPreviouslySetNcm`/
+`rejectsInvalidNcmOnUpdateWithStandardErrorFormat` (atualização) — mesmo
+formato de sucesso/validação/limpar-campo-opcional já usado pelos testes
+de `description`/`Ingredient.minimumStock`.
+
+**RBAC**: nenhuma mudança — `FiscalProfileController` continua sem
+`@RequireRole` em nenhum endpoint, mesmo raciocínio/precedente já
+documentado na seção `FiscalProfile` acima (aplicação de RBAC é sempre um
+ticket dedicado e distinto, ainda não nomeado para `fiscal`).
+
 ### FARELO-155 — Criar `CompanyFiscalConfiguration`
 
 Segunda entidade do domínio `fiscal` — **distinta de `FiscalProfile`**, não

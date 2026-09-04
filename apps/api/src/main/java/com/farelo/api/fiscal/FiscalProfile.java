@@ -42,6 +42,15 @@ import java.util.UUID;
  * three concrete future tickets whose entire reason to exist is adding
  * exactly these fields one at a time.
  *
+ * <p><b>FARELO-152 ("Adicionar NCM") update — {@link #ncm} added.</b> The
+ * first of the three fiscal codes named above, now implemented. NCM
+ * (Nomenclatura Comum do Mercosul) is a real, standardized Brazilian tax
+ * classification code, always exactly 8 numeric digits — that shape is
+ * fixed by Brazilian tax law, not an app-specific format choice. Nullable
+ * (see {@link #ncm}'s own javadoc) — CFOP/CST/CSOSN remain out of scope for
+ * this ticket, same discipline as above (FARELO-153/154 still not
+ * implemented).
+ *
  * <p>What a {@code FiscalProfile} minimally needs to exist as a real,
  * useful row <i>before</i> any fiscal code is attached to it is just a way
  * for a business owner to name and describe a fiscal category they intend
@@ -77,6 +86,25 @@ public class FiscalProfile {
 
     @Column(name = "description")
     private String description;
+
+    /**
+     * NCM (Nomenclatura Comum do Mercosul), FARELO-152 — a real,
+     * standardized Brazilian tax classification code, always exactly 8
+     * numeric digits. Nullable: existing {@code FiscalProfile} rows predate
+     * this ticket and have no NCM, and there is no meaningful "default NCM"
+     * to backfill (unlike {@link #active}, whose default is genuinely
+     * universal) — same "null means not configured yet, a distinct,
+     * permanent state" reasoning as {@code Ingredient.minimumStock}
+     * (FARELO-099). Format ({@code ^[0-9]{8}$}) is validated at the request
+     * DTO boundary ({@code @Pattern} on {@code FiscalProfileRequest}/{@code
+     * FiscalProfileUpdateRequest}) and backstopped by a DB {@code CHECK}
+     * constraint (see {@code V30__add_fiscal_profile_ncm_column.sql}) for
+     * any write path that bypasses the DTO — same defense-in-depth pattern
+     * as {@code Ingredient.minimumStock}'s {@code CHECK (minimum_stock IS
+     * NULL OR minimum_stock >= 0)}.
+     */
+    @Column(name = "ncm", length = 8)
+    private String ncm;
 
     @Column(name = "active", nullable = false)
     private boolean active = true;
@@ -125,6 +153,14 @@ public class FiscalProfile {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getNcm() {
+        return ncm;
+    }
+
+    public void setNcm(String ncm) {
+        this.ncm = ncm;
     }
 
     public boolean isActive() {

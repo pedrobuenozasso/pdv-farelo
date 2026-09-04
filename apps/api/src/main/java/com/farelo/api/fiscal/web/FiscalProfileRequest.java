@@ -1,6 +1,7 @@
 package com.farelo.api.fiscal.web;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 
 /**
  * Request body for {@code POST /api/v1/fiscal-profiles}. Never expose the
@@ -17,8 +18,22 @@ import jakarta.validation.constraints.NotBlank;
  * ProductRequest.description}): a fiscal profile is meaningfully
  * identifiable by {@code name} alone (e.g. "Isento"), so a description is a
  * convenience, not a requirement.
+ *
+ * <p>{@code ncm} (FARELO-152) is optional too, defaulting to {@code null}
+ * ("no NCM configured") when omitted — same shape as {@code
+ * IngredientRequest.minimumStock}: there's no single unambiguous default
+ * value to silently apply (a missing NCM is a distinct, deliberate state,
+ * not an error), so leaving it unset must genuinely mean "not configured
+ * yet". {@code @Pattern(regexp = "^[0-9]{8}$")} without {@code @NotNull}:
+ * Bean Validation only runs a constraint against a non-null value, so this
+ * rejects a malformed NCM (wrong digit count, non-numeric) when sent while
+ * still allowing the field to be entirely absent. A real NCM is always
+ * exactly 8 numeric digits (standard Brazilian tax classification code,
+ * not an app-specific format choice) — see {@code FiscalProfile.ncm}'s
+ * javadoc.
  */
 public record FiscalProfileRequest(
         @NotBlank String name,
-        String description) {
+        String description,
+        @Pattern(regexp = "^[0-9]{8}$", message = "ncm must be exactly 8 numeric digits") String ncm) {
 }

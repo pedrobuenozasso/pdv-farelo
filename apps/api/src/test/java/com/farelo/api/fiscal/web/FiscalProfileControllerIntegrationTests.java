@@ -119,6 +119,74 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(persisted.get().getDescription()).isNull();
     }
 
+    // FARELO-152.
+    @Test
+    void createsFiscalProfileWithValidNcm() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Tributado padrão", "ncm": "12345678"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.ncm").value("12345678"))
+                .andReturn();
+
+        FiscalProfileResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), FiscalProfileResponse.class);
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getNcm()).isEqualTo("12345678");
+    }
+
+    // FARELO-152.
+    @Test
+    void createsFiscalProfileWithoutNcm() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.ncm").value(nullValue()))
+                .andReturn();
+
+        FiscalProfileResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), FiscalProfileResponse.class);
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getNcm()).isNull();
+    }
+
+    // FARELO-152.
+    @Test
+    void rejectsNcmWithWrongDigitCountWithStandardErrorFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento", "ncm": "1234567"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    // FARELO-152.
+    @Test
+    void rejectsNonNumericNcmWithStandardErrorFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Isento", "ncm": "1234567A"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
     @Test
     void rejectsBlankNameWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
@@ -242,6 +310,75 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
         Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(fiscalProfile.getId());
         assertThat(persisted).isPresent();
         assertThat(persisted.get().getDescription()).isNull();
+    }
+
+    // FARELO-152.
+    @Test
+    void updatesFiscalProfileSettingNcm() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true,
+                  "ncm": "87654321"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ncm").value("87654321"));
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(fiscalProfile.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getNcm()).isEqualTo("87654321");
+    }
+
+    // FARELO-152.
+    @Test
+    void updateWithoutNcmClearsPreviouslySetNcm() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+        fiscalProfile.setNcm("12345678");
+        fiscalProfileRepository.save(fiscalProfile);
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ncm").value(nullValue()));
+
+        Optional<FiscalProfile> persisted = fiscalProfileRepository.findById(fiscalProfile.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getNcm()).isNull();
+    }
+
+    // FARELO-152.
+    @Test
+    void rejectsInvalidNcmOnUpdateWithStandardErrorFormat() throws Exception {
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+
+        String body = """
+                {
+                  "name": "Isento",
+                  "active": true,
+                  "ncm": "abc"
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
     @Test
