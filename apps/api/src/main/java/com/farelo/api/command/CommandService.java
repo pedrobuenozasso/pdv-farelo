@@ -167,4 +167,84 @@ public class CommandService {
         return command;
     }
 
+    /**
+     * Staff-facing edit of a comanda's central customer record
+     * (FARELO-190/191, {@code PATCH /api/v1/commands/{number}/customer}).
+     * No status precondition — unlike {@link #open}/{@link #close}, this
+     * isn't a {@code Command} state transition and doesn't need the
+     * comanda to be in any particular status; a cashier can correct a
+     * customer's name/phone at any point in the comanda's lifecycle.
+     *
+     * <p>Full replace, same convention as every other {@code PUT}/{@code
+     * PATCH} in this codebase that isn't itself a state transition:
+     * omitting/blanking a field clears it (FARELO-190's "nome opcional",
+     * FARELO-191's "permitir telefone vazio") rather than leaving the old
+     * value untouched.
+     */
+    @Transactional
+    public Command updateCustomer(int number, String customerName, String customerPhone) {
+        Command command = findByNumber(number);
+        applyCustomerInfo(command, customerName, customerPhone);
+        return commandRepository.save(command);
+    }
+
+    /**
+     * The write-through half of FARELO-191's "mesma informação central"
+     * requirement: called from {@code OrderService#create} right after an
+     * order is placed (from either the customer-facing QR checkout or the
+     * PDV's own manual item entry, FARELO-182), so whichever channel last
+     * supplied a real name/phone becomes this comanda's current customer
+     * record — the same value {@link #updateCustomer} would produce by
+     * hand. Unlike {@link #updateCustomer}, this is deliberately NOT a
+     * full replace: a manually-entered PDV order (FARELO-182's flow, which
+     * collects no customer info at all) must not blank out a name/phone a
+     * customer already gave via the QR form earlier in the same visit — so
+     * this only touches the command when at least one of the two arguments
+     * is actually non-blank.
+     *
+     * <p>Takes the already-loaded {@code command} (not a number) — the
+     * caller ({@code OrderService#create}) already holds the exact managed
+     * entity it just resolved via {@code openForOrdering}; re-fetching by
+     * number here would be a redundant query in the same transaction.
+     */
+    public void applyCustomerInfoIfProvided(Command command, String customerName, String customerPhone) {
+        boolean hasName = customerName != null && !customerName.isBlank();
+        boolean hasPhone = customerPhone != null && !customerPhone.isBlank();
+        if (hasName || hasPhone) {
+            applyCustomerInfo(command, customerName, customerPhone);
+        }
+    }
+
+    private void applyCustomerInfo(Command command, String customerName, String customerPhone) {
+        command.setCustomerName(
+                customerName != null && !customerName.isBlank() ? customerName.trim() : null);
+        command.setCustomerPhone(normalizePhone(customerPhone));
+    }
+
+    // FARELO-191: "normalizar número; armazenar código do país" — strips
+    // everything but digits, then prepends Brazil's country code (55) when
+    // the result looks like a bare local number (a 10 or 11-digit DDD +
+    // number, the two real lengths for a Brazilian landline/mobile) and
+    // doesn't already start with one. This is deliberately a heuristic,
+    // not a real phone-number library (no libphonenumber dependency in
+    // this codebase) — "validação básica" per the ticket, same
+    // discipline-over-precision choice already made for
+    // Order.customerPhone (see that field's javadoc: no format validator,
+    // YAGNI) and CompanyFiscalConfiguration.cnpj (no digit-verification
+    // logic). Returns null for blank/empty input — FARELO-191's "permitir
+    // telefone vazio".
+    static String normalizePhone(String rawPhone) {
+        if (rawPhone == null) {
+            return null;
+        }
+        String digits = rawPhone.replaceAll("\\D", "");
+        if (digits.isEmpty()) {
+            return null;
+        }
+        if (!digits.startsWith("55") && (digits.length() == 10 || digits.length() == 11)) {
+            digits = "55" + digits;
+        }
+        return digits;
+    }
+
 }

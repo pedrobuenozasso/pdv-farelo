@@ -102,6 +102,16 @@ public class OrderService {
             int commandNumber, List<NewOrderItem> newItems, String customerName, String customerPhone) {
         Command command = commandService.openForOrdering(commandNumber);
 
+        // FARELO-190/191: write-through to the comanda's central customer
+        // record whenever this order actually carries a name/phone — see
+        // CommandService#applyCustomerInfoIfProvided's javadoc for why
+        // this is the mechanism that makes the QR checkout and a PDV edit
+        // resolve to "the same central information" (FARELO-191's
+        // acceptance criterion), and why it's a no-op (not a blank-out)
+        // when neither argument is provided, e.g. a PDV manual item entry
+        // (FARELO-182), which collects no customer info at all.
+        commandService.applyCustomerInfoIfProvided(command, customerName, customerPhone);
+
         Order order = orderRepository.save(new Order(command, customerName, customerPhone));
         orderStatusHistoryRepository.save(new OrderStatusHistory(order, null, OrderStatus.CREATED));
 

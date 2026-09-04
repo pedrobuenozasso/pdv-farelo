@@ -14,6 +14,8 @@ public record CommandResponse(
         UUID id,
         int number,
         CommandStatus status,
+        String customerName,
+        String customerPhone,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
@@ -22,6 +24,8 @@ public record CommandResponse(
                 command.getId(),
                 command.getNumber(),
                 command.getStatus(),
+                command.getCustomerName(),
+                command.getCustomerPhone(),
                 command.getCreatedAt(),
                 command.getUpdatedAt());
     }

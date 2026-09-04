@@ -38,6 +38,8 @@ import {
   closeCommand,
   getCommand,
   openCommand,
+  updateCommandCustomer,
+  type Command,
   type CommandStatus,
 } from "@/lib/api/commands";
 import {
@@ -228,15 +230,6 @@ function CommandDetail({
   const totalPaid = totalPaidQuery.data?.totalPaid ?? 0;
   const remaining = Math.max(totalOwed - totalPaid, 0);
 
-  // Cliente informado no pedido mais recente que trouxe essa informação —
-  // ver Order.customerName/customerPhone's javadoc no backend: é um
-  // snapshot por pedido, não um cadastro de cliente único por comanda, mas
-  // na prática a mesma pessoa costuma abrir todos os pedidos de uma
-  // comanda, então o mais recente é a melhor aproximação disponível hoje.
-  const customerOrder = [...orders]
-    .reverse()
-    .find((order) => order.customerName);
-
   return (
     <Card className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
@@ -296,27 +289,8 @@ function CommandDetail({
         </div>
       ) : null}
 
-      {customerOrder ? (
-        <div className="border-line bg-bg flex items-center gap-3.5 rounded-xl border px-4 py-3.5">
-          <span className="bg-primary-soft text-primary-dark flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-serif text-sm font-semibold">
-            {customerOrder
-              .customerName!.split(" ")
-              .map((part) => part[0])
-              .slice(0, 2)
-              .join("")
-              .toUpperCase()}
-          </span>
-          <div>
-            <div className="font-serif text-[15px] font-semibold">
-              {customerOrder.customerName}
-            </div>
-            <div className="text-ink-soft text-[13px]">
-              {customerOrder.customerPhone ?? "Sem telefone informado"} ·
-              informado no pedido das{" "}
-              {dateTimeFormatter.format(new Date(customerOrder.createdAt))}
-            </div>
-          </div>
-        </div>
+      {command ? (
+        <CustomerCard commandNumber={number} command={command} />
       ) : null}
 
       <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-start">
@@ -537,6 +511,156 @@ function AddItemPanel({
         </div>
       ) : null}
       {errorMessage ? <p className="text-red text-sm">{errorMessage}</p> : null}
+    </div>
+  );
+}
+
+// FARELO-190/191 — displays/edits the comanda's central customer record
+// (Command.customerName/customerPhone), not an inference from the latest
+// order like this screen used to do. Read-modify-write against
+// updateCommandCustomer (PATCH .../customer); the same record the QR
+// checkout's write-through keeps updated (see docs/domain-model.md,
+// seção command).
+function formatPhone(digits: string): string {
+  if (digits.length === 13 && digits.startsWith("55")) {
+    return `+55 (${digits.slice(2, 4)}) ${digits.slice(4, 9)}-${digits.slice(9)}`;
+  }
+  if (digits.length === 12 && digits.startsWith("55")) {
+    return `+55 (${digits.slice(2, 4)}) ${digits.slice(4, 8)}-${digits.slice(8)}`;
+  }
+  return digits;
+}
+
+function CustomerCard({
+  commandNumber,
+  command,
+}: {
+  commandNumber: number;
+  command: Command;
+}) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { isSubmitting },
+  } = useForm<{ customerName: string; customerPhone: string }>({
+    defaultValues: {
+      customerName: command.customerName ?? "",
+      customerPhone: command.customerPhone ?? "",
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (values: { customerName: string; customerPhone: string }) =>
+      updateCommandCustomer(commandNumber, {
+        customerName: values.customerName.trim() || undefined,
+        customerPhone: values.customerPhone.trim() || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["pdv", "command", commandNumber],
+      });
+      setEditing(false);
+    },
+  });
+
+  const errorMessage = apiErrorMessage(
+    updateMutation.error,
+    "Não foi possível salvar o cliente.",
+  );
+
+  if (editing) {
+    return (
+      <form
+        onSubmit={handleSubmit((values) => updateMutation.mutate(values))}
+        noValidate
+        className="border-line bg-bg flex flex-col gap-2.5 rounded-xl border px-4 py-3.5"
+      >
+        <div className="flex flex-wrap gap-2">
+          <input
+            placeholder="Nome (opcional)"
+            className="border-line bg-surface focus:border-primary flex-1 rounded-lg border px-3 py-2 text-sm outline-none"
+            {...register("customerName")}
+          />
+          <input
+            placeholder="Telefone (opcional)"
+            className="border-line bg-surface focus:border-primary flex-1 rounded-lg border px-3 py-2 text-sm outline-none"
+            {...register("customerPhone")}
+          />
+        </div>
+        {errorMessage ? (
+          <p className="text-red text-sm">{errorMessage}</p>
+        ) : null}
+        <div className="flex gap-2">
+          <Button
+            type="submit"
+            disabled={isSubmitting || updateMutation.isPending}
+            className="px-4 py-2 text-[13px]"
+          >
+            {updateMutation.isPending ? "Salvando..." : "Salvar"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              reset();
+              setEditing(false);
+            }}
+            className="px-4 py-2 text-[13px]"
+          >
+            Cancelar
+          </Button>
+        </div>
+      </form>
+    );
+  }
+
+  if (!command.customerName && !command.customerPhone) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="border-line text-ink-soft hover:border-primary/40 rounded-xl border border-dashed px-4 py-3.5 text-left text-sm"
+      >
+        + Adicionar cliente
+      </button>
+    );
+  }
+
+  const initials = command.customerName
+    ? command.customerName
+        .split(" ")
+        .map((part) => part[0])
+        .slice(0, 2)
+        .join("")
+        .toUpperCase()
+    : "?";
+
+  return (
+    <div className="border-line bg-bg flex items-center gap-3.5 rounded-xl border px-4 py-3.5">
+      <span className="bg-primary-soft text-primary-dark flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-serif text-sm font-semibold">
+        {initials}
+      </span>
+      <div className="flex-1">
+        <div className="font-serif text-[15px] font-semibold">
+          {command.customerName ?? "Cliente sem nome"}
+        </div>
+        <div className="text-ink-soft text-[13px]">
+          {command.customerPhone
+            ? formatPhone(command.customerPhone)
+            : "Sem telefone informado"}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="text-primary text-xs font-bold hover:underline"
+      >
+        Editar
+      </button>
     </div>
   );
 }

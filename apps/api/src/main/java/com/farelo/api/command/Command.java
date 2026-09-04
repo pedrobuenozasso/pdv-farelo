@@ -32,6 +32,20 @@ import java.util.UUID;
  * <p>Id generation follows the same strategy as {@link
  * com.farelo.api.catalog.Category} — see its javadoc for why {@code RANDOM}
  * (UUIDv4) is used instead of UUIDv7.
+ *
+ * <p><b>{@code customerName}/{@code customerPhone}</b> (FARELO-190/191):
+ * the single central "who is at this comanda right now" customer record —
+ * editable directly by staff via PDV ({@code CommandService#updateCustomer})
+ * and kept in sync whenever an order is created with a non-blank name/phone
+ * ({@code OrderService#create}'s write-through). Deliberately not the same
+ * thing as {@code Order.customerName}/{@code Order.customerPhone} — those
+ * stay an immutable per-order snapshot (see that class's javadoc); these
+ * two are the current, mutable value for the comanda as a whole. Both
+ * nullable — "no customer info recorded (yet, or anymore)" is a legitimate
+ * permanent state, not a placeholder. {@code customerPhone} is always
+ * stored normalized (digits only, country code prepended when missing —
+ * see {@code CommandService#normalizePhone}), never however staff typed
+ * it.
  */
 @Entity
 @Table(name = "command")
@@ -50,6 +64,12 @@ public class Command {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private CommandStatus status = CommandStatus.AVAILABLE;
+
+    @Column(name = "customer_name")
+    private String customerName;
+
+    @Column(name = "customer_phone")
+    private String customerPhone;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -95,6 +115,22 @@ public class Command {
 
     public void setStatus(CommandStatus status) {
         this.status = status;
+    }
+
+    public String getCustomerName() {
+        return customerName;
+    }
+
+    public void setCustomerName(String customerName) {
+        this.customerName = customerName;
+    }
+
+    public String getCustomerPhone() {
+        return customerPhone;
+    }
+
+    public void setCustomerPhone(String customerPhone) {
+        this.customerPhone = customerPhone;
     }
 
     public OffsetDateTime getCreatedAt() {

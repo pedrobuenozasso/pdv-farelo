@@ -26,8 +26,21 @@ export type Command = {
   id: string;
   number: number;
   status: CommandStatus;
+  // FARELO-190/191 — the comanda's single central customer record, kept
+  // in sync with whichever of PDV/QR last supplied a name/phone (see
+  // updateCommandCustomer below and the backend's
+  // CommandService#applyCustomerInfoIfProvided). Distinct from an
+  // Order's own customerName/customerPhone snapshot (orders.ts's
+  // Order type) — that one stays per-order and immutable.
+  customerName: string | null;
+  customerPhone: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type UpdateCommandCustomerInput = {
+  customerName?: string;
+  customerPhone?: string;
 };
 
 export async function getCommand(number: number): Promise<Command> {
@@ -51,6 +64,20 @@ export async function closeCommand(number: number): Promise<Command> {
   const response = await fetch(`${COMMANDS_URL}/${number}/close`, {
     method: "POST",
     headers: authHeaders(),
+  });
+  return parseResponse<Command>(response);
+}
+
+// FARELO-190/191 — full replace: omitting a field clears it, matching the
+// backend's own semantics (see CommandCustomerUpdateRequest's javadoc).
+export async function updateCommandCustomer(
+  number: number,
+  input: UpdateCommandCustomerInput,
+): Promise<Command> {
+  const response = await fetch(`${COMMANDS_URL}/${number}/customer`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
   });
   return parseResponse<Command>(response);
 }

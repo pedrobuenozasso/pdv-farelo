@@ -1,0 +1,48 @@
+-- V34__add_command_customer_columns.sql
+-- Novos tickets FARELO-190/191 ("Editar nome/telefone do cliente pelo
+-- PDV") — introduce the single central customer record per comanda that
+-- FARELO-191's acceptance criteria requires ("o telefone cadastrado no QR
+-- e o telefone cadastrado no PDV devem utilizar a mesma informação
+-- central da comanda/cliente"). Command had no customer fields at all
+-- before this ticket — customerName/customerPhone previously only
+-- existed as an immutable per-Order snapshot (Order.customerName/
+-- customerPhone, FARELO-045/FARELO-050) captured once at checkout time.
+--
+-- These two are deliberately separate concepts, not a migration of the
+-- Order columns:
+--   * Order.customerName/customerPhone stays exactly as-is — an
+--     immutable historical snapshot of what was typed at THAT specific
+--     checkout, still the source OrderReadyNotificationService reads to
+--     know who to notify about THAT order.
+--   * Command.customer_name/customer_phone (this migration) is the
+--     current, editable "who is at this comanda right now" record —
+--     writable directly by staff via PDV (PATCH
+--     /api/v1/commands/{number}/customer, CommandService#updateCustomer)
+--     and kept in sync automatically whenever an order is created with
+--     a non-blank name/phone (OrderService#create's write-through to
+--     CommandService#applyCustomerInfoIfProvided) — that's what makes
+--     "QR" and "PDV" resolve to the same central value: both paths
+--     write through the same CommandService method.
+--
+-- Nullable, no default: both fields optional per FARELO-190 ("nome
+-- opcional") and FARELO-191 ("permitir telefone vazio") — NULL means "no
+-- customer info recorded for this comanda yet/anymore", a legitimate
+-- permanent state, not a placeholder.
+--
+-- customer_phone stored normalized (digits only, country code prepended
+-- when missing — see CommandService#normalizePhone) rather than however
+-- staff typed it, so every reader (PDV display, a future WhatsApp
+-- integration) gets one consistent shape without re-parsing — same
+-- "5511999999999" shape the notification domain's Notification.recipient
+-- already uses (docs/domain-model.md, seção notification).
+--
+-- VARCHAR(20): generous ceiling for a normalized, digits-only phone
+-- (longest realistic case is well under 15 digits per E.164) — not a
+-- structural format constraint like fiscal_profile.ncm/cfop's exact-
+-- digit-count CHECKs, since phone number length legitimately varies by
+-- country and this ticket's own validation is deliberately "básica"
+-- (see CommandCustomerUpdateRequest), not a strict format authority.
+
+ALTER TABLE command
+    ADD COLUMN customer_name VARCHAR(120),
+    ADD COLUMN customer_phone VARCHAR(20);

@@ -4,9 +4,12 @@ import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandService;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.rbac.RequireRole;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -84,6 +87,22 @@ public class CommandController {
     @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
     public CommandResponse open(@PathVariable int number) {
         Command command = commandService.open(number);
+        return CommandResponse.from(command);
+    }
+
+    // FARELO-190/191 — same role list as open() above: a front-of-house
+    // action (correcting a customer's name/phone), no money implication,
+    // no reason to exclude ATTENDANT while including CASHIER. PATCH, not
+    // PUT: unlike open()'s state-transition verb-suffix convention, this
+    // genuinely is a partial update of the comanda's customer fields (see
+    // CommandCustomerUpdateRequest's javadoc for the full-replace
+    // semantics within those two fields specifically).
+    @PatchMapping("/{number}/customer")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
+    public CommandResponse updateCustomer(
+            @PathVariable int number, @Valid @RequestBody CommandCustomerUpdateRequest request) {
+        Command command =
+                commandService.updateCustomer(number, request.customerName(), request.customerPhone());
         return CommandResponse.from(command);
     }
 

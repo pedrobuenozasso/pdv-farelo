@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -21,6 +22,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -63,6 +65,11 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
     private static final int CONFLICT_TEST_NUMBER = 3;
     private static final int RBAC_OPEN_NUMBER = 91;
 
+    // FARELO-190/191 — 4/5/92 are free (retired from this file's own
+    // FARELO-143 tests, "not reused here" per this class's javadoc).
+    private static final int CUSTOMER_UPDATE_NUMBER = 4;
+    private static final int RBAC_CUSTOMER_NUMBER = 5;
+
     private static final String PASSWORD = "senha-forte-123";
 
     @Autowired
@@ -85,11 +92,21 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
         resetToAvailable(OPEN_TEST_NUMBER);
         resetToAvailable(CONFLICT_TEST_NUMBER);
         resetToAvailable(RBAC_OPEN_NUMBER);
+        clearCustomerInfo(CUSTOMER_UPDATE_NUMBER);
+        clearCustomerInfo(RBAC_CUSTOMER_NUMBER);
     }
 
     private void resetToAvailable(int number) {
         commandRepository.findByNumber(number).ifPresent(command -> {
             command.setStatus(CommandStatus.AVAILABLE);
+            commandRepository.save(command);
+        });
+    }
+
+    private void clearCustomerInfo(int number) {
+        commandRepository.findByNumber(number).ifPresent(command -> {
+            command.setCustomerName(null);
+            command.setCustomerPhone(null);
             commandRepository.save(command);
         });
     }
@@ -188,6 +205,108 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/commands/{number}/open", RBAC_OPEN_NUMBER)
                         .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
                 .andExpect(status().isOk());
+    }
+
+    // --- FARELO-190/191: PATCH .../customer ---------------------------------
+
+    @Test
+    void updatesCustomerNameAndNormalizesPhone() throws Exception {
+        mockMvc.perform(patch("/api/v1/commands/{number}/customer", CUSTOMER_UPDATE_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "customerName": "Maria Souza", "customerPhone": "(31) 99876-5432" }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerName").value("Maria Souza"))
+                .andExpect(jsonPath("$.customerPhone").value("5531998765432"));
+
+        Optional<Command> persisted = commandRepository.findByNumber(CUSTOMER_UPDATE_NUMBER);
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCustomerName()).isEqualTo("Maria Souza");
+        assertThat(persisted.get().getCustomerPhone()).isEqualTo("5531998765432");
+    }
+
+    @Test
+    void doesNotPrependCountryCodeWhenAlreadyPresent() throws Exception {
+        mockMvc.perform(patch("/api/v1/commands/{number}/customer", CUSTOMER_UPDATE_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "customerPhone": "+55 31 99876-5432" }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerPhone").value("5531998765432"));
+    }
+
+    @Test
+    void clearsCustomerInfoWhenFieldsOmitted() throws Exception {
+        String token = tokenFor(UserRole.ATTENDANT);
+
+        mockMvc.perform(patch("/api/v1/commands/{number}/customer", CUSTOMER_UPDATE_NUMBER)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "customerName": "Ana", "customerPhone": "31988887777" }
+                                """))
+                .andExpect(status().isOk());
+
+        // omitting both fields (full-replace) clears the previously-set values
+        mockMvc.perform(patch("/api/v1/commands/{number}/customer", CUSTOMER_UPDATE_NUMBER)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerName").doesNotExist())
+                .andExpect(jsonPath("$.customerPhone").doesNotExist());
+
+        Optional<Command> persisted = commandRepository.findByNumber(CUSTOMER_UPDATE_NUMBER);
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getCustomerName()).isNull();
+        assertThat(persisted.get().getCustomerPhone()).isNull();
+    }
+
+    @Test
+    void rejectsCustomerPhoneWithLetters() throws Exception {
+        mockMvc.perform(patch("/api/v1/commands/{number}/customer", CUSTOMER_UPDATE_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "customerPhone": "not-a-phone" }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void returnsCommandNotFoundWhenUpdatingCustomerForUnknownNumber() throws Exception {
+        mockMvc.perform(patch("/api/v1/commands/{number}/customer", 999)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"));
+    }
+
+    @Test
+    void rejectsCustomerUpdateWithNoAuthorizationHeader() throws Exception {
+        mockMvc.perform(patch("/api/v1/commands/{number}/customer", RBAC_CUSTOMER_NUMBER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    // KITCHEN has no business editing a comanda's customer info either —
+    // same reasoning as rejectsOpenWhenCallerRoleIsNotAllowed above.
+    @Test
+    void rejectsCustomerUpdateWhenCallerRoleIsNotAllowed() throws Exception {
+        mockMvc.perform(patch("/api/v1/commands/{number}/customer", RBAC_CUSTOMER_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
     }
 
 }

@@ -132,6 +132,12 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     private void setCommandStatus(int number, CommandStatus status) {
         Command command = commandRepository.findByNumber(number).orElseThrow();
         command.setStatus(status);
+        // FARELO-190/191: also clear the customer write-through this class's
+        // own createsOrderWithCustomerNameAndPhone test leaves behind on
+        // COMMAND_AVAILABLE — same "leave shared fixtures clean" discipline
+        // as the status reset itself.
+        command.setCustomerName(null);
+        command.setCustomerPhone(null);
         commandRepository.save(command);
     }
 
@@ -281,6 +287,14 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         Order order = orderRepository.findById(response.id()).orElseThrow();
         assertThat(order.getCustomerName()).isEqualTo("Maria");
         assertThat(order.getCustomerPhone()).isEqualTo("+55 11 91234-5678");
+
+        // FARELO-190/191 write-through: the comanda's own central customer
+        // record picks up the same name, and a normalized phone (unlike
+        // Order.customerPhone above, which stays the raw, unmodified
+        // snapshot) — see CommandService#applyCustomerInfoIfProvided.
+        Command commandAfterOrder = commandRepository.findByNumber(COMMAND_AVAILABLE).orElseThrow();
+        assertThat(commandAfterOrder.getCustomerName()).isEqualTo("Maria");
+        assertThat(commandAfterOrder.getCustomerPhone()).isEqualTo("5511912345678");
     }
 
     @Test
