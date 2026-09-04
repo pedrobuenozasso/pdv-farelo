@@ -9,14 +9,18 @@ import java.util.UUID;
  * Response body exposing only the public fields of {@link FiscalProfile} —
  * the JPA entity itself is never returned by the API (see AGENTS.md).
  *
- * <p>No NCM/CFOP/CST/CSOSN (or any other prompt-mestre-seção-24 fiscal
- * code) here — none of those fields exist on {@link FiscalProfile} yet, see
- * that class's javadoc for why (FARELO-152/153/154, future tickets).
+ * <p>{@code ncm} (FARELO-152) is the first of the prompt-mestre-seção-24
+ * fiscal codes to exist on {@link FiscalProfile} — {@code null} means "not
+ * configured yet" (see {@code FiscalProfile.ncm}'s javadoc). CFOP/CST/CSOSN
+ * (or any other seção 24 fiscal code) still don't exist on {@link
+ * FiscalProfile}, see that class's javadoc for why (FARELO-153/154, future
+ * tickets).
  */
 public record FiscalProfileResponse(
         UUID id,
         String name,
         String description,
+        String ncm,
         boolean active,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
@@ -26,6 +30,7 @@ public record FiscalProfileResponse(
                 fiscalProfile.getId(),
                 fiscalProfile.getName(),
                 fiscalProfile.getDescription(),
+                fiscalProfile.getNcm(),
                 fiscalProfile.isActive(),
                 fiscalProfile.getCreatedAt(),
                 fiscalProfile.getUpdatedAt());

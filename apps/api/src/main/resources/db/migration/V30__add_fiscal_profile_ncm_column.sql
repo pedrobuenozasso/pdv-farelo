@@ -1,0 +1,43 @@
+-- V30__add_fiscal_profile_ncm_column.sql
+-- Fiscal domain (FARELO-152, "Adicionar NCM", prompt mestre seção 24:
+-- "Perfis fiscais devem permitir futuramente: NCM, CFOP, CST/CSOSN, CEST,
+-- origem, cBenef, ICMS, CBS, IBS"). Adds the NCM column that fiscal_profile
+-- (V27) deliberately left out until a concrete ticket needed it — see that
+-- migration's own comment ("Deliberately no NCM/CFOP/CST/CSOSN ... column
+-- yet ... FARELO-152/153/154").
+--
+-- NCM (Nomenclatura Comum do Mercosul) is a real, standardized Brazilian
+-- tax classification code, always exactly 8 numeric digits (never letters,
+-- never a different length) — this is fixed by Brazilian tax law/customs
+-- nomenclature, not an app-specific choice.
+--
+-- Nullable, no default: same reasoning as ingredient.minimum_stock
+-- (V24) — existing fiscal_profile rows predate this ticket and have no
+-- NCM, and there is no meaningful "default NCM" a migration could backfill
+-- (unlike active/createdAt, whose defaults are genuinely universal). NULL
+-- means "no NCM configured for this fiscal profile yet", a distinct,
+-- permanent state an Admin will fill in later — not a temporary
+-- placeholder forced by the migration.
+--
+-- VARCHAR(8): exact max length of a real NCM code (always 8 digits).
+--
+-- CHECK (ncm IS NULL OR ncm ~ '^[0-9]{8}$'): mirrors the
+-- ingredient.minimum_stock (V24) precedent almost exactly — format
+-- validation already lives at the request layer (@Pattern on
+-- FiscalProfileRequest/FiscalProfileUpdateRequest, see those classes) for
+-- traffic that goes through the DTO boundary, but this column has no
+-- equivalent guard for a write path that bypasses the DTO (e.g. a direct
+-- repository save, a future data migration/import), so the same
+-- "validation at the DTO boundary + DB CHECK as a defense-in-depth
+-- backstop" pattern applies here too. A regex CHECK rather than the
+-- VARCHAR + IN (...) convention used for this schema's enum-backed columns
+-- (e.g. ingredient.unit, V16) — NCM isn't a small fixed enumeration, it's a
+-- large, externally-maintained government table of thousands of valid
+-- codes that changes over time, so the DB only enforces the one property
+-- that's actually structural and permanent (exactly 8 digits), not
+-- membership in the current NCM table (which belongs to a future
+-- integration/lookup concern, not this ticket).
+
+ALTER TABLE fiscal_profile
+    ADD COLUMN ncm VARCHAR(8)
+        CHECK (ncm IS NULL OR ncm ~ '^[0-9]{8}$');
