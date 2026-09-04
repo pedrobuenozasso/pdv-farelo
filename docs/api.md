@@ -167,7 +167,8 @@ acima para o formato do header e das respostas `401`/`403`.
   "imageUrl": "https://example.com/espresso.png",
   "availableOnMenu": true,
   "availableOnPos": true,
-  "productionStation": "BAR"
+  "productionStation": "BAR",
+  "fiscalProfileId": "c4a2d3e1-7d0b-4b3c-8a4b-2b3c4d5e6f70"
 }
 ```
 
@@ -181,6 +182,7 @@ acima para o formato do header e das respostas `401`/`403`.
 | `availableOnMenu` | boolean | não | Default `true` se ausente (FARELO-017) |
 | `availableOnPos` | boolean | não | Default `true` se ausente (FARELO-017) |
 | `productionStation` | string | não | Um de `BAR`/`KITCHEN` (FARELO-073). Sem default — ausente/`null` significa "sem estação atribuída" |
+| `fiscalProfileId` | UUID | não | (FARELO-151) Precisa apontar para um `FiscalProfile` existente quando enviado. Sem default — ausente/`null` significa "sem perfil fiscal atribuído" |
 
 `availableOnMenu` controla se o produto aparece no cardápio QR
 (cliente-facing); `availableOnPos` controla se aparece no PDV
@@ -191,6 +193,12 @@ acima para o formato do header e das respostas `401`/`403`.
 impressão por setor (FARELO-074, fora do escopo deste endpoint). Diferente
 de `availableOnMenu`/`availableOnPos`, não tem um default seguro: um produto
 sem estação óbvia fica `null` até ser atribuído explicitamente.
+
+`fiscalProfileId` (FARELO-151) associa o produto à classificação
+fiscal/tributária (`FiscalProfile`, FARELO-150 — ex: "Isento", "Tributado
+padrão") que ele pertence, evitando repetir esses atributos por produto.
+Mesmo raciocínio de `productionStation`: sem default seguro, `null`
+significa "ainda não classificado".
 
 **Response — `201 Created`**
 
@@ -208,13 +216,17 @@ Header `Location: /api/v1/products/{id}`.
   "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
   "imageUrl": "https://example.com/espresso.png",
   "productionStation": "BAR",
+  "fiscalProfileId": "c4a2d3e1-7d0b-4b3c-8a4b-2b3c4d5e6f70",
   "createdAt": "2026-09-01T13:00:00Z",
   "updatedAt": "2026-09-01T13:00:00Z"
 }
 ```
 
 `productionStation` é `null` na resposta quando o produto ainda não tem
-estação atribuída.
+estação atribuída. `fiscalProfileId` (FARELO-151) é `null` na resposta
+quando o produto ainda não tem perfil fiscal atribuído — expõe só o id
+(mesmo formato de `categoryId`), sem nome/descrição do perfil fiscal
+embutidos.
 
 **Erros**
 
@@ -228,6 +240,17 @@ estação atribuída.
   {
     "code": "CATEGORY_NOT_FOUND",
     "message": "Category not found: b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+    "correlationId": "..."
+  }
+  ```
+
+- `404 Not Found` — `fiscalProfileId` enviado não corresponde a nenhum
+  `FiscalProfile` existente (FARELO-151):
+
+  ```json
+  {
+    "code": "FISCAL_PROFILE_NOT_FOUND",
+    "message": "FiscalProfile not found: c4a2d3e1-7d0b-4b3c-8a4b-2b3c4d5e6f70",
     "correlationId": "..."
   }
   ```
@@ -262,6 +285,7 @@ consumidor existir.
     "categoryId": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
     "imageUrl": "https://example.com/espresso.png",
     "productionStation": "BAR",
+    "fiscalProfileId": "c4a2d3e1-7d0b-4b3c-8a4b-2b3c4d5e6f70",
     "createdAt": "2026-09-01T13:00:00Z",
     "updatedAt": "2026-09-01T13:00:00Z"
   }
@@ -299,6 +323,11 @@ atribuída"), não um placeholder de "campo esquecido" — omiti-lo no `PUT`
 explicitamente limpa a estação já atribuída, o que faz sentido para uma
 substituição completa.
 
+`fiscalProfileId` (FARELO-151) segue a mesma regra de `productionStation`
+aqui: **opcional**, e omiti-lo/enviar `null` explicitamente limpa um perfil
+fiscal já atribuído — mesma convenção "PUT pode limpar um campo opcional
+explicitamente" que `productionStation` já estabeleceu.
+
 ```json
 {
   "name": "Café Espresso Duplo",
@@ -309,7 +338,8 @@ substituição completa.
   "active": false,
   "availableOnMenu": false,
   "availableOnPos": true,
-  "productionStation": "BAR"
+  "productionStation": "BAR",
+  "fiscalProfileId": "c4a2d3e1-7d0b-4b3c-8a4b-2b3c4d5e6f70"
 }
 ```
 
@@ -324,6 +354,7 @@ substituição completa.
 | `availableOnMenu` | boolean | sim | Independente de `availableOnPos` |
 | `availableOnPos` | boolean | sim | Independente de `availableOnMenu` |
 | `productionStation` | string | não | Um de `BAR`/`KITCHEN` (FARELO-073). Omitido/`null` limpa a estação atribuída |
+| `fiscalProfileId` | UUID | não | (FARELO-151) Precisa apontar para um `FiscalProfile` existente quando enviado. Omitido/`null` limpa o perfil fiscal atribuído |
 
 **Response — `200 OK`**
 
@@ -334,8 +365,9 @@ substituição completa.
 
 - `400 Bad Request` — mesmas validações do `POST`, `code: "VALIDATION_ERROR"`.
 - `404 Not Found` — `{id}` do produto não existe, `code: "PRODUCT_NOT_FOUND"`;
-  ou `categoryId` não existe, `code: "CATEGORY_NOT_FOUND"` (mesmo formato do
-  `POST`).
+  ou `categoryId` não existe, `code: "CATEGORY_NOT_FOUND"`; ou
+  `fiscalProfileId` não existe, `code: "FISCAL_PROFILE_NOT_FOUND"` (mesmo
+  formato do `POST`).
 
 ### `GET /api/v1/commands/{number}`
 

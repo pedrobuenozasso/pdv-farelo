@@ -1,5 +1,6 @@
 package com.farelo.api.catalog;
 
+import com.farelo.api.fiscal.FiscalProfile;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -23,10 +24,10 @@ import java.util.UUID;
  * {@code catalog} domain, the single source of truth for the menu (see
  * docs/domain-model.md).
  *
- * <p>Scope note (FARELO-011): no recipe, inventory or advanced fiscal
- * fields yet. {@code fiscalProfileId} (FARELO-151) is deliberately left out
- * for a later ticket. {@code availableOnMenu}/{@code availableOnPos} were
- * added in FARELO-017; {@code productionStation} was added in FARELO-073.
+ * <p>Scope note (FARELO-011): no recipe or inventory fields yet.
+ * {@code availableOnMenu}/{@code availableOnPos} were added in FARELO-017;
+ * {@code productionStation} was added in FARELO-073; {@code fiscalProfile}
+ * was added in FARELO-151.
  *
  * <p>Id generation follows the same strategy as {@link Category} — see its
  * javadoc for why {@code RANDOM} (UUIDv4) is used instead of UUIDv7.
@@ -93,6 +94,27 @@ public class Product {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "category_id", nullable = false)
     private Category category;
+
+    /**
+     * The fiscal/tax classification this product belongs to (e.g. "Isento",
+     * "Tributado padrão") — see {@link FiscalProfile}'s javadoc. Unidirectional
+     * {@code @ManyToOne}, same "no back-reference collection on the parent"
+     * pattern already used throughout this codebase ({@code Order.command},
+     * {@code Payment.command}, {@code PrintJob.order}): {@code FiscalProfile}
+     * is a plain lookup entity with no need to navigate back to every
+     * {@code Product} that references it.
+     *
+     * <p><b>Nullable, same reasoning as {@link #productionStation}</b>: not
+     * every product has a fiscal profile assigned yet, and there is no safe
+     * default to fabricate (unlike {@link #availableOnMenu}/
+     * {@link #availableOnPos}, which default unambiguously to {@code true}).
+     * {@code null} means "not yet classified" — staff assigns one explicitly
+     * per product, same convention {@code productionStation} established in
+     * FARELO-073.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "fiscal_profile_id")
+    private FiscalProfile fiscalProfile;
 
     @Column(name = "image_url")
     private String imageUrl;
@@ -191,6 +213,14 @@ public class Product {
 
     public void setCategory(Category category) {
         this.category = category;
+    }
+
+    public FiscalProfile getFiscalProfile() {
+        return fiscalProfile;
+    }
+
+    public void setFiscalProfile(FiscalProfile fiscalProfile) {
+        this.fiscalProfile = fiscalProfile;
     }
 
     public String getImageUrl() {

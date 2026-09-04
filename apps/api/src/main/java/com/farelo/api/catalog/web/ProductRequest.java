@@ -28,6 +28,11 @@ import java.util.UUID;
  * javadoc on the field). No wrapper-vs-primitive gotcha applies here: an
  * enum is already a reference type, so a missing JSON field simply
  * deserializes to {@code null} with no silent-default risk.
+ *
+ * <p>{@code fiscalProfileId} (FARELO-151) is optional too, same "no safe
+ * default, {@code null} is itself a legitimate value" reasoning as
+ * {@code productionStation} — see
+ * {@link com.farelo.api.catalog.Product#getFiscalProfile()}'s javadoc.
  */
 public record ProductRequest(
         @NotBlank String name,
@@ -37,5 +42,6 @@ public record ProductRequest(
         String imageUrl,
         Boolean availableOnMenu,
         Boolean availableOnPos,
-        ProductionStation productionStation) {
+        ProductionStation productionStation,
+        UUID fiscalProfileId) {
 }
