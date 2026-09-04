@@ -3,6 +3,7 @@ package com.farelo.api.payment;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandNotFullyPaidException;
 import com.farelo.api.command.CommandService;
+import com.farelo.api.discount.DiscountService;
 import com.farelo.api.ordering.OrderService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,14 @@ import java.util.List;
  * lives, and why {@code payment} depending on {@code ordering} is safe (no
  * cycle) even though {@code payment} already depends on {@code command} and
  * {@code ordering} already depends on {@code command} too.
+ *
+ * <p><b>FARELO-230/231/232 adds a third, on {@link DiscountService}</b> —
+ * {@link #getBalance(int)}/{@link #closeCommand(int)} now subtract a
+ * comanda's total discount from what's owed. Same acyclic reasoning as the
+ * {@code ordering} dependency above: {@code DiscountService} depends only
+ * on {@code command}/{@code ordering}/{@code security}, none of which
+ * depend back on {@code payment}, so {@code payment → discount → ...}
+ * stays a straight line.
  */
 @Service
 public class PaymentService {
@@ -40,11 +49,17 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final CommandService commandService;
     private final OrderService orderService;
+    private final DiscountService discountService;
 
-    public PaymentService(PaymentRepository paymentRepository, CommandService commandService, OrderService orderService) {
+    public PaymentService(
+            PaymentRepository paymentRepository,
+            CommandService commandService,
+            OrderService orderService,
+            DiscountService discountService) {
         this.paymentRepository = paymentRepository;
         this.commandService = commandService;
         this.orderService = orderService;
+        this.discountService = discountService;
     }
 
     /**
@@ -139,18 +154,20 @@ public class PaymentService {
     }
 
     /**
-     * FARELO-223 ("Calcular saldo restante"): a comanda's {@link
-     * PaymentBalance} — {@code totalOwed}/{@code totalPaid}/{@code
-     * remaining}, all computed here rather than by a caller. See {@link
-     * PaymentBalance}'s javadoc for why this method exists at all: before
-     * it, nothing in this codebase computed {@code totalOwed} except
-     * {@link #closeCommand(int)}'s internal validation, and {@code
-     * remaining} wasn't computed anywhere server-side — the PDV frontend
-     * derived both itself from raw order/payment data. Backs {@code GET
+     * FARELO-223 ("Calcular saldo restante"), extended by FARELO-230/231/
+     * 232: a comanda's {@link PaymentBalance} — {@code totalOwed}/{@code
+     * totalDiscount}/{@code totalPaid}/{@code remaining}, all computed
+     * here rather than by a caller. See {@link PaymentBalance}'s javadoc
+     * for why this method exists at all: before it, nothing in this
+     * codebase computed {@code totalOwed} except {@link
+     * #closeCommand(int)}'s internal validation, and {@code remaining}
+     * wasn't computed anywhere server-side — the PDV frontend derived both
+     * itself from raw order/payment data. Backs {@code GET
      * /api/v1/commands/{number}/payments/balance}.
      *
      * <p>Same "not status-gated" reasoning as {@link #getTotalPaid(int)}/
-     * {@link OrderService#getTotalOwed(int)} — a pure read, callable
+     * {@link OrderService#getTotalOwed(int)}/{@link
+     * DiscountService#getTotalDiscount(int)} — a pure read, callable
      * regardless of the comanda's current status (e.g. still useful to
      * inspect after a comanda is already {@code CLOSED}).
      *
@@ -160,8 +177,9 @@ public class PaymentService {
     @Transactional(readOnly = true)
     public PaymentBalance getBalance(int commandNumber) {
         BigDecimal totalOwed = orderService.getTotalOwed(commandNumber);
+        BigDecimal totalDiscount = discountService.getTotalDiscount(commandNumber);
         BigDecimal totalPaid = getTotalPaid(commandNumber);
-        return PaymentBalance.of(totalOwed, totalPaid);
+        return PaymentBalance.of(totalOwed, totalDiscount, totalPaid);
     }
 
     /**
@@ -275,10 +293,12 @@ public class PaymentService {
         commandService.findClosable(commandNumber);
 
         BigDecimal totalOwed = orderService.getTotalOwed(commandNumber);
+        BigDecimal totalDiscount = discountService.getTotalDiscount(commandNumber);
         BigDecimal totalPaid = getTotalPaid(commandNumber);
+        BigDecimal amountDue = totalOwed.subtract(totalDiscount);
 
-        if (totalPaid.compareTo(totalOwed) < 0) {
-            throw new CommandNotFullyPaidException(commandNumber, totalOwed, totalPaid);
+        if (totalPaid.compareTo(amountDue) < 0) {
+            throw new CommandNotFullyPaidException(commandNumber, totalOwed, totalDiscount, totalPaid);
         }
 
         return commandService.close(commandNumber);

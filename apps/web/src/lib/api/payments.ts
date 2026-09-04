@@ -24,9 +24,11 @@ export type TotalPaid = {
 // FARELO-223: totalOwed/totalPaid/remaining computed entirely server-side —
 // backs GET .../payments/balance. Replaces the client-side
 // sum-orders-then-subtract-paid logic apps/pdv/page.tsx used to do itself.
+// totalDiscount added by FARELO-230/231/232 — see lib/api/discounts.ts.
 export type PaymentBalance = {
   commandNumber: number;
   totalOwed: number;
+  totalDiscount: number;
   totalPaid: number;
   remaining: number;
 };

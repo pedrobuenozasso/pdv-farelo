@@ -8,6 +8,9 @@ import com.farelo.api.catalog.ProductRepository;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandRepository;
 import com.farelo.api.command.CommandStatus;
+import com.farelo.api.discount.Discount;
+import com.farelo.api.discount.DiscountRepository;
+import com.farelo.api.discount.DiscountType;
 import com.farelo.api.ordering.Order;
 import com.farelo.api.ordering.OrderItem;
 import com.farelo.api.ordering.OrderItemRepository;
@@ -150,6 +153,11 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
     private static final int RECORD_CHANGE_WRONG_METHOD_NUMBER = 87;
     private static final int RECORD_CHANGE_BELOW_AMOUNT_NUMBER = 88;
 
+    // FARELO-230/231/232: balance/close discount-awareness tests below —
+    // 98-99, free per this class's own registry above.
+    private static final int BALANCE_WITH_DISCOUNT_NUMBER = 98;
+    private static final int CLOSE_WITH_DISCOUNT_NUMBER = 99;
+
     // FARELO-143 (POST .../close) — moved verbatim from
     // CommandControllerIntegrationTests (4-7, 92), plus new numbers (73-77)
     // for the payment-sufficiency tests this ticket adds. See class javadoc.
@@ -174,6 +182,9 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Autowired
     private PaymentRepository paymentRepository;
+
+    @Autowired
+    private DiscountRepository discountRepository;
 
     @Autowired
     private CategoryRepository categoryRepository;
@@ -237,6 +248,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         resetToAvailable(CLOSE_OVERPAID_NUMBER);
         resetToAvailable(CLOSE_CANCELLED_ORDER_ONLY_NUMBER);
         resetToAvailable(CLOSE_CANCELLED_ORDER_EXCLUDED_NUMBER);
+        resetToAvailable(CLOSE_WITH_DISCOUNT_NUMBER);
     }
 
     private void resetToAvailable(int number) {
@@ -297,6 +309,18 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         orderRepository.deleteAll(createdOrders);
         productRepository.deleteAll(createdProducts);
         categoryRepository.deleteAll(createdCategories);
+    }
+
+    // FARELO-230/231/232: discounts applied against BALANCE_WITH_DISCOUNT_NUMBER/
+    // CLOSE_WITH_DISCOUNT_NUMBER by the tests in that section below — same
+    // "clean up only what this class itself created" reasoning as
+    // cleanUpOrderFixtures above.
+    @AfterEach
+    void cleanUpDiscountFixtures() {
+        discountRepository.findByCommandOrderByCreatedAtAsc(command(BALANCE_WITH_DISCOUNT_NUMBER))
+                .forEach(discountRepository::delete);
+        discountRepository.findByCommandOrderByCreatedAtAsc(command(CLOSE_WITH_DISCOUNT_NUMBER))
+                .forEach(discountRepository::delete);
     }
 
     private String tokenFor(UserRole role) {
@@ -704,6 +728,28 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"));
     }
 
+    // FARELO-230/231/232: balance subtracts totalDiscount, in addition to
+    // totalPaid, from totalOwed — see PaymentBalance's javadoc. Inserts the
+    // Discount directly via the repository (bypassing POST
+    // .../discounts) — this section's scope is PaymentService#getBalance's
+    // aggregation, already covered end-to-end (including the HTTP layer)
+    // by DiscountControllerIntegrationTests.
+    @Test
+    void balanceSubtractsTotalDiscountFromRemaining() throws Exception {
+        createOrder(BALANCE_WITH_DISCOUNT_NUMBER, new BigDecimal("50.00"), 1, OrderStatus.DELIVERED);
+        Command command = command(BALANCE_WITH_DISCOUNT_NUMBER);
+        discountRepository.save(new Discount(
+                command, DiscountType.FIXED_AMOUNT, null, new BigDecimal("50.00"), new BigDecimal("10.00"),
+                "Teste", UUID.randomUUID(), "Test User"));
+
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_WITH_DISCOUNT_NUMBER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalOwed").value(50.00))
+                .andExpect(jsonPath("$.totalDiscount").value(10.00))
+                .andExpect(jsonPath("$.totalPaid").value(0))
+                .andExpect(jsonPath("$.remaining").value(40.00));
+    }
+
     // --- FARELO-143: POST .../close -----------------------------------------
     //
     // Moved from CommandControllerIntegrationTests (see this class's
@@ -786,6 +832,26 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         paymentRepository.save(new Payment(command, new BigDecimal("25.00"), PaymentMethod.CASH));
 
         mockMvc.perform(post("/api/v1/commands/{number}/close", CLOSE_FULLY_PAID_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+    }
+
+    // FARELO-230/231/232: a discount covering the gap between totalPaid and
+    // totalOwed lifts the CommandNotFullyPaidException block — same
+    // "insert Discount directly" scope-boundary reasoning as
+    // balanceSubtractsTotalDiscountFromRemaining above.
+    @Test
+    void closesCommandWhenDiscountCoversTheRemainingGap() throws Exception {
+        setStatus(CLOSE_WITH_DISCOUNT_NUMBER, CommandStatus.OPEN);
+        createOrder(CLOSE_WITH_DISCOUNT_NUMBER, new BigDecimal("20.00"), 1, OrderStatus.DELIVERED);
+        Command command = command(CLOSE_WITH_DISCOUNT_NUMBER);
+        paymentRepository.save(new Payment(command, new BigDecimal("15.00"), PaymentMethod.CASH));
+        discountRepository.save(new Discount(
+                command, DiscountType.FIXED_AMOUNT, null, new BigDecimal("20.00"), new BigDecimal("5.00"),
+                null, UUID.randomUUID(), "Test User"));
+
+        mockMvc.perform(post("/api/v1/commands/{number}/close", CLOSE_WITH_DISCOUNT_NUMBER)
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CLOSED"));

@@ -53,6 +53,7 @@ import {
   type OrderItemCancelReason,
   type OrderStatus,
 } from "@/lib/api/orders";
+import { applyDiscount } from "@/lib/api/discounts";
 import {
   getPaymentBalance,
   recordPayment,
@@ -232,7 +233,9 @@ function CommandDetail({
   // FARELO-223: totalOwed/totalPaid/remaining all come from the backend
   // (GET .../payments/balance) — no client-side sum/subtraction anymore,
   // per that ticket's "backend deve ser fonte de verdade" requirement.
+  // totalDiscount added by FARELO-230/231/232.
   const totalOwed = balanceQuery.data?.totalOwed ?? 0;
+  const totalDiscount = balanceQuery.data?.totalDiscount ?? 0;
   const totalPaid = balanceQuery.data?.totalPaid ?? 0;
   const remaining = balanceQuery.data?.remaining ?? 0;
 
@@ -354,6 +357,7 @@ function CommandDetail({
           <PaymentPanel
             commandNumber={number}
             totalOwed={totalOwed}
+            totalDiscount={totalDiscount}
             totalPaid={totalPaid}
             remaining={remaining}
           />
@@ -674,11 +678,13 @@ function CustomerCard({
 function PaymentPanel({
   commandNumber,
   totalOwed,
+  totalDiscount,
   totalPaid,
   remaining,
 }: {
   commandNumber: number;
   totalOwed: number;
+  totalDiscount: number;
   totalPaid: number;
   remaining: number;
 }) {
@@ -794,6 +800,11 @@ function PaymentPanel({
           />
         </div>
         <div className="mt-2 flex flex-col gap-0.5 text-[13px]">
+          {totalDiscount > 0 ? (
+            <span className="text-red">
+              Desconto · -{currencyFormatter.format(totalDiscount)}
+            </span>
+          ) : null}
           <span className="text-ink-soft">
             Pago · {currencyFormatter.format(totalPaid)}
           </span>
@@ -802,6 +813,8 @@ function PaymentPanel({
           </span>
         </div>
       </div>
+
+      <DiscountButton commandNumber={commandNumber} totalOwed={totalOwed} />
 
       <PrintConferenceButton commandNumber={commandNumber} />
 
@@ -920,6 +933,159 @@ function PaymentPanel({
         </div>
       )}
     </div>
+  );
+}
+
+// FARELO-230/231/232: applies a fixed-amount or percentage discount to the
+// comanda. amount/percentage are mutually exclusive on the wire (see
+// ApplyDiscountInput) — this form only ever sends the one matching the
+// selected type.
+function DiscountButton({
+  commandNumber,
+  totalOwed,
+}: {
+  commandNumber: number;
+  totalOwed: number;
+}) {
+  const queryClient = useQueryClient();
+  const [formOpen, setFormOpen] = useState(false);
+
+  const discountFormSchema = z
+    .object({
+      type: z.enum(["FIXED_AMOUNT", "PERCENTAGE"]),
+      value: z
+        .string()
+        .trim()
+        .min(1, "Valor é obrigatório")
+        .refine((value) => !Number.isNaN(Number(value)), "Valor inválido")
+        .refine((value) => Number(value) > 0, "Valor deve ser maior que zero"),
+      reason: z.string().trim().optional(),
+    })
+    .refine(
+      (data) => data.type !== "PERCENTAGE" || Number(data.value) <= 100,
+      { message: "Percentual não pode passar de 100", path: ["value"] },
+    );
+  type DiscountFormValues = z.infer<typeof discountFormSchema>;
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    control,
+    formState: { errors },
+  } = useForm<DiscountFormValues>({
+    resolver: zodResolver(discountFormSchema),
+    defaultValues: { type: "FIXED_AMOUNT", value: "", reason: "" },
+  });
+
+  const type = useWatch({ control, name: "type" });
+
+  const applyDiscountMutation = useMutation({
+    mutationFn: (values: DiscountFormValues) => {
+      const input: Parameters<typeof applyDiscount>[1] =
+        values.type === "PERCENTAGE"
+          ? {
+              type: "PERCENTAGE",
+              percentage: Number(values.value),
+              reason: values.reason || undefined,
+            }
+          : {
+              type: "FIXED_AMOUNT",
+              amount: Number(values.value),
+              reason: values.reason || undefined,
+            };
+      return applyDiscount(commandNumber, input);
+    },
+    onSuccess: () => {
+      reset();
+      setFormOpen(false);
+      queryClient.invalidateQueries({
+        queryKey: ["pdv", "command", commandNumber, "paymentBalance"],
+      });
+    },
+  });
+
+  const errorMessage = apiErrorMessage(
+    applyDiscountMutation.error,
+    "Não foi possível aplicar o desconto.",
+  );
+
+  if (!formOpen) {
+    return (
+      <Button
+        variant="outline"
+        disabled={totalOwed <= 0}
+        onClick={() => setFormOpen(true)}
+      >
+        Aplicar desconto
+      </Button>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit((values) => applyDiscountMutation.mutate(values))}
+      noValidate
+      className="border-line bg-bg flex flex-col gap-3 rounded-2xl border p-4"
+    >
+      <div className="flex flex-col gap-1">
+        <label className="text-ink text-sm font-medium" htmlFor="discountType">
+          Tipo de desconto
+        </label>
+        <select
+          id="discountType"
+          className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+          {...register("type")}
+        >
+          <option value="FIXED_AMOUNT">Valor fixo (R$)</option>
+          <option value="PERCENTAGE">Percentual (%)</option>
+        </select>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-ink text-sm font-medium" htmlFor="discountValue">
+          {type === "PERCENTAGE" ? "Percentual (%)" : "Valor (R$)"}
+        </label>
+        <input
+          id="discountValue"
+          inputMode="decimal"
+          className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+          {...register("value")}
+        />
+        {errors.value ? (
+          <p className="text-red text-sm">{errors.value.message}</p>
+        ) : null}
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-ink text-sm font-medium" htmlFor="discountReason">
+          Motivo · opcional
+        </label>
+        <input
+          id="discountReason"
+          className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+          {...register("reason")}
+        />
+      </div>
+      {errorMessage ? <p className="text-red text-sm">{errorMessage}</p> : null}
+      <div className="flex gap-2">
+        <Button
+          type="submit"
+          disabled={applyDiscountMutation.isPending}
+          className="flex-1"
+        >
+          {applyDiscountMutation.isPending ? "Aplicando..." : "Confirmar"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            reset();
+            setFormOpen(false);
+          }}
+        >
+          Cancelar
+        </Button>
+      </div>
+    </form>
   );
 }
 
