@@ -32,6 +32,11 @@ import java.util.UUID;
  * full-replace {@code PUT} must be able to send it to explicitly clear a
  * previously-assigned station — forcing {@code @NotNull} here would make
  * "unassign the station" impossible to express.
+ *
+ * <p>{@code fiscalProfileId} (FARELO-151) stays optional here too, same
+ * "no safe default, {@code null} clears a previously-assigned value"
+ * reasoning as {@code productionStation} — see
+ * {@link com.farelo.api.catalog.Product#getFiscalProfile()}'s javadoc.
  */
 public record ProductUpdateRequest(
         @NotBlank String name,
@@ -42,5 +47,6 @@ public record ProductUpdateRequest(
         @NotNull Boolean active,
         @NotNull Boolean availableOnMenu,
         @NotNull Boolean availableOnPos,
-        ProductionStation productionStation) {
+        ProductionStation productionStation,
+        UUID fiscalProfileId) {
 }

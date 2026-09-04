@@ -1,6 +1,7 @@
 package com.farelo.api.fiscal.web;
 
 import com.farelo.api.AbstractIntegrationTest;
+import com.farelo.api.catalog.ProductRepository;
 import com.farelo.api.fiscal.FiscalProfile;
 import com.farelo.api.fiscal.FiscalProfileRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,11 +36,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * CategoryControllerIntegrationTests}: the shared singleton Postgres
  * container (see {@link AbstractIntegrationTest}) means the {@code
  * fiscal_profile} table may already have rows from other test classes, so
- * tests that assert list contents clear it first. Unlike {@code
- * ingredient}, no other table has a DB-level FK into {@code
- * fiscal_profile} yet (FARELO-151, {@code Product.fiscalProfileId}, is a
- * future ticket), so a plain {@code fiscalProfileRepository.deleteAll()} is
- * safe here with no ordering landmine to document.
+ * tests that assert list contents clear it first.
+ *
+ * <p><b>FARELO-151</b>: {@code product.fiscal_profile_id} now FKs into this
+ * table (see {@code V28__add_product_fiscal_profile_id_column.sql}), so a
+ * blind {@code fiscalProfileRepository.deleteAll()} is no longer
+ * unconditionally safe — a leftover {@code Product} row from another test
+ * class (e.g. {@code ProductControllerIntegrationTests}, run order is
+ * Surefire's, not alphabetical) could still reference a fiscal profile this
+ * class tries to delete. Same fix already applied by {@code
+ * CategoryControllerIntegrationTests} for the exact same shape of problem
+ * with {@code category}: {@code productRepository.deleteAll()} runs first,
+ * in this class's own {@code @BeforeEach}, rather than relying on every
+ * other class to clean up after itself.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -52,10 +61,16 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     private FiscalProfileRepository fiscalProfileRepository;
 
     @Autowired
+    private ProductRepository productRepository;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void cleanFiscalProfileTable() {
+        // product first — it FKs into fiscal_profile as of FARELO-151. See
+        // this class's javadoc.
+        productRepository.deleteAll();
         fiscalProfileRepository.deleteAll();
     }
 

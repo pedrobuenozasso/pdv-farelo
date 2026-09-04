@@ -40,9 +40,9 @@ Pacote: `com.farelo.api.catalog`.
   `imageUrl` (opcional), `createdAt`/`updatedAt` (UTC). Tabela criada pela
   migration `V3__create_product_table.sql`, com FK para `category(id)`.
   Ganhou `availableOnMenu`/`availableOnPos` (default `true` cada, visibilidade
-  independente no cardápio QR vs. no PDV) em FARELO-017. Escopo ainda restrito
-  propositalmente: sem `fiscalProfileId` (FARELO-151/Epic 11), sem
-  receita/estoque.
+  independente no cardápio QR vs. no PDV) em FARELO-017. Ganhou
+  `fiscalProfile` em FARELO-151 (ver subseção dedicada abaixo). Escopo ainda
+  restrito propositalmente: sem receita/estoque.
 
   **`productionStation`** (FARELO-073): enum `ProductionStation` (`BAR`,
   `KITCHEN` — `@Enumerated(EnumType.STRING)`, mesma convenção de
@@ -152,6 +152,97 @@ para os endpoints.
   via `GET /api/v1/audit-logs?entityType=Product&entityId=...` (endpoint
   já existente, FARELO-125, sem autenticação na chamada — mesma
   característica "ainda não protegido" documentada na seção `audit`).
+
+- **FARELO-151 ("Associar Product com FiscalProfile")**: `Product` ganha um
+  campo `fiscalProfile`, `@ManyToOne(fetch = LAZY)` **opcional** (sem
+  `optional = false`, diferente de `category`) apontando para
+  `com.farelo.api.fiscal.FiscalProfile` (FARELO-150). Unidirecional, sem
+  coleção de volta em `FiscalProfile` — mesmo padrão "sem back-reference no
+  lado dono da associação" já usado em `Order.command`, `Payment.command`,
+  `PrintJob.order`; `FiscalProfile` é um lookup simples, sem necessidade de
+  navegar de volta para todo `Product` que o referencia.
+
+  **Nullable, mesmo raciocínio de `productionStation` (FARELO-073)**: nem
+  todo produto tem uma classificação fiscal atribuída ainda, e não existe
+  default seguro para fabricar (diferente de `availableOnMenu`/
+  `availableOnPos`, que têm `true` como default inequívoco). `null`
+  significa "ainda não classificado" — a equipe atribui explicitamente por
+  produto, e uma substituição completa via `PUT` precisa poder enviar
+  `null` para limpar uma classificação já atribuída (mesma convenção que
+  `productionStation` já estabeleceu).
+
+  Migration `V28__add_product_fiscal_profile_id_column.sql`: coluna
+  `fiscal_profile_id UUID REFERENCES fiscal_profile (id)`, nullable (sem
+  backfill — linhas existentes ficam `NULL`), com índice
+  (`idx_product_fiscal_profile_id`) — mesma convenção de índice em toda FK
+  deste código, inclusive as nullable (ex: `inventory_movement.order_id`,
+  V21).
+
+  **Resolução do id — via `FiscalProfileService#getById`, não
+  `FiscalProfileRepository` direto**: `fiscal` é um domínio diferente de
+  `catalog`, então esta é uma dependência cross-domain — segue a mesma
+  convenção já estabelecida (e documentada no javadoc de
+  `ProductService#update`, FARELO-126) de que toda dependência cross-domain
+  passa pelo *serviço* do outro domínio, nunca pelo seu repositório
+  diretamente (ex: `OrderService`/`RecipeService` dependem de
+  `ProductService`, não de `ProductRepository`). Isso é diferente da
+  resolução de `categoryId` → `Category` no mesmo método, que usa
+  `CategoryRepository` diretamente porque `Category` mora no mesmo pacote
+  `catalog` — uma exceção intra-domínio à regra, não uma contradição dela.
+  Quando `fiscalProfileId` não resolve para um `FiscalProfile` existente,
+  `FiscalProfileService#getById` lança `FiscalProfileNotFoundException`
+  (`404`/`FISCAL_PROFILE_NOT_FOUND`, já registrada em `ApiExceptionHandler`
+  desde FARELO-150) — mesmo formato de `CategoryNotFoundException` para
+  `categoryId`.
+
+  **`ProductService#create`/`#update`**: ambos ganham um parâmetro
+  `fiscalProfileId`, resolvido por um método privado
+  `resolveFiscalProfile(UUID)` compartilhado (`null` in → `null` out, sem
+  chamar o serviço; um id não-`null` que não resolve propaga a exceção
+  acima) — mesmo "resolve id → entidade" que este serviço já faz para
+  `categoryId`. **`update()` não foi restruturado**: a lógica de auditoria
+  de preço do FARELO-126 (captura do preço antigo antes de qualquer campo
+  ser sobrescrito, comparação via `BigDecimal#compareTo`, resolução do ator
+  só quando o preço muda) permanece intocada — a única adição é resolver
+  `fiscalProfileId` → `FiscalProfile` ao lado da resolução de `categoryId`
+  já existente, e aplicar via `product.setFiscalProfile(...)`
+  incondicionalmente (mesmo raciocínio de "PUT é substituição completa,
+  `null` é um valor legítimo" já aplicado a `productionStation`).
+
+  **`ProductRequest`/`ProductUpdateRequest`/`ProductResponse`**: os dois
+  requests ganham um `fiscalProfileId` (`UUID`, opcional, sem `@NotNull`) —
+  mesma forma de `productionStation` nos dois DTOs (sem gotcha de
+  primitivo-vs-wrapper, já que `UUID` é tipo referência). `ProductResponse`
+  ganha `fiscalProfileId` expondo **só o id**, mesmo formato de
+  `categoryId` (sem nome/descrição do perfil fiscal embutidos na resposta
+  do produto) — não há necessidade de `JOIN FETCH` na query que constrói a
+  resposta: ler `product.getFiscalProfile().getId()` num proxy lazy não
+  inicializado é seguro (o id já é conhecido pelo proxy sem precisar de
+  round-trip ao banco nem de sessão viva), a mesma característica de
+  `categoryId` que já funciona hoje sem `JOIN FETCH` algum. Isso é
+  diferente dos casos que *precisam* de `JOIN FETCH` neste código (ex:
+  `PrintJobRepository#findByStatusOrderByCreatedAtAsc` com `JOIN FETCH
+  p.order`) — aqueles leem uma *propriedade* da entidade associada (um
+  nome), não só o id.
+
+  **Testes**: `ProductControllerIntegrationTests` ganhou casos cobrindo
+  criar/atualizar um produto com `fiscalProfileId` válido (persiste a
+  associação), criar/atualizar com `fiscalProfileId` desconhecido (`404`
+  `FISCAL_PROFILE_NOT_FOUND`), omitir o campo (fica `null`) e atualizar
+  para limpar um `fiscalProfileId` já atribuído (enviar `null` no `PUT`,
+  mesma convenção de `productionStation`).
+  `ProductRepositoryIntegrationTests` ganhou um caso de mapeamento JPA
+  dedicado (`savesAndFindsProductWithFiscalProfile`).
+
+  **Landmine de isolamento de teste, mesma classe do aviso já documentado
+  na seção `fiscal` abaixo**: como `product` agora FK para `fiscal_profile`,
+  `FiscalProfileControllerIntegrationTests` (que fazia
+  `fiscalProfileRepository.deleteAll()` cego) precisou do mesmo fix que
+  `CategoryControllerIntegrationTests` já tinha para `category` —
+  `productRepository.deleteAll()` primeiro, no próprio `@BeforeEach` dessa
+  classe, em vez de depender de toda outra classe (ex:
+  `ProductControllerIntegrationTests`) limpar depois de si mesma. Ver a
+  subseção `FiscalProfile` na seção `fiscal` para o texto completo.
 
 ## command
 
@@ -3884,10 +3975,10 @@ Pacote: `com.farelo.api.fiscal`.
 
 - **`FiscalProfile`** (FARELO-150): entidade JPA — uma classificação
   fiscal/tributária reutilizável (ex: "Isento", "Tributado padrão") que um
-  `Product` vai futuramente referenciar (FARELO-151, "Associar Product com
-  FiscalProfile" — ticket futuro, não este), para que produtos que
-  compartilham o mesmo tratamento tributário não precisem repetir esses
-  atributos individualmente. Primeira peça do Epic 11 (Fiscal Base, ver
+  `Product` referencia (FARELO-151, "Associar Product com FiscalProfile" —
+  ver subseção dedicada abaixo), para que produtos que compartilham o mesmo
+  tratamento tributário não precisem repetir esses atributos
+  individualmente. Primeira peça do Epic 11 (Fiscal Base, ver
   `docs/PROMPT_MESTRE.md` seção 47: "NÃO EMITIR NFC-e ainda") — segue o
   mesmo padrão "entidade primeiro, associações/produtores depois" já usado
   por `PrintJob` (FARELO-071), `Notification` (FARELO-110),
@@ -3965,7 +4056,7 @@ Pacote: `com.farelo.api.fiscal`.
   poder referenciá-los** — exatamente a situação de `FiscalProfile`: o
   próprio FARELO-151 ("Associar Product com FiscalProfile") só faz sentido
   se já existir pelo menos um `FiscalProfile` criável e listável por um
-  Admin. Por isso este ticket segue o precedente de `Category`/
+  Admin. Por isso este ticket seguiu o precedente de `Category`/
   `Ingredient`, não o de `Payment`/`AuditLog`.
 
   Dentro desse precedente, a forma exata escolhida foi o CRUD completo de
@@ -3979,10 +4070,10 @@ Pacote: `com.farelo.api.fiscal`.
   quando chegar. `PUT` em particular importa mais aqui do que importaria
   para uma entidade só-ledger: um perfil fiscal é um valor de lookup
   digitado à mão (nome/descrição) que um Admin vai querer corrigir (typo,
-  descrição melhor) antes do FARELO-151 começar a referenciá-lo por id —
-  sem `PUT`, a única correção possível seria criar um novo perfil e deixar
-  o antigo órfão. `DELETE` fica de fora, mesmo raciocínio "fora do roadmap
-  atual" já aplicado a `Category`/`Product`/`Ingredient`.
+  descrição melhor) antes de um `Product` referenciá-lo por id (FARELO-151)
+  — sem `PUT`, a única correção possível seria criar um novo perfil e
+  deixar o antigo órfão. `DELETE` fica de fora, mesmo raciocínio "fora do
+  roadmap atual" já aplicado a `Category`/`Product`/`Ingredient`.
 
   `FiscalProfileService`: `create`/`listAll` (ordenado por `name`, mesmo
   padrão de `IngredientService#listAll` — sem filtro `active`-only ainda,
@@ -4015,12 +4106,29 @@ Pacote: `com.farelo.api.fiscal`.
   `IngredientRepositoryIntegrationTests`) e
   `FiscalProfileControllerIntegrationTests` (HTTP real via `MockMvc`,
   cobrindo os quatro endpoints — sucesso, validação e `404` — mesmo
-  formato de `IngredientControllerIntegrationTests`). Sem a landmine de FK
-  cross-tabela que `IngredientControllerIntegrationTests` documenta
-  (`inventory_movement` precisando ser limpo antes de `ingredient`):
-  nenhuma outra tabela referencia `fiscal_profile` ainda (FARELO-151,
-  `product.fiscal_profile_id`, é ticket futuro), então um
-  `fiscalProfileRepository.deleteAll()` simples no `@BeforeEach` é seguro.
+  formato de `IngredientControllerIntegrationTests`).
+
+  **Atualização FARELO-151 — landmine de FK cross-tabela que passou a
+  existir**: a nota original deste ticket (FARELO-150) dizia que nenhuma
+  outra tabela referenciava `fiscal_profile` ainda, então um
+  `fiscalProfileRepository.deleteAll()` cego no `@BeforeEach` de
+  `FiscalProfileControllerIntegrationTests` era seguro. Isso deixou de ser
+  verdade assim que FARELO-151 adicionou `product.fiscal_profile_id`
+  (`V28__add_product_fiscal_profile_id_column.sql`) — a mesma landmine já
+  documentada para `IngredientControllerIntegrationTests`/
+  `inventory_movement` (e mais adiante nesta seção, para `RecipeItem`)
+  passou a existir aqui também: um `Product` deixado para trás por outra
+  classe (ex: `ProductControllerIntegrationTests`, cuja ordem de execução
+  sob a suíte completa é do Surefire, não alfabética — ver o aviso
+  correspondente na seção `inventory`) que referencie um `FiscalProfile`
+  faria esse `deleteAll()` cego falhar com violação de FK. Corrigido com o
+  mesmo fix que `CategoryControllerIntegrationTests` já usa para o mesmo
+  formato de problema com `category`:
+  `FiscalProfileControllerIntegrationTests` ganhou um
+  `productRepository.deleteAll()` **antes** de `fiscalProfileRepository.
+  deleteAll()`, no próprio `@BeforeEach` da classe, em vez de depender de
+  toda outra classe limpar suas próprias linhas primeiro. Ver a subseção
+  FARELO-151 na seção `catalog` para o resto da mudança.
 
 ## Outbox (infraestrutura cross-cutting)
 

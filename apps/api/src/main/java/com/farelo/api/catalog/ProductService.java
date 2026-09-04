@@ -1,6 +1,8 @@
 package com.farelo.api.catalog;
 
 import com.farelo.api.audit.AuditLogService;
+import com.farelo.api.fiscal.FiscalProfile;
+import com.farelo.api.fiscal.FiscalProfileService;
 import com.farelo.api.security.User;
 import com.farelo.api.security.UserService;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -26,6 +28,7 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
+    private final FiscalProfileService fiscalProfileService;
     private final UserService userService;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
@@ -33,11 +36,13 @@ public class ProductService {
     public ProductService(
             ProductRepository productRepository,
             CategoryRepository categoryRepository,
+            FiscalProfileService fiscalProfileService,
             UserService userService,
             AuditLogService auditLogService,
             ObjectMapper objectMapper) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
+        this.fiscalProfileService = fiscalProfileService;
         this.userService = userService;
         this.auditLogService = auditLogService;
         this.objectMapper = objectMapper;
@@ -45,7 +50,8 @@ public class ProductService {
 
     public Product create(
             String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
-            Boolean availableOnMenu, Boolean availableOnPos, ProductionStation productionStation) {
+            Boolean availableOnMenu, Boolean availableOnPos, ProductionStation productionStation,
+            UUID fiscalProfileId) {
         Category category = categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new CategoryNotFoundException(categoryId));
 
@@ -61,12 +67,27 @@ public class ProductService {
         if (availableOnPos != null) {
             product.setAvailableOnPos(availableOnPos);
         }
-        // productionStation has no default to apply when absent (unlike the
-        // two booleans above) — null is itself the correct "not assigned"
-        // value (see Product's field javadoc), so it's set unconditionally.
+        // productionStation/fiscalProfile have no default to apply when
+        // absent (unlike the two booleans above) — null is itself the
+        // correct "not assigned" value (see Product's field javadocs), so
+        // both are set unconditionally.
         product.setProductionStation(productionStation);
+        // FiscalProfileService#getById, not FiscalProfileRepository directly
+        // — fiscal is a different domain from catalog, so this follows the
+        // established "cross-domain lookup goes through the other domain's
+        // service, never its repository" convention (see
+        // ProductService#update's javadoc, which spells this rule out for
+        // the categoryId lookup's own intra-domain exception to it).
+        product.setFiscalProfile(resolveFiscalProfile(fiscalProfileId));
 
         return productRepository.save(product);
+    }
+
+    // Reused by create() above and update() below. null is a legitimate
+    // "no fiscal profile assigned" input, not something to guard against —
+    // only a non-null id that fails to resolve triggers the 404.
+    private FiscalProfile resolveFiscalProfile(UUID fiscalProfileId) {
+        return fiscalProfileId != null ? fiscalProfileService.getById(fiscalProfileId) : null;
     }
 
     public List<Product> listAll() {
@@ -132,12 +153,16 @@ public class ProductService {
     public Product update(
             UUID id, String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
             boolean active, boolean availableOnMenu, boolean availableOnPos, ProductionStation productionStation,
-            UUID actorId) {
+            UUID fiscalProfileId, UUID actorId) {
         Product product = getById(id);
         BigDecimal previousPrice = product.getPrice();
 
         Category category = categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new CategoryNotFoundException(categoryId));
+        // FARELO-151: same resolve-id-to-entity shape as categoryId above,
+        // through FiscalProfileService (cross-domain) — see create()'s
+        // comment on resolveFiscalProfile() for why.
+        FiscalProfile fiscalProfile = resolveFiscalProfile(fiscalProfileId);
 
         product.setName(name);
         product.setDescription(description);
@@ -151,6 +176,8 @@ public class ProductService {
         // here is a legitimate, intentional value (clear a previously
         // assigned station) — not a "field omitted" placeholder to guard.
         product.setProductionStation(productionStation);
+        // Same reasoning, now for fiscalProfile (FARELO-151).
+        product.setFiscalProfile(fiscalProfile);
 
         Product saved = productRepository.save(product);
 

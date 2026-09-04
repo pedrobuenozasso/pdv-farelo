@@ -8,6 +8,8 @@ import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductRepository;
 import com.farelo.api.catalog.ProductionStation;
+import com.farelo.api.fiscal.FiscalProfile;
+import com.farelo.api.fiscal.FiscalProfileRepository;
 import com.farelo.api.security.User;
 import com.farelo.api.security.UserRepository;
 import com.farelo.api.security.UserRole;
@@ -44,9 +46,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>Same reasoning as {@code CategoryControllerIntegrationTests}: the
  * shared singleton Postgres container (see {@link AbstractIntegrationTest})
- * means the {@code product}/{@code category} tables may already have rows
- * from other test classes, so tests that assert list contents clear both
- * tables first (products before categories, because of the FK).
+ * means the {@code product}/{@code category}/{@code fiscal_profile} tables
+ * may already have rows from other test classes, so tests that assert list
+ * contents clear all three first (products before categories/fiscal
+ * profiles, because of the FKs — FARELO-151 added {@code
+ * product.fiscal_profile_id}, so {@code fiscalProfileRepository.deleteAll()}
+ * here follows the same product-first ordering rule as {@code
+ * categoryRepository.deleteAll()}; see {@code
+ * FiscalProfileControllerIntegrationTests}' own javadoc for the matching fix
+ * on that side).
  *
  * <p><b>FARELO-123</b>: {@code POST}/{@code PUT} now require
  * {@link UserRole#ADMIN}/{@link UserRole#MANAGER} (see
@@ -73,6 +81,9 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
     private ProductRepository productRepository;
 
     @Autowired
+    private FiscalProfileRepository fiscalProfileRepository;
+
+    @Autowired
     private UserRepository userRepository;
 
     @Autowired
@@ -89,8 +100,10 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
 
     @BeforeEach
     void cleanCatalogTables() {
+        // product first — it FKs into both category and fiscal_profile.
         productRepository.deleteAll();
         categoryRepository.deleteAll();
+        fiscalProfileRepository.deleteAll();
     }
 
     private String tokenFor(UserRole role) {
@@ -144,6 +157,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.availableOnPos").value(true))
                 .andExpect(jsonPath("$.categoryId").value(category.getId().toString()))
                 .andExpect(jsonPath("$.productionStation").value(nullValue()))
+                .andExpect(jsonPath("$.fiscalProfileId").value(nullValue()))
                 .andExpect(jsonPath("$.createdAt").exists())
                 .andExpect(jsonPath("$.updatedAt").exists())
                 .andReturn();
@@ -165,6 +179,9 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
         // productionStation omitted from the request body above -> stays
         // null (FARELO-073, "not yet assigned" — no default is applied).
         assertThat(persisted.get().getProductionStation()).isNull();
+        // fiscalProfileId omitted from the request body above -> stays null
+        // (FARELO-151, same "no default applied" reasoning).
+        assertThat(persisted.get().getFiscalProfile()).isNull();
     }
 
     @Test
@@ -531,6 +548,159 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                         .content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    // --- FARELO-151: associate Product with FiscalProfile -----------------
+
+    @Test
+    void createsProductWithExplicitFiscalProfile() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Tributado padrão"));
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "fiscalProfileId": "%s"
+                }
+                """.formatted(category.getId(), fiscalProfile.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.fiscalProfileId").value(fiscalProfile.getId().toString()))
+                .andReturn();
+
+        ProductResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), ProductResponse.class);
+
+        Optional<Product> persisted = productRepository.findById(response.id());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getFiscalProfile()).isNotNull();
+        assertThat(persisted.get().getFiscalProfile().getId()).isEqualTo(fiscalProfile.getId());
+    }
+
+    @Test
+    void returnsFiscalProfileNotFoundWhenCreatingWithUnknownFiscalProfile() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        UUID missingFiscalProfileId = UUID.randomUUID();
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "fiscalProfileId": "%s"
+                }
+                """.formatted(category.getId(), missingFiscalProfileId);
+
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("FISCAL_PROFILE_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void updatesProductSettingFiscalProfile() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+        assertThat(product.getFiscalProfile()).isNull();
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true,
+                  "fiscalProfileId": "%s"
+                }
+                """.formatted(category.getId(), fiscalProfile.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fiscalProfileId").value(fiscalProfile.getId().toString()));
+
+        Optional<Product> persisted = productRepository.findById(product.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getFiscalProfile()).isNotNull();
+        assertThat(persisted.get().getFiscalProfile().getId()).isEqualTo(fiscalProfile.getId());
+    }
+
+    @Test
+    void updatesProductClearingFiscalProfile() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
+        Product product = new Product("Café Espresso", new BigDecimal("7.50"), category);
+        product.setFiscalProfile(fiscalProfile);
+        product = productRepository.save(product);
+        assertThat(product.getFiscalProfile()).isNotNull();
+
+        // fiscalProfileId omitted here -> deserializes to null on
+        // ProductUpdateRequest, and a full-replace PUT applies that null —
+        // same "PUT can explicitly clear an optional field" convention
+        // productionStation already established (FARELO-073).
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true
+                }
+                """.formatted(category.getId());
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fiscalProfileId").value(nullValue()));
+
+        Optional<Product> persisted = productRepository.findById(product.getId());
+        assertThat(persisted).isPresent();
+        assertThat(persisted.get().getFiscalProfile()).isNull();
+    }
+
+    @Test
+    void returnsFiscalProfileNotFoundWhenUpdatingWithUnknownFiscalProfile() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product product = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+        UUID missingFiscalProfileId = UUID.randomUUID();
+
+        String body = """
+                {
+                  "name": "Café Espresso",
+                  "price": 7.50,
+                  "categoryId": "%s",
+                  "active": true,
+                  "availableOnMenu": true,
+                  "availableOnPos": true,
+                  "fiscalProfileId": "%s"
+                }
+                """.formatted(category.getId(), missingFiscalProfileId);
+
+        mockMvc.perform(put("/api/v1/products/{id}", product.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("FISCAL_PROFILE_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.correlationId").exists());
     }
 
     // --- FARELO-123: RBAC on create()/update() ---------------------------
