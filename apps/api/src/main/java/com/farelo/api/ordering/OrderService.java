@@ -11,6 +11,7 @@ import com.farelo.api.outbox.OutboxPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -185,6 +186,62 @@ public class OrderService {
         return orders.stream()
                 .map(order -> new OrderWithItems(order, orderItemRepository.findByOrder(order)))
                 .toList();
+    }
+
+    /**
+     * FARELO-143 ("Validar total pago antes de fechar"): a comanda's total
+     * bill — the sum of {@code unitPrice * quantity} across every {@link
+     * OrderItem} of every {@link Order} belonging to it, via {@link
+     * OrderItemRepository#sumOwedByCommand}. This is the "total owed" half
+     * of the comparison {@code PaymentService#closeCommand} needs against
+     * {@code PaymentService#getTotalPaid} (FARELO-142, the "total paid"
+     * half) before allowing {@code CommandService#close}.
+     *
+     * <p><b>Built here, in {@code ordering}, not in {@code payment}</b>: this
+     * is fundamentally {@code Order}/{@code OrderItem} data (their prices
+     * and quantities), the same reasoning already used for every other
+     * computation in this class ({@link #listByCommand(int)}, {@link
+     * #listQueue()}) — {@code payment} owning it would mean reaching across
+     * into {@code ordering}'s entities to compute something that has
+     * nothing to do with payments themselves. Confirmed before writing this:
+     * {@code FARELO-142}'s own javadoc on {@code PaymentService#getTotalPaid}
+     * explicitly left this uncomputed anywhere in the codebase — this method
+     * is the first one.
+     *
+     * <p><b>{@code CANCELLED} orders are excluded.</b> A cancelled order was
+     * never fulfilled — nothing was delivered, so there is nothing to
+     * charge for it; counting it toward "total owed" would let a comanda
+     * get stuck unable to close (total owed inflated by cancelled items
+     * nobody expects to be paid for) or, worse, require a customer to pay
+     * for food they never received. Every other {@code OrderStatus}
+     * (including still-in-flight ones like {@code CREATED}/{@code
+     * PREPARING}/{@code READY}) counts toward the bill — an order doesn't
+     * need to reach {@code DELIVERED} to be owed; it needs to not be
+     * cancelled. Implemented as {@code status <> CANCELLED} (an exclusion),
+     * not an explicit inclusion list, so a future new {@code OrderStatus}
+     * value defaults to being billable unless a future ticket decides
+     * otherwise — the same "closed set of one exception" shape is easier to
+     * reason about than enumerating every non-cancelled status by hand.
+     *
+     * <p>A comanda with zero orders (or only cancelled ones) reports {@code
+     * 0} (never {@code null}), same {@code COALESCE(SUM(...), 0)} shape as
+     * {@code PaymentRepository#sumAmountByCommand} — this is what makes an
+     * always-{@code AVAILABLE}-then-{@code OPEN}-but-never-ordered-against
+     * comanda still closable: {@code totalPaid (0) >= totalOwed (0)} holds
+     * trivially.
+     *
+     * <p>Not status-gated on the {@code Command} itself, same reasoning as
+     * {@link com.farelo.api.payment.PaymentService#getTotalPaid(int)}: this
+     * is a pure read over already-recorded data, callable regardless of the
+     * comanda's current status.
+     *
+     * @throws com.farelo.api.command.CommandNotFoundException {@code
+     *     commandNumber} doesn't exist.
+     */
+    @Transactional(readOnly = true)
+    public BigDecimal getTotalOwed(int commandNumber) {
+        Command command = commandService.findByNumber(commandNumber);
+        return orderItemRepository.sumOwedByCommand(command, OrderStatus.CANCELLED);
     }
 
     // Used by markAsPreparing/markAsReady below. See OrderRepository's

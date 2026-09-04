@@ -8,6 +8,7 @@ import com.farelo.api.command.CommandCannotAcceptPaymentsException;
 import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
+import com.farelo.api.command.CommandNotFullyPaidException;
 import com.farelo.api.fiscal.FiscalProfileNotFoundException;
 import com.farelo.api.inventory.IngredientNotFoundException;
 import com.farelo.api.inventory.RecipeAlreadyExistsException;
@@ -101,6 +102,17 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleCommandCannotBeClosed(CommandCannotBeClosedException ex) {
         return new ErrorResponse("COMMAND_CANNOT_BE_CLOSED", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: the comanda is in a closable status, but its total paid
+    // (PaymentService#getTotalPaid) doesn't cover its total owed
+    // (OrderService#getTotalOwed) yet (FARELO-143). Distinct code from
+    // COMMAND_CANNOT_BE_CLOSED above — see CommandNotFullyPaidException's
+    // javadoc for why this isn't a status problem.
+    @ExceptionHandler(CommandNotFullyPaidException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleCommandNotFullyPaid(CommandNotFullyPaidException ex) {
+        return new ErrorResponse("COMMAND_NOT_FULLY_PAID", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     // 409 Conflict, same reasoning as the other command state-conflict

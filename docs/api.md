@@ -455,23 +455,43 @@ recebe corpo algum.
 ### `POST /api/v1/commands/{number}/close`
 
 Fecha uma comanda: transição de status `OPEN`/`PAYMENT_REQUESTED` →
-`CLOSED`. (FARELO-034)
+`CLOSED`, agora **validando que o total pago cobre o total devido**
+antes de permitir a transição. (FARELO-034/FARELO-143)
 
 **Requer: `ADMIN`, `MANAGER`, `CASHIER`** (FARELO-124) — tratado como ação
-de manuseio de caixa (mesmo sem validação de pagamento real ainda);
-deliberadamente **sem** `ATTENDANT`, diferente do `open()` acima — ver a
-subseção FARELO-124 de `docs/domain-model.md` para o raciocínio completo.
+de manuseio de caixa; deliberadamente **sem** `ATTENDANT`, diferente do
+`open()` acima — ver a subseção FARELO-124 de `docs/domain-model.md` para
+o raciocínio completo. Papéis/URL/formato de resposta inalterados pelo
+FARELO-143.
 
-**Sem validação de pagamento/fiscal ainda** — por enquanto é só a
-transição de estado; validar que o total foi pago antes de fechar é o
-FARELO-143 (Epic 10).
+**Implementação movida para `PaymentController` (FARELO-143)** — a URL
+continua exatamente a mesma, mas o handler agora vive no pacote `payment`,
+não mais em `CommandController` (`command.web`), porque validar o
+pagamento exige ler dados de `ordering` (total devido) e `payment` (total
+pago), e `command` não pode depender de nenhum dos dois sem criar um ciclo
+de dependência de bean do Spring (`payment`/`ordering` já dependem de
+`command`). Ver a subseção FARELO-143 de `docs/domain-model.md` (seções
+`payment`/`command`) para o raciocínio completo da decisão de dependência.
 
 Mesma razão para `POST` em vez de `PATCH` do `open` acima.
 
 **Estados de origem válidos**: `OPEN` e `PAYMENT_REQUESTED` — ambos fazem
 sentido operacionalmente (a comanda pode ser fechada direto ou depois de
 pedir o pagamento). `AVAILABLE`, `CLOSED` e `BLOCKED` são inválidos como
-origem.
+origem. **Essa checagem de status continua acontecendo antes da checagem
+de pagamento** — uma comanda em estado inválido reporta
+`COMMAND_CANNOT_BE_CLOSED`, nunca um erro de pagamento confuso.
+
+**Validação de total pago (FARELO-143)**: depois de confirmado que o
+status é fechável, o total pago (soma de todo `Payment` da comanda,
+FARELO-142) precisa ser **maior ou igual** ao total devido (soma de
+`unitPrice × quantity` de todo `OrderItem` de todo pedido da comanda,
+**excluindo pedidos `CANCELLED`**). `>=`, não igualdade exata — sobra é
+permitida (troco não pego, gorjeta, arredondamento de maquininha); falta
+não. Uma comanda sem nenhum pedido (ou só com pedidos cancelados) tem
+total devido `0`, então fecha normalmente sem nenhum pagamento — mesmo
+comportamento que o FARELO-034 original já tinha para uma comanda aberta
+e nunca usada.
 
 **Response — `200 OK`**
 
@@ -499,9 +519,26 @@ origem.
   mais comum de erro (uma comanda ainda `AVAILABLE`, nunca aberta, *está*
   disponível — é exatamente por isso que não pode ser fechada).
 
+- `409 Conflict` — **novo no FARELO-143**: a comanda está em um estado
+  fechável, mas o total pago ainda é menor que o total devido:
+
+  ```json
+  {
+    "code": "COMMAND_NOT_FULLY_PAID",
+    "message": "Command 74 cannot be closed: total paid (20.00) is less than total owed (50.00)",
+    "correlationId": "..."
+  }
+  ```
+
+  `code`/exceção próprios (`COMMAND_NOT_FULLY_PAID`,
+  `CommandNotFullyPaidException`), distintos de `COMMAND_CANNOT_BE_CLOSED`
+  — esse é um problema de status, este é um problema de valor pago; uma
+  comanda pode estar perfeitamente `OPEN` (estado válido) e ainda assim
+  falhar aqui por falta de pagamento, então reaproveitar a mensagem de
+  status seria enganoso.
+
 Ainda não há endpoint para transição a `PAYMENT_REQUESTED` nem para
-`BLOCKED` — escopo de tickets futuros. Isso fecha o Epic 2 (Comandas) do
-lado do backend por enquanto.
+`BLOCKED` — escopo de tickets futuros.
 
 ### `POST /api/v1/orders`
 
@@ -2171,6 +2208,17 @@ manuseio de caixa que justifica proteger `POST .../payments`).
 
 - `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
   `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
+
+**FARELO-143 ("Validar total pago antes de fechar")** usa este endpoint's
+mesma soma (via `PaymentService#getTotalPaid`, reaproveitado sem
+alteração) como o lado "pago" da comparação que `POST
+/api/v1/commands/{number}/close` agora faz — ver a documentação desse
+endpoint acima (seção "Endpoints" → `POST /api/v1/commands/{number}/close`)
+para o comportamento completo, incluindo o novo `code:
+"COMMAND_NOT_FULLY_PAID"`. O handler HTTP de `close()` agora vive nesta
+mesma classe (`PaymentController`), não mais em `CommandController` — ver
+`docs/domain-model.md`, subseção FARELO-143 de `payment`, para o
+raciocínio de dependência completo.
 
 ### `POST /api/v1/fiscal-profiles`
 

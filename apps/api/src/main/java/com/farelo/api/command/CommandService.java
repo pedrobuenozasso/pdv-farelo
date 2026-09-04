@@ -11,8 +11,13 @@ public class CommandService {
 
     // Origin statuses from which a command can be closed. Both make
     // operational sense: a command can be closed straight from OPEN, or
-    // after payment was requested (FARELO-034 — no payment/fiscal
-    // validation yet, that's Epic 10/FARELO-143).
+    // after payment was requested (FARELO-034). Purely a status check —
+    // this class still has no opinion on whether the comanda has been paid
+    // enough; that check lives in PaymentService#closeCommand (FARELO-143),
+    // which calls findClosable() below for this precondition before its own
+    // payment-sufficiency check, then close() to actually transition. See
+    // findClosable()'s javadoc for why this class doesn't perform that
+    // payment check itself.
     private static final Set<CommandStatus> CLOSABLE_STATUSES =
             EnumSet.of(CommandStatus.OPEN, CommandStatus.PAYMENT_REQUESTED);
 
@@ -70,14 +75,45 @@ public class CommandService {
     // Same read-check-write caveat as open() above.
     @Transactional
     public Command close(int number) {
+        Command command = findClosable(number);
+
+        command.setStatus(CommandStatus.CLOSED);
+        return commandRepository.save(command);
+    }
+
+    /**
+     * Resolves a comanda ready to be closed but does <b>not</b> close it —
+     * the status half of {@link #close(int)}'s precondition, extracted into
+     * its own read-only method (FARELO-143) so a caller can validate "is
+     * this comanda in a closable status" separately from "actually flip it
+     * to {@code CLOSED}". Same read-only "resolve + validate, no save"
+     * shape as {@link #findForPayment(int)}.
+     *
+     * <p>Exists specifically for {@code PaymentService#closeCommand}
+     * (FARELO-143, "Validar total pago antes de fechar"): it needs to check
+     * the <em>status</em> precondition before checking the <em>payment</em>
+     * precondition (so a comanda that's e.g. still {@code AVAILABLE} fails
+     * with {@link CommandCannotBeClosedException}, not a confusing payment
+     * error, exactly as it did before this ticket), without duplicating
+     * {@link #CLOSABLE_STATUSES} membership logic in the {@code payment}
+     * package. {@link #close(int)} itself now delegates to this method for
+     * that same check, then performs the actual transition+save — a
+     * behavior-preserving refactor, not a change to what statuses are
+     * accepted or which exception is thrown.
+     *
+     * @throws CommandNotFoundException {@code number} doesn't exist (via
+     *     {@link #findByNumber}).
+     * @throws CommandCannotBeClosedException the comanda exists but its
+     *     status isn't in {@link #CLOSABLE_STATUSES}.
+     */
+    public Command findClosable(int number) {
         Command command = findByNumber(number);
 
         if (!CLOSABLE_STATUSES.contains(command.getStatus())) {
             throw new CommandCannotBeClosedException(number, command.getStatus());
         }
 
-        command.setStatus(CommandStatus.CLOSED);
-        return commandRepository.save(command);
+        return command;
     }
 
     /**
