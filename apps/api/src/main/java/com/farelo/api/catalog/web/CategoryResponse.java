@@ -12,7 +12,9 @@ import java.util.UUID;
 public record CategoryResponse(
         UUID id,
         String name,
+        String description,
         boolean active,
+        int sortOrder,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
@@ -20,7 +22,9 @@ public record CategoryResponse(
         return new CategoryResponse(
                 category.getId(),
                 category.getName(),
+                category.getDescription(),
                 category.isActive(),
+                category.getSortOrder(),
                 category.getCreatedAt(),
                 category.getUpdatedAt());
     }

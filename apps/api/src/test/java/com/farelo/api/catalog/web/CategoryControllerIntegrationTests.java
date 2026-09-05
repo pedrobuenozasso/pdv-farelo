@@ -25,6 +25,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -119,6 +120,33 @@ class CategoryControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(persisted).isPresent();
         assertThat(persisted.get().getName()).isEqualTo("Sobremesas");
         assertThat(persisted.get().isActive()).isTrue();
+    }
+
+    // FARELO-261: description/sortOrder are optional new fields.
+    @Test
+    void createsCategoryWithDescriptionAndSortOrder() throws Exception {
+        mockMvc.perform(post("/api/v1/categories")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Cafés Especiais", "description": "Grãos selecionados", "sortOrder": 5}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.description").value("Grãos selecionados"))
+                .andExpect(jsonPath("$.sortOrder").value(5));
+    }
+
+    @Test
+    void defaultsSortOrderToZeroWhenOmitted() throws Exception {
+        mockMvc.perform(post("/api/v1/categories")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": "Salgados"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sortOrder").value(0))
+                .andExpect(jsonPath("$.description").value(nullValue()));
     }
 
     @Test

@@ -43,7 +43,7 @@ public class CategoryController {
     public ResponseEntity<CategoryResponse> create(
             @Valid @RequestBody CategoryRequest request,
             UriComponentsBuilder uriComponentsBuilder) {
-        Category category = categoryService.create(request.name());
+        Category category = categoryService.create(request.name(), request.description(), request.sortOrder());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/categories/{id}")

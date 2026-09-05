@@ -18,6 +18,7 @@ import {
   listProducts,
   updateProduct,
   type Product,
+  type ProductionStation,
 } from "@/lib/api/products";
 
 const PRODUCTS_QUERY_KEY = ["products"];
@@ -30,6 +31,11 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
 
 const inputClass =
   "rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-primary";
+
+const PRODUCTION_STATION_LABEL: Record<ProductionStation, string> = {
+  BAR: "Bar",
+  KITCHEN: "Cozinha",
+};
 
 // price/imageUrl are kept as raw strings from the inputs and
 // parsed/validated here — avoids fighting native <input> string values vs.
@@ -52,17 +58,21 @@ const productFormSchema = z.object({
       (value) => !value || /^https?:\/\/.+/.test(value),
       "URL inválida (deve começar com http:// ou https://)",
     ),
+  // FARELO-271: the backend already accepted these on create — only the
+  // form was missing them.
+  availableOnMenu: z.boolean(),
+  availableOnPos: z.boolean(),
+  productionStation: z.enum(["", "BAR", "KITCHEN"]),
 });
 
 type ProductFormValues = z.infer<typeof productFormSchema>;
 
 // PUT is a full replace — the backend requires active/availableOnMenu/
 // availableOnPos explicitly (see ProductUpdateRequest / docs/api.md), so the
-// edit form extends the create schema with those three booleans.
+// edit form extends the create schema with active (productionStation is
+// already on productFormSchema, FARELO-272).
 const productEditFormSchema = productFormSchema.extend({
   active: z.boolean(),
-  availableOnMenu: z.boolean(),
-  availableOnPos: z.boolean(),
 });
 
 type ProductEditFormValues = z.infer<typeof productEditFormSchema>;
@@ -77,6 +87,19 @@ export default function ProductsAdminPage() {
   const queryClient = useQueryClient();
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+
+  // FARELO-270 ("busca; categoria; ativo/inativo; disponível no menu;
+  // disponível no PDV"): filtered client-side over the already-fetched
+  // product list — same reasoning already used elsewhere in this codebase
+  // for filtering over a small, fully-loaded catalog rather than adding
+  // query params to GET /api/v1/products.
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "active" | "inactive"
+  >("all");
+  const [menuFilter, setMenuFilter] = useState<"all" | "yes" | "no">("all");
+  const [posFilter, setPosFilter] = useState<"all" | "yes" | "no">("all");
 
   const productsQuery = useQuery({
     queryKey: PRODUCTS_QUERY_KEY,
@@ -93,6 +116,23 @@ export default function ProductsAdminPage() {
     categories.map((category) => [category.id, category.name]),
   );
 
+  const filteredProducts = (productsQuery.data ?? []).filter((product) => {
+    if (
+      search.trim() &&
+      !product.name.toLowerCase().includes(search.trim().toLowerCase())
+    ) {
+      return false;
+    }
+    if (categoryFilter && product.categoryId !== categoryFilter) return false;
+    if (statusFilter === "active" && !product.active) return false;
+    if (statusFilter === "inactive" && product.active) return false;
+    if (menuFilter === "yes" && !product.availableOnMenu) return false;
+    if (menuFilter === "no" && product.availableOnMenu) return false;
+    if (posFilter === "yes" && !product.availableOnPos) return false;
+    if (posFilter === "no" && product.availableOnPos) return false;
+    return true;
+  });
+
   const {
     register,
     handleSubmit,
@@ -106,6 +146,9 @@ export default function ProductsAdminPage() {
       price: "",
       categoryId: "",
       imageUrl: "",
+      availableOnMenu: true,
+      availableOnPos: true,
+      productionStation: "",
     },
   });
 
@@ -125,6 +168,9 @@ export default function ProductsAdminPage() {
       price: Number(values.price),
       categoryId: values.categoryId,
       imageUrl: values.imageUrl?.trim() || undefined,
+      availableOnMenu: values.availableOnMenu,
+      availableOnPos: values.availableOnPos,
+      productionStation: values.productionStation || undefined,
     });
   });
 
@@ -141,7 +187,8 @@ export default function ProductsAdminPage() {
             <div>
               <h1 className="font-serif text-2xl font-semibold">Produtos</h1>
               <p className="text-ink-soft mt-0.5 text-sm">
-                {productsQuery.data?.length ?? 0} produtos cadastrados
+                {filteredProducts.length} de {productsQuery.data?.length ?? 0}{" "}
+                produtos
               </p>
             </div>
             <Button onClick={() => setCreateOpen((open) => !open)}>
@@ -252,6 +299,40 @@ export default function ProductsAdminPage() {
                   ) : null}
                 </div>
 
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="productionStation"
+                    className="text-sm font-medium"
+                  >
+                    Estação de produção (opcional)
+                  </label>
+                  <select
+                    id="productionStation"
+                    className={inputClass}
+                    {...register("productionStation")}
+                  >
+                    <option value="">Sem estação</option>
+                    {Object.entries(PRODUCTION_STATION_LABEL).map(
+                      ([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-6 text-sm font-medium">
+                  <label className="flex items-center gap-2">
+                    <Switch {...register("availableOnMenu")} />
+                    Cardápio
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <Switch {...register("availableOnPos")} />
+                    PDV
+                  </label>
+                </div>
+
                 {apiErrorMessage ? (
                   <p className="text-red text-sm">{apiErrorMessage}</p>
                 ) : null}
@@ -269,6 +350,62 @@ export default function ProductsAdminPage() {
             </Card>
           ) : null}
 
+          {/* FARELO-270 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar por nome..."
+              className={`${inputClass} min-w-[200px] flex-1`}
+            />
+            <select
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">Todas as categorias</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as typeof statusFilter)
+              }
+              className={inputClass}
+            >
+              <option value="all">Ativos e inativos</option>
+              <option value="active">Só ativos</option>
+              <option value="inactive">Só inativos</option>
+            </select>
+            <select
+              value={menuFilter}
+              onChange={(event) =>
+                setMenuFilter(event.target.value as typeof menuFilter)
+              }
+              className={inputClass}
+            >
+              <option value="all">Cardápio: todos</option>
+              <option value="yes">No cardápio</option>
+              <option value="no">Fora do cardápio</option>
+            </select>
+            <select
+              value={posFilter}
+              onChange={(event) =>
+                setPosFilter(event.target.value as typeof posFilter)
+              }
+              className={inputClass}
+            >
+              <option value="all">PDV: todos</option>
+              <option value="yes">No PDV</option>
+              <option value="no">Fora do PDV</option>
+            </select>
+          </div>
+
           <div className="border-line bg-surface overflow-hidden rounded-2xl border">
             {productsQuery.isLoading ? (
               <p className="text-ink-faint p-5 text-sm">Carregando...</p>
@@ -278,12 +415,14 @@ export default function ProductsAdminPage() {
                 Não foi possível carregar os produtos.
               </p>
             ) : null}
-            {productsQuery.data && productsQuery.data.length === 0 ? (
+            {productsQuery.data && filteredProducts.length === 0 ? (
               <p className="text-ink-faint p-5 text-sm">
-                Nenhum produto cadastrado.
+                {productsQuery.data.length === 0
+                  ? "Nenhum produto cadastrado."
+                  : "Nenhum produto encontrado com esses filtros."}
               </p>
             ) : null}
-            {productsQuery.data && productsQuery.data.length > 0 ? (
+            {filteredProducts.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-left">
                   <thead>
@@ -310,7 +449,7 @@ export default function ProductsAdminPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {productsQuery.data.map((product: Product) =>
+                    {filteredProducts.map((product: Product) =>
                       editingProductId === product.id ? (
                         <ProductEditRow
                           key={product.id}
@@ -426,6 +565,7 @@ function ProductEditRow({
       active: product.active,
       availableOnMenu: product.availableOnMenu,
       availableOnPos: product.availableOnPos,
+      productionStation: product.productionStation ?? "",
     },
   });
 
@@ -440,6 +580,7 @@ function ProductEditRow({
         active: values.active,
         availableOnMenu: values.availableOnMenu,
         availableOnPos: values.availableOnPos,
+        productionStation: values.productionStation || undefined,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
@@ -524,6 +665,22 @@ function ProductEditRow({
               {errors.imageUrl ? (
                 <p className="text-red text-xs">{errors.imageUrl.message}</p>
               ) : null}
+            </div>
+            <div className="flex min-w-[160px] flex-1 flex-col gap-1">
+              <select
+                aria-label="Estação de produção"
+                className={inputClass}
+                {...register("productionStation")}
+              >
+                <option value="">Sem estação</option>
+                {Object.entries(PRODUCTION_STATION_LABEL).map(
+                  ([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ),
+                )}
+              </select>
             </div>
           </div>
 

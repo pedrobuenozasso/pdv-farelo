@@ -7,6 +7,8 @@
 
 import { authHeaders, parseResponse } from "./client";
 
+export type ProductionStation = "BAR" | "KITCHEN";
+
 export type Product = {
   id: string;
   name: string;
@@ -17,16 +19,25 @@ export type Product = {
   availableOnPos: boolean;
   categoryId: string;
   imageUrl: string | null;
+  productionStation: ProductionStation | null;
   createdAt: string;
   updatedAt: string;
 };
 
+// FARELO-271: availableOnMenu/availableOnPos/productionStation are all
+// already accepted by the backend on create (ProductRequest) — active
+// deliberately isn't (a product always starts active, same reasoning
+// ProductUpdateRequest's javadoc documents for why active only appears on
+// the update shape).
 export type CreateProductInput = {
   name: string;
   description?: string;
   price: number;
   categoryId: string;
   imageUrl?: string;
+  availableOnMenu?: boolean;
+  availableOnPos?: boolean;
+  productionStation?: ProductionStation;
 };
 
 // PUT is a full replace: unlike create, active/availableOnMenu/availableOnPos
@@ -40,6 +51,7 @@ export type UpdateProductInput = {
   active: boolean;
   availableOnMenu: boolean;
   availableOnPos: boolean;
+  productionStation?: ProductionStation;
 };
 
 const API_BASE_URL =

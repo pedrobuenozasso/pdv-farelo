@@ -17,13 +17,17 @@ export { ApiError } from "./client";
 export type Category = {
   id: string;
   name: string;
+  description: string | null;
   active: boolean;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 };
 
 export type CreateCategoryInput = {
   name: string;
+  description?: string;
+  sortOrder?: number;
 };
 
 const API_BASE_URL =

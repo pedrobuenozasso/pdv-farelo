@@ -35,8 +35,20 @@ public class Category {
     @Column(name = "name", nullable = false)
     private String name;
 
+    // FARELO-261 — optional, same convention as Product#getDescription().
+    @Column(name = "description")
+    private String description;
+
     @Column(name = "active", nullable = false)
     private boolean active = true;
+
+    // FARELO-261 — display order within the menu/PDV/admin listing.
+    // Defaults to 0 for every category; actually letting staff reorder
+    // categories via the Admin UI is FARELO-264, a separate, later
+    // ticket — this field exists and is sortable-by now, but nothing
+    // yet changes it after creation.
+    @Column(name = "sort_order", nullable = false)
+    private int sortOrder;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -76,12 +88,28 @@ public class Category {
         this.name = name;
     }
 
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
     public boolean isActive() {
         return active;
     }
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public int getSortOrder() {
+        return sortOrder;
+    }
+
+    public void setSortOrder(int sortOrder) {
+        this.sortOrder = sortOrder;
     }
 
     public OffsetDateTime getCreatedAt() {
