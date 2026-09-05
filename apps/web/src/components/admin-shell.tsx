@@ -80,6 +80,7 @@ const ADMIN_SECTIONS = [
   { href: "/admin/notifications", label: "Notificações" },
   { href: "/admin/print-jobs", label: "Impressão" },
   { href: "/admin/users", label: "Usuários" },
+  { href: "/admin/commands/qrcodes", label: "QR Codes" },
 ] as const;
 
 export function AdminShell({ children }: { children: ReactNode }) {
@@ -94,7 +95,10 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <div className="border-line bg-surface flex w-56 shrink-0 flex-col gap-6 border-r p-4">
+      {/* FARELO-253: hidden on print — a printed QR batch page shouldn't
+          carry the admin nav chrome. The content area (below) stays
+          visible; each page decides its own screen-vs-print content. */}
+      <div className="border-line bg-surface flex w-56 shrink-0 flex-col gap-6 border-r p-4 print:hidden">
         <Link href="/pdv" className="flex items-center gap-2.5 px-1.5">
           <LogoBadge size={34} />
           <span className="font-serif text-base font-semibold italic">
