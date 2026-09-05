@@ -82,7 +82,7 @@ type IngredientFormValues = z.infer<typeof ingredientFormSchema>;
 
 export default function InventoryAdminPage() {
   return (
-    <AuthGuard>
+    <AuthGuard allow={["ADMIN", "MANAGER"]}>
       <AdminShell>
         <div className="mx-auto flex max-w-4xl flex-col gap-10">
           <IngredientsSection />

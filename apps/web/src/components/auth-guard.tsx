@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect } from "react";
 
 import { getSession } from "@/lib/auth";
+import type { UserRole } from "@/lib/api/users";
 import { useSession } from "@/lib/use-session";
 
 // Gates the internal tools (/pdv, /admin/*, /kds) behind a logged-in
@@ -26,7 +27,22 @@ import { useSession } from "@/lib/use-session";
 // frame. `useSession()` still governs what's rendered below (worst case:
 // a legitimately logged-in user briefly renders nothing while React
 // corrects the hydration mismatch, never a leak of protected content).
-export function AuthGuard({ children }: { children: ReactNode }) {
+// FARELO-304 ("Guardas de rota... conforme role"): `allow`, when given,
+// restricts a route to the listed roles instead of just "logged in". This
+// is a separate branch from the redirect-to-/login effect above: a user
+// who IS logged in but whose role isn't in `allow` shouldn't be bounced to
+// /login (they have a valid session — that's not the problem) or silently
+// shown nothing (indistinguishable from a loading/hydration flash). Instead
+// they see an in-place "access denied" message, same "client-side check is
+// UX only" reasoning as the rest of this file — the backend's @RequireRole
+// on the actual write/read endpoints remains the real enforcement.
+export function AuthGuard({
+  children,
+  allow,
+}: {
+  children: ReactNode;
+  allow?: UserRole[];
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const session = useSession();
@@ -38,5 +54,16 @@ export function AuthGuard({ children }: { children: ReactNode }) {
   }, [pathname, router]);
 
   if (session === null) return null;
+
+  if (allow && (session.role === null || !allow.includes(session.role))) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center p-8">
+        <p className="text-center text-sm text-neutral-500">
+          Você não tem permissão para acessar esta página.
+        </p>
+      </div>
+    );
+  }
+
   return <>{children}</>;
 }

@@ -1,6 +1,8 @@
 package com.farelo.api.payment.web;
 
 import com.farelo.api.AbstractIntegrationTest;
+import com.farelo.api.audit.AuditLog;
+import com.farelo.api.audit.AuditLogRepository;
 import com.farelo.api.catalog.Category;
 import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
@@ -185,6 +187,9 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Autowired
     private DiscountRepository discountRepository;
+
+    @Autowired
+    private AuditLogRepository auditLogRepository;
 
     @Autowired
     private CategoryRepository categoryRepository;
@@ -400,6 +405,16 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(persisted).hasSize(1);
         assertThat(persisted.get(0).getAmount()).isEqualByComparingTo("25.50");
         assertThat(persisted.get(0).getMethod()).isEqualTo(PaymentMethod.PIX);
+
+        // FARELO-305 ("Auditoria por usuário"): recording a payment now
+        // writes an AuditLog entry identifying who did it.
+        List<AuditLog> auditLogs = auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
+                "Payment", persisted.get(0).getId());
+        assertThat(auditLogs).hasSize(1);
+        assertThat(auditLogs.get(0).getAction()).isEqualTo("PAYMENT_RECORDED");
+        assertThat(auditLogs.get(0).getUserId()).isNotNull();
+        assertThat(auditLogs.get(0).getPreviousValue()).isNull();
+        assertThat(auditLogs.get(0).getNewValue()).contains("25.5").contains("PIX");
     }
 
     @Test

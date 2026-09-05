@@ -1,5 +1,6 @@
 package com.farelo.api.ordering;
 
+import com.farelo.api.audit.AuditLogService;
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductNotAvailableException;
 import com.farelo.api.catalog.ProductService;
@@ -10,6 +11,8 @@ import com.farelo.api.inventory.OrderItemConsumption;
 import com.farelo.api.outbox.OutboxPublisher;
 import com.farelo.api.security.User;
 import com.farelo.api.security.UserService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,6 +52,12 @@ public class OrderService {
     private static final Set<OrderStatus> ITEM_CANCELLATION_BLOCKED_STATUSES =
             Set.of(OrderStatus.DELIVERED, OrderStatus.CANCELLED);
 
+    // FARELO-305: audit action/entity-type constants for markAsCancelled
+    // below, same naming convention ProductService (AUDIT_ACTION_PRICE_CHANGED)/
+    // InventoryMovementService already established.
+    private static final String AUDIT_ACTION_ORDER_CANCELLED = "ORDER_CANCELLED";
+    private static final String AUDIT_ENTITY_TYPE_ORDER = "Order";
+
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final OrderStatusHistoryRepository orderStatusHistoryRepository;
@@ -57,6 +66,8 @@ public class OrderService {
     private final OutboxPublisher outboxPublisher;
     private final InventoryMovementService inventoryMovementService;
     private final UserService userService;
+    private final AuditLogService auditLogService;
+    private final ObjectMapper objectMapper;
 
     public OrderService(
             OrderRepository orderRepository,
@@ -66,7 +77,9 @@ public class OrderService {
             ProductService productService,
             OutboxPublisher outboxPublisher,
             InventoryMovementService inventoryMovementService,
-            UserService userService) {
+            UserService userService,
+            AuditLogService auditLogService,
+            ObjectMapper objectMapper) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.orderStatusHistoryRepository = orderStatusHistoryRepository;
@@ -75,6 +88,8 @@ public class OrderService {
         this.outboxPublisher = outboxPublisher;
         this.inventoryMovementService = inventoryMovementService;
         this.userService = userService;
+        this.auditLogService = auditLogService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -348,10 +363,44 @@ public class OrderService {
      * {@link #transition(UUID, Set, OrderStatus)} overload instead (see that
      * method's javadoc for why an overload, rather than changing the
      * existing single-status method's signature).
+     *
+     * <p>{@code actorId} (FARELO-305, "Auditoria por usuário"): cancelling
+     * an order is exactly the kind of sensitive action the prompt mestre
+     * (seção 27) names — "cancelamento" — so this now records an {@link
+     * com.farelo.api.audit.AuditLog} entry, same {@code
+     * AuditLogService#record} seam {@code ProductService}/{@code
+     * InventoryMovementService} already use for their own sensitive
+     * actions, rather than a bespoke denormalized actor column on {@code
+     * Order} (unlike {@code OrderItem#cancel}, FARELO-200/201 — that one
+     * predates this ticket and its own column stays; no need to migrate it
+     * onto the generic ledger retroactively).
      */
     @Transactional
-    public OrderWithItems markAsCancelled(UUID orderId) {
-        return transition(orderId, CANCELLABLE_STATUSES, OrderStatus.CANCELLED);
+    public OrderWithItems markAsCancelled(UUID orderId, UUID actorId) {
+        OrderStatus previousStatus = getById(orderId).getStatus();
+        OrderWithItems result = transition(orderId, CANCELLABLE_STATUSES, OrderStatus.CANCELLED);
+
+        User actor = userService.getById(actorId);
+        auditLogService.record(
+                actor, AUDIT_ACTION_ORDER_CANCELLED, AUDIT_ENTITY_TYPE_ORDER, orderId,
+                serializeStatus(previousStatus), serializeStatus(OrderStatus.CANCELLED));
+
+        return result;
+    }
+
+    // FARELO-305: same "record + writeValueAsString" pattern ProductService#
+    // serializePrice/PrintJobService#serialize already use for an
+    // AuditLog/PrintJob snapshot — OrderCancellationSnapshot is a simple
+    // record built from an already-valid OrderStatus, so a
+    // JsonProcessingException here would mean Jackson genuinely can't
+    // serialize it, an invariant violation rather than an expected runtime
+    // condition.
+    private String serializeStatus(OrderStatus status) {
+        try {
+            return objectMapper.writeValueAsString(new OrderCancellationSnapshot(status));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize order status snapshot", e);
+        }
     }
 
     /**

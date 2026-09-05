@@ -1,15 +1,21 @@
 package com.farelo.api.payment;
 
+import com.farelo.api.audit.AuditLogService;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandNotFullyPaidException;
 import com.farelo.api.command.CommandService;
 import com.farelo.api.discount.DiscountService;
 import com.farelo.api.ordering.OrderService;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * FARELO-140 gave this class its first method, {@link #listByCommand(int)} —
@@ -42,24 +48,46 @@ import java.util.List;
  * on {@code command}/{@code ordering}/{@code security}, none of which
  * depend back on {@code payment}, so {@code payment → discount → ...}
  * stays a straight line.
+ *
+ * <p><b>FARELO-305 ("Auditoria por usuário") adds {@link UserService}/
+ * {@link AuditLogService}</b> — {@link #record(int, BigDecimal,
+ * PaymentMethod, UUID)} now resolves the acting user and writes an {@link
+ * com.farelo.api.audit.AuditLog} entry, same seam {@code ProductService}/
+ * {@code OrderService#markAsCancelled} already use for their own sensitive
+ * actions. {@code security} depends on nothing in {@code payment}, so this
+ * stays acyclic too.
  */
 @Service
 public class PaymentService {
+
+    // FARELO-305: audit action/entity-type constants for record below, same
+    // naming convention ProductService/OrderService already established.
+    private static final String AUDIT_ACTION_PAYMENT_RECORDED = "PAYMENT_RECORDED";
+    private static final String AUDIT_ENTITY_TYPE_PAYMENT = "Payment";
 
     private final PaymentRepository paymentRepository;
     private final CommandService commandService;
     private final OrderService orderService;
     private final DiscountService discountService;
+    private final UserService userService;
+    private final AuditLogService auditLogService;
+    private final ObjectMapper objectMapper;
 
     public PaymentService(
             PaymentRepository paymentRepository,
             CommandService commandService,
             OrderService orderService,
-            DiscountService discountService) {
+            DiscountService discountService,
+            UserService userService,
+            AuditLogService auditLogService,
+            ObjectMapper objectMapper) {
         this.paymentRepository = paymentRepository;
         this.commandService = commandService;
         this.orderService = orderService;
         this.discountService = discountService;
+        this.userService = userService;
+        this.auditLogService = auditLogService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -102,10 +130,29 @@ public class PaymentService {
      *     full status-precondition reasoning).
      */
     @Transactional
-    public Payment record(int commandNumber, BigDecimal amount, PaymentMethod method) {
+    public Payment record(int commandNumber, BigDecimal amount, PaymentMethod method, UUID actorId) {
         Command command = commandService.findForPayment(commandNumber);
         Payment payment = new Payment(command, amount, method);
-        return paymentRepository.save(payment);
+        Payment saved = paymentRepository.save(payment);
+
+        // FARELO-305 ("Auditoria por usuário"): recording a payment is
+        // exactly the "pagamento" the prompt mestre (seção 27) names as a
+        // sensitive action — same AuditLogService#record seam
+        // ProductService/OrderService#markAsCancelled already use.
+        User actor = userService.getById(actorId);
+        auditLogService.record(
+                actor, AUDIT_ACTION_PAYMENT_RECORDED, AUDIT_ENTITY_TYPE_PAYMENT, saved.getId(),
+                null, serializePayment(saved));
+
+        return saved;
+    }
+
+    private String serializePayment(Payment payment) {
+        try {
+            return objectMapper.writeValueAsString(new PaymentSnapshot(payment.getAmount(), payment.getMethod()));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize payment snapshot", e);
+        }
     }
 
     /**

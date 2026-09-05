@@ -151,10 +151,15 @@ public class OrderController {
     // pedido") — cancelling an order is a comanda/order-lifecycle decision
     // made from the same front-of-house screen as delivering one, not a
     // kitchen action, so KITCHEN is excluded for the same reason.
+    //
+    // FARELO-305: needs AuthenticatedPrincipal (unlike before) so
+    // OrderService#markAsCancelled can attribute the AuditLog entry to
+    // whoever cancelled the order — resolved the same way #cancelItem
+    // already does below.
     @PostMapping("/{id}/cancel")
     @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
-    public OrderResponse markAsCancelled(@PathVariable UUID id) {
-        OrderWithItems result = orderService.markAsCancelled(id);
+    public OrderResponse markAsCancelled(@PathVariable UUID id, AuthenticatedPrincipal principal) {
+        OrderWithItems result = orderService.markAsCancelled(id, principal.userId());
         return OrderResponse.from(result);
     }
 

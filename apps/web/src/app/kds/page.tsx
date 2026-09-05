@@ -74,7 +74,7 @@ export default function KdsPage() {
   const clock = nowSeconds > 0 ? formatClock(new Date(nowSeconds * 1_000)) : "";
 
   return (
-    <AuthGuard>
+    <AuthGuard allow={["ADMIN", "MANAGER", "KITCHEN"]}>
       <main
         style={KDS_VARS}
         className="min-h-screen bg-[var(--kds-bg)] px-8 py-6 text-[var(--kds-ink)]"

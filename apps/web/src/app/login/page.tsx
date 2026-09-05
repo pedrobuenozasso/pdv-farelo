@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import { login } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
-import { setSession } from "@/lib/auth";
+import { decodeRole, setSession } from "@/lib/auth";
 import { LogoBadge } from "@/components/logo-badge";
 import { Button } from "@/components/ui/button";
 
@@ -44,7 +44,7 @@ function LoginForm() {
   const onSubmit = handleSubmit(async (values) => {
     try {
       const result = await login(values);
-      setSession(result);
+      setSession({ ...result, role: decodeRole(result.token) });
       const redirect = searchParams.get("redirect") ?? "/pdv";
       router.push(redirect);
     } catch (error) {

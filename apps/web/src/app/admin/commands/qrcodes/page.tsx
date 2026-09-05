@@ -67,7 +67,7 @@ export default function CommandQrCodesAdminPage() {
   }
 
   return (
-    <AuthGuard>
+    <AuthGuard allow={["ADMIN", "MANAGER"]}>
       <AdminShell>
         <div className="flex flex-col gap-6 print:hidden">
           <div>

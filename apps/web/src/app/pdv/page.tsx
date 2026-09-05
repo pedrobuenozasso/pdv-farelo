@@ -140,7 +140,7 @@ export default function PdvCommandsPage() {
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
 
   return (
-    <AuthGuard>
+    <AuthGuard allow={["ADMIN", "MANAGER", "CASHIER", "ATTENDANT"]}>
       <InternalNav />
       <main className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
         <div>

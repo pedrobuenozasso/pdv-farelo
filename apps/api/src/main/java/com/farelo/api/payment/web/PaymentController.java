@@ -6,6 +6,7 @@ import com.farelo.api.payment.Payment;
 import com.farelo.api.payment.PaymentBalance;
 import com.farelo.api.payment.PaymentService;
 import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.AuthenticatedPrincipal;
 import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -40,14 +41,12 @@ import java.util.List;
  * method's javadoc): {@code ADMIN}/{@code MANAGER}/{@code CASHIER}, and
  * deliberately <b>not</b> {@code ATTENDANT} (front-of-house table service,
  * not cash handling — same exclusion {@code close()} makes) or {@code
- * KITCHEN} (no business recording payments at all). No {@code
- * AuthenticatedPrincipal} parameter is needed here, unlike {@code
- * InventoryMovementController#create}/{@code #recordLoss}: those endpoints
- * need a principal because they feed an audit trail
- * ({@code InventoryMovementService#recordAudit}); {@link Payment} carries no
- * "recorded by" field (this ticket doesn't add one — see {@code Payment}'s
- * javadoc, its shape is deliberately unchanged), so there is nothing for a
- * principal to be forwarded to.
+ * KITCHEN} (no business recording payments at all). {@code
+ * AuthenticatedPrincipal} (FARELO-305, "Auditoria por usuário") — recording
+ * a payment now feeds an {@code AuditLog} entry, same reason {@code
+ * InventoryMovementController#create}/{@code #recordLoss} already need a
+ * principal; {@link Payment}'s own shape stays unchanged (the actor is
+ * denormalized onto the {@code AuditLog} row, not a new column here).
  *
  * <p><b>Placement note</b>: this is a command-scoped URL, but lives in the
  * new {@code payment} domain ({@code com.farelo.api.payment.web}), not in
@@ -142,8 +141,10 @@ public class PaymentController {
     public ResponseEntity<PaymentRecordResponse> record(
             @PathVariable int number,
             @Valid @RequestBody PaymentRequest request,
+            AuthenticatedPrincipal principal,
             UriComponentsBuilder uriComponentsBuilder) {
-        Payment payment = paymentService.record(number, request.amount(), request.method());
+        Payment payment = paymentService.record(
+                number, request.amount(), request.method(), principal.userId());
 
         BigDecimal changeGiven = request.amountReceived() != null
                 ? request.amountReceived().subtract(request.amount())

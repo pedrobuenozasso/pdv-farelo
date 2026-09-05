@@ -1,6 +1,8 @@
 package com.farelo.api.ordering.web;
 
 import com.farelo.api.AbstractIntegrationTest;
+import com.farelo.api.audit.AuditLog;
+import com.farelo.api.audit.AuditLogRepository;
 import com.farelo.api.catalog.Category;
 import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
@@ -105,6 +107,9 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Autowired
     private OutboxEventRepository outboxEventRepository;
+
+    @Autowired
+    private AuditLogRepository auditLogRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -678,6 +683,28 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(history).hasSize(2);
         assertThat(history.get(1).getFromStatus()).isEqualTo(OrderStatus.CREATED);
         assertThat(history.get(1).getToStatus()).isEqualTo(OrderStatus.CANCELLED);
+    }
+
+    // FARELO-305 ("Auditoria por usuário"): cancelling an order now writes
+    // an AuditLog entry identifying who did it — same assertion pattern
+    // InventoryMovementServiceIntegrationTests already uses for its own
+    // AuditLogService producers.
+    @Test
+    void cancellingOrderWritesAuditLogEntry() throws Exception {
+        UUID orderId = createOrder(createActiveProduct(new BigDecimal("5.00")));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + cashierToken()))
+                .andExpect(status().isOk());
+
+        List<AuditLog> auditLogs =
+                auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc("Order", orderId);
+        assertThat(auditLogs).hasSize(1);
+        assertThat(auditLogs.get(0).getAction()).isEqualTo("ORDER_CANCELLED");
+        assertThat(auditLogs.get(0).getUserId()).isNotNull();
+        assertThat(auditLogs.get(0).getUserName()).isEqualTo("Test User");
+        assertThat(auditLogs.get(0).getPreviousValue()).contains("CREATED");
+        assertThat(auditLogs.get(0).getNewValue()).contains("CANCELLED");
     }
 
     // CONFIRMED has no transition into it anywhere in the system yet (see

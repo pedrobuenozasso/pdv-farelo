@@ -81,7 +81,7 @@ export default function CategoriesAdminPage() {
         : null;
 
   return (
-    <AuthGuard>
+    <AuthGuard allow={["ADMIN", "MANAGER"]}>
       <AdminShell>
         <div className="mx-auto flex max-w-2xl flex-col gap-6">
           <div>

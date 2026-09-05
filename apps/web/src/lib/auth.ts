@@ -20,13 +20,54 @@
 // The `useSession` hook lives in `use-session.ts`, a `"use client"` file
 // that imports `getSession` from here instead.
 
+// Type-only import — erased at compile time, so it doesn't reintroduce the
+// "hook into a Server Component module" problem described above.
+import type { UserRole } from "./api/users";
+
 const TOKEN_KEY = "farelo:auth:token";
 const EXPIRES_AT_KEY = "farelo:auth:expiresAt";
 
 export type Session = {
   token: string;
   expiresAt: string;
+  // FARELO-304 ("Guardas de rota... conforme role"): decoded from the
+  // JWT's own `role` claim (JwtTokenService#issue on the backend), not a
+  // second field the login response returns separately — LoginResponse's
+  // own javadoc already anticipates this exact move ("a caller who needs
+  // their own profile can decode the JWT's claims client-side"). Reading
+  // an unverified claim client-side is safe here specifically because it
+  // only ever drives which UI a staff member sees (AuthGuard below) —
+  // the backend's own @RequireRole checks on every write endpoint remain
+  // the real enforcement, same "client-side check is UX only" reasoning
+  // AuthGuard's own comment already states for the logged-in/out check.
+  role: UserRole | null;
 };
+
+// Decodes the JWT payload's `role` claim without verifying the signature
+// (verification is meaningless client-side anyway — the browser has no
+// way to keep the signing secret; a tampered token would still fail on
+// the very next API call's real @RequireRole check). No jwt-decode
+// dependency: a JWT payload is just the middle `.`-separated segment,
+// base64url-encoded JSON — trivial to decode by hand.
+export function decodeRole(token: string): UserRole | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const claims: unknown = JSON.parse(atob(base64));
+    if (
+      typeof claims === "object" &&
+      claims !== null &&
+      "role" in claims &&
+      typeof (claims as { role: unknown }).role === "string"
+    ) {
+      return (claims as { role: UserRole }).role;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 // Memoized by the raw localStorage strings, not just called fresh every
 // time: `getSession` doubles as `useSession`'s `useSyncExternalStore`
@@ -56,7 +97,7 @@ export function getSession(): Session | null {
   const raw = `${token} ${expiresAt}`;
   if (raw !== cachedRaw) {
     cachedRaw = raw;
-    cachedSession = { token, expiresAt };
+    cachedSession = { token, expiresAt, role: decodeRole(token) };
   }
   return cachedSession;
 }

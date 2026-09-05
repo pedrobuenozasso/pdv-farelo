@@ -215,7 +215,7 @@ class PrintJobServiceCommandCheckIntegrationTests extends AbstractIntegrationTes
 
         createOrder(new NewOrderItem(espresso.getId(), 1));
         Order cancelledOrder = createOrder(new NewOrderItem(croissant.getId(), 1));
-        orderService.markAsCancelled(cancelledOrder.getId());
+        orderService.markAsCancelled(cancelledOrder.getId(), actorId());
 
         CommandCheckContent content = readContent(printJobService.createCommandCheck(COMMAND_NUMBER));
 
