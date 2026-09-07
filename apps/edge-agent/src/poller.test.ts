@@ -26,6 +26,9 @@ function makeJob(overrides: Partial<PrintJob> = {}): PrintJob {
       commandNumber: 37,
       productionStation: "BAR",
       items: [{ productName: "Cappuccino", quantity: 2 }],
+      customerName: "Cliente Teste",
+      customerPhone: "11999999999",
+      orderCreatedAt: "2026-01-01T12:00:00Z",
     },
     commandCheckContent: null,
     status: "PENDING",
@@ -179,11 +182,25 @@ describe("pollOnce", () => {
   it("processa múltiplos jobs pendentes de forma independente (um falha, outro é impresso)", async () => {
     const okJob = makeJob({
       id: "job-ok",
-      content: { commandNumber: 1, productionStation: "BAR", items: [] },
+      content: {
+        commandNumber: 1,
+        productionStation: "BAR",
+        items: [],
+        customerName: null,
+        customerPhone: null,
+        orderCreatedAt: "2026-01-01T12:00:00Z",
+      },
     });
     const failJob = makeJob({
       id: "job-fail",
-      content: { commandNumber: 2, productionStation: "KITCHEN", items: [] },
+      content: {
+        commandNumber: 2,
+        productionStation: "KITCHEN",
+        items: [],
+        customerName: null,
+        customerPhone: null,
+        orderCreatedAt: "2026-01-01T12:00:00Z",
+      },
     });
 
     const printedCalls: string[] = [];

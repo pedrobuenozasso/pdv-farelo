@@ -45,6 +45,9 @@ const validResponseFixture = [
       commandNumber: 37,
       productionStation: "BAR",
       items: [{ productName: "Cappuccino", quantity: 2 }],
+      customerName: "Rafa Teste",
+      customerPhone: "85984460585",
+      orderCreatedAt: "2026-01-01T11:58:00Z",
     },
     commandCheckContent: null,
     status: "PENDING",
@@ -89,6 +92,43 @@ describe("parsePrintJobs", () => {
     assert.deepEqual(jobs[0]?.content?.items, [
       { productName: "Cappuccino", quantity: 2 },
     ]);
+    assert.equal(jobs[0]?.content?.customerName, "Rafa Teste");
+    assert.equal(jobs[0]?.content?.customerPhone, "85984460585");
+    assert.equal(jobs[0]?.content?.orderCreatedAt, "2026-01-01T11:58:00Z");
+  });
+
+  it("aceita customerName/customerPhone nulos (comanda sem cliente cadastrado)", () => {
+    const noCustomer = [
+      {
+        ...validResponseFixture[0],
+        content: {
+          ...validResponseFixture[0]!.content,
+          customerName: null,
+          customerPhone: null,
+        },
+      },
+    ];
+
+    const jobs = parsePrintJobs(noCustomer);
+    assert.equal(jobs[0]?.content?.customerName, null);
+    assert.equal(jobs[0]?.content?.customerPhone, null);
+  });
+
+  it("lança um erro quando content não tem orderCreatedAt", () => {
+    const malformed = [
+      {
+        ...validResponseFixture[0],
+        content: {
+          commandNumber: 37,
+          productionStation: "BAR",
+          items: [],
+          customerName: null,
+          customerPhone: null,
+        },
+      },
+    ];
+
+    assert.throws(() => parsePrintJobs(malformed), /orderCreatedAt/);
   });
 
   it("interpreta uma lista vazia (nenhum PrintJob pendente)", () => {

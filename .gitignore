@@ -37,3 +37,7 @@ logs/
 
 # Docker
 docker-compose.override.yml
+
+# Dados reais exportados do Sischef para a migração — financeiro/clientes,
+# nunca deve ir pro controle de versão.
+docs/migracao-sischef/raw/

@@ -14,6 +14,13 @@ de dispositivos.
 
 ## Status atual
 
+**Impressão em modo gráfico (ADR-003)**: o formatador padrão usado por
+`poller.ts` hoje é `ticketImage.ts` (renderiza o ticket como imagem via
+`@napi-rs/canvas` e imprime como raster ESC/POS, `GS v 0`) — não mais
+`escpos.ts` (modo texto), mantido no repositório só como histórico/
+alternativa. Ver [ADR-003](../../docs/decisions/ADR-003-ticket-graphic-mode.md)
+para o porquê completo.
+
 **Impressão ESC/POS real via TCP (FARELO-078)**, sobre a base de polling +
 report já existente (FARELO-076/077). O serviço conecta com a API e faz
 polling periódico de `GET /api/v1/print-jobs`. Para cada `PrintJob` pendente

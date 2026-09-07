@@ -48,6 +48,13 @@ export type PrintJobContent = {
   // com productionStation explicitamente null no JSON, nunca omitido).
   productionStation: string | null;
   items: PrintJobItem[];
+  // Nullable, espelhando Order.customerName/customerPhone no backend — uma
+  // comanda aberta sem passar pelo cardápio do cliente não tem nenhum dos
+  // dois. `escpos.ts` decide o rótulo de "não informado" na hora de montar
+  // o ticket — aqui é só o dado cru, igual ao resto deste arquivo.
+  customerName: string | null;
+  customerPhone: string | null;
+  orderCreatedAt: string;
 };
 
 // FARELO-210/211: conteúdo de uma "conferência" (COMMAND_CHECK) — pré-conta
@@ -157,7 +164,7 @@ function parsePrintJobContent(
     throw new Error(`PrintJob "${printJobId}" não tem "content" (objeto)`);
   }
 
-  const { commandNumber, productionStation, items } = raw;
+  const { commandNumber, productionStation, items, customerName, customerPhone, orderCreatedAt } = raw;
 
   if (typeof commandNumber !== "number") {
     throw new Error(
@@ -174,6 +181,23 @@ function parsePrintJobContent(
   if (!Array.isArray(items)) {
     throw new Error(`PrintJob "${printJobId}".content não tem "items" (array)`);
   }
+  // customerName/customerPhone: null também é válido e esperado (comanda
+  // aberta sem cliente cadastrado — ver o tipo PrintJobContent acima).
+  if (typeof customerName !== "string" && customerName !== null) {
+    throw new Error(
+      `PrintJob "${printJobId}".content."customerName" não é string nem null`,
+    );
+  }
+  if (typeof customerPhone !== "string" && customerPhone !== null) {
+    throw new Error(
+      `PrintJob "${printJobId}".content."customerPhone" não é string nem null`,
+    );
+  }
+  if (typeof orderCreatedAt !== "string") {
+    throw new Error(
+      `PrintJob "${printJobId}".content não tem "orderCreatedAt" (string)`,
+    );
+  }
 
   return {
     commandNumber,
@@ -181,6 +205,9 @@ function parsePrintJobContent(
     items: items.map((item, index) =>
       parsePrintJobItem(item, printJobId, index),
     ),
+    customerName,
+    customerPhone,
+    orderCreatedAt,
   };
 }
 

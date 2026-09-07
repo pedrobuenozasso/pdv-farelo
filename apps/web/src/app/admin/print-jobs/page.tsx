@@ -1,11 +1,41 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { AdminShell } from "@/components/admin-shell";
 import { AuthGuard } from "@/components/auth-guard";
 import { Badge } from "@/components/ui/badge";
+import {
+  CommandCheckTicketPreview,
+  KitchenTicketPreview,
+} from "@/components/ticket-preview";
 import { listPendingPrintJobs, type PrintJob } from "@/lib/api/print-jobs";
+
+// Dado fixo, só para o modelo de exemplo abaixo — não vem da API. Existe
+// para o Pedro poder conferir o layout do cupom a qualquer momento, mesmo
+// sem nenhuma comanda pendente de impressão (pedido explícito: "um modelo
+// que eu possa ver toda vez").
+const EXAMPLE_KITCHEN_CONTENT = {
+  commandNumber: 37,
+  productionStation: "BAR" as const,
+  items: [
+    { productName: "Pão na Chapa com Ovos Mexidos e Bacon", quantity: 1 },
+    { productName: "Café com Leite (Pingado)", quantity: 1 },
+  ],
+  customerName: "Rafa Teste",
+  customerPhone: "(85) 98446-0585",
+  orderCreatedAt: new Date().toISOString(),
+};
+
+const EXAMPLE_COMMAND_CHECK_CONTENT = {
+  commandNumber: 37,
+  items: [
+    { productName: "Pão na Chapa com Ovos Mexidos e Bacon", quantity: 1, unitPrice: 28, lineTotal: 28 },
+    { productName: "Café com Leite (Pingado)", quantity: 1, unitPrice: 16, lineTotal: 16 },
+  ],
+  total: 44,
+};
 
 const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
   dateStyle: "short",
@@ -43,6 +73,21 @@ export default function PrintJobsAdminPage() {
             (algo como filtrar por status).
           </div>
 
+          <div className="border-line bg-surface rounded-2xl border p-5">
+            <h2 className="font-serif text-lg font-semibold">
+              Modelo de exemplo
+            </h2>
+            <p className="text-ink-soft mt-0.5 text-sm">
+              Como as comandas saem na impressora hoje — cupom de pedido
+              (cozinha/bar) e cupom de conferência (caixa). Dados fictícios,
+              só para referência de layout.
+            </p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <KitchenTicketPreview content={EXAMPLE_KITCHEN_CONTENT} />
+              <CommandCheckTicketPreview content={EXAMPLE_COMMAND_CHECK_CONTENT} />
+            </div>
+          </div>
+
           <div className="border-line bg-surface overflow-hidden rounded-2xl border">
             {queueQuery.isLoading ? (
               <p className="text-ink-faint p-5 text-sm">Carregando...</p>
@@ -68,6 +113,8 @@ export default function PrintJobsAdminPage() {
 }
 
 function PrintJobRow({ job }: { job: PrintJob }) {
+  const [expanded, setExpanded] = useState(false);
+
   // FARELO-210/211: a COMMAND_CHECK job has no productionStation (it isn't
   // scoped to a production station) and its items carry prices — content
   // vs. commandCheckContent, branched by type (see PrintJob's javadoc on
@@ -85,27 +132,43 @@ function PrintJobRow({ job }: { job: PrintJob }) {
         .join(", ");
 
   return (
-    <div className="border-line flex items-center gap-4 border-t px-5 py-3.5 first:border-t-0">
-      <div className="flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">
-            Comanda {commandNumber}
-          </span>
-          {!isCommandCheck && job.content?.productionStation ? (
-            <span className="text-ink-faint text-xs">
-              {job.content.productionStation === "BAR" ? "Bar" : "Cozinha"}
+    <div className="border-line border-t first:border-t-0">
+      <button
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+        className="flex w-full items-center gap-4 px-5 py-3.5 text-left"
+      >
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">
+              Comanda {commandNumber}
             </span>
+            {!isCommandCheck && job.content?.productionStation ? (
+              <span className="text-ink-faint text-xs">
+                {job.content.productionStation === "BAR" ? "Bar" : "Cozinha"}
+              </span>
+            ) : null}
+          </div>
+          <p className="text-ink-soft mt-0.5 text-sm">{summary}</p>
+          <div className="text-ink-faint mt-1 text-xs">
+            {dateTimeFormatter.format(new Date(job.createdAt))}
+          </div>
+        </div>
+        {job.retryCount > 0 ? (
+          <Badge tone="amber">{job.retryCount}ª tentativa</Badge>
+        ) : null}
+        <Badge tone="primary">Aguardando</Badge>
+      </button>
+      {expanded ? (
+        <div className="border-line border-t px-5 py-4">
+          {isCommandCheck && job.commandCheckContent ? (
+            <CommandCheckTicketPreview content={job.commandCheckContent} />
+          ) : null}
+          {!isCommandCheck && job.content ? (
+            <KitchenTicketPreview content={job.content} />
           ) : null}
         </div>
-        <p className="text-ink-soft mt-0.5 text-sm">{summary}</p>
-        <div className="text-ink-faint mt-1 text-xs">
-          {dateTimeFormatter.format(new Date(job.createdAt))}
-        </div>
-      </div>
-      {job.retryCount > 0 ? (
-        <Badge tone="amber">{job.retryCount}ª tentativa</Badge>
       ) : null}
-      <Badge tone="primary">Aguardando</Badge>
     </div>
   );
 }

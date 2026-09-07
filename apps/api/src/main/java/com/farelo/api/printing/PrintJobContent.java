@@ -4,6 +4,7 @@ import com.farelo.api.catalog.ProductionStation;
 import com.farelo.api.ordering.Order;
 import com.farelo.api.ordering.OrderItem;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 /**
@@ -47,8 +48,25 @@ import java.util.List;
  * physical formatting itself is out of scope here (Edge Agent territory,
  * FARELO-076+); this class only guarantees the signal is present and
  * unambiguous in the data it hands off.
+ *
+ * <h2>{@code customerName}/{@code customerPhone}/{@code orderCreatedAt}</h2>
+ *
+ * Same frozen-snapshot posture as everything else here: copied straight off
+ * {@link Order} (already in hand at {@link #from} — no extra query) at
+ * ticket-build time, not a live reference. {@code customerName}/{@code
+ * customerPhone} are nullable, mirroring {@link Order#getCustomerName()}/
+ * {@link Order#getCustomerPhone()} (a walk-in comanda started without going
+ * through the customer-facing menu flow has neither) — printed as an
+ * explicit "not informed" placeholder by whoever formats the ticket (Edge
+ * Agent territory), never a missing key.
  */
-public record PrintJobContent(int commandNumber, ProductionStation productionStation, List<Item> items) {
+public record PrintJobContent(
+        int commandNumber,
+        ProductionStation productionStation,
+        List<Item> items,
+        String customerName,
+        String customerPhone,
+        OffsetDateTime orderCreatedAt) {
 
     public record Item(String productName, int quantity) {
     }
@@ -58,7 +76,13 @@ public record PrintJobContent(int commandNumber, ProductionStation productionSta
                 .map(item -> new Item(item.getProduct().getName(), item.getQuantity()))
                 .toList();
 
-        return new PrintJobContent(order.getCommand().getNumber(), productionStation, printItems);
+        return new PrintJobContent(
+                order.getCommand().getNumber(),
+                productionStation,
+                printItems,
+                order.getCustomerName(),
+                order.getCustomerPhone(),
+                order.getCreatedAt());
     }
 
 }

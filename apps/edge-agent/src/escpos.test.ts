@@ -22,6 +22,9 @@ const baseContent: PrintJobContent = {
     { productName: "Cappuccino", quantity: 2 },
     { productName: "Coca-Cola", quantity: 1 },
   ],
+  customerName: "Rafa Teste",
+  customerPhone: "85984460585",
+  orderCreatedAt: "2026-09-05T12:45:00Z",
 };
 
 describe("buildEscPosTicket", () => {
@@ -50,17 +53,59 @@ describe("buildEscPosTicket", () => {
     );
   });
 
-  it("restaura o modo normal (ESC ! 0x00) depois do número da comanda", () => {
+  it("troca para o modo de corpo (negrito + altura dobrada, ESC ! 0x18) depois do número da comanda", () => {
     const ticket = buildEscPosTicket(baseContent);
     const commandTextIndex = ticket.indexOf(Buffer.from("COMANDA 37", "ascii"));
-    const normalModeIndex = ticket.indexOf(
-      Buffer.from([0x1b, 0x21, 0x00]),
+    const bodyModeIndex = ticket.indexOf(
+      Buffer.from([0x1b, 0x21, 0x18]),
       commandTextIndex,
     );
 
     assert.ok(
-      normalModeIndex > commandTextIndex,
-      "modo normal deve vir depois do número da comanda",
+      bodyModeIndex > commandTextIndex,
+      "modo de corpo deve vir depois do número da comanda",
+    );
+  });
+
+  it("restaura o modo normal (ESC ! 0x00) antes do corte final", () => {
+    const ticket = buildEscPosTicket(baseContent);
+    const cutIndex = ticket.indexOf(Buffer.from([0x1d, 0x56, 0x00]));
+    const normalModeIndex = ticket.lastIndexOf(Buffer.from([0x1b, 0x21, 0x00]));
+
+    assert.ok(
+      normalModeIndex >= 0 && normalModeIndex < cutIndex,
+      "modo normal deve vir antes do corte",
+    );
+  });
+
+  it("inclui nome e telefone do cliente quando presentes", () => {
+    const text = buildEscPosTicket(baseContent).toString("ascii");
+    assert.match(text, /Cliente: Rafa Teste/);
+    assert.match(text, /Fone: 85984460585/);
+  });
+
+  it("indica '(nao informado)' quando cliente/telefone são null, nunca o literal 'null'", () => {
+    const text = buildEscPosTicket({
+      ...baseContent,
+      customerName: null,
+      customerPhone: null,
+    }).toString("ascii");
+
+    assert.match(text, /Cliente: \(nao informado\)/);
+    assert.match(text, /Fone: \(nao informado\)/);
+    assert.doesNotMatch(text, /Cliente: null/);
+    assert.doesNotMatch(text, /Fone: null/);
+  });
+
+  it("inclui o horário do pedido e repete o nome do cliente no rodapé", () => {
+    const text = buildEscPosTicket(baseContent).toString("ascii");
+    assert.match(text, /Pedido as \d{2}:\d{2}/);
+
+    const lastClienteIndex = text.lastIndexOf("Cliente: Rafa Teste");
+    const firstClienteIndex = text.indexOf("Cliente: Rafa Teste");
+    assert.ok(
+      lastClienteIndex > firstClienteIndex,
+      "nome do cliente deve aparecer de novo no rodapé, depois da primeira ocorrência",
     );
   });
 
@@ -108,6 +153,7 @@ describe("buildEscPosTicket", () => {
 
   it("mantém quantidade/nome exatos para múltiplos itens na ordem original", () => {
     const content: PrintJobContent = {
+      ...baseContent,
       commandNumber: 42,
       productionStation: "KITCHEN",
       items: [
@@ -130,6 +176,7 @@ describe("buildEscPosTicket", () => {
 
   it("preserva caracteres acentuados do português como bytes latin1, não os corrompe (ver textLine)", () => {
     const content: PrintJobContent = {
+      ...baseContent,
       commandNumber: 7,
       productionStation: "Salão",
       items: [

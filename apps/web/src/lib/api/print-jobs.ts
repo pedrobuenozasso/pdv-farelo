@@ -21,6 +21,9 @@ export type PrintJobContent = {
   commandNumber: number;
   productionStation: "BAR" | "KITCHEN" | null;
   items: { productName: string; quantity: number }[];
+  customerName: string | null;
+  customerPhone: string | null;
+  orderCreatedAt: string;
 };
 
 export type CommandCheckContent = {

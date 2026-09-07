@@ -74,6 +74,31 @@ const PRINT_MODE_NORMAL = Buffer.from([ESC, 0x21, 0x00]);
 const PRINT_MODE_COMMAND_HIGHLIGHT = Buffer.from([ESC, 0x21, 0x38]);
 
 /**
+ * ESC ! 0x18 — negrito (0x08) + altura dobrada (0x10), largura normal.
+ * Corpo do ticket (cliente, itens, rodapé): maior e mais escuro que
+ * `PRINT_MODE_NORMAL` sem dobrar a largura (que quebraria a legibilidade em
+ * telas estreitas de 32/40 colunas) — ajuste pedido depois de ver o ticket
+ * de teste sair fino/apertado na impressora física (ver README.md).
+ */
+const PRINT_MODE_BODY = Buffer.from([ESC, 0x21, 0x18]);
+
+/** Rótulo explícito para um dado ausente — nunca o literal "null"/vazio no papel. */
+const NOT_INFORMED = "(nao informado)";
+
+/**
+ * Formata `orderCreatedAt` (ISO 8601, ver `PrintJobContent`) como "HH:MM" no
+ * fuso horário do processo que roda o Edge Agent — em produção, a máquina
+ * física da cafeteria, então "hora local" aqui é a hora real do
+ * estabelecimento, não uma conversão arbitrária.
+ */
+function formatOrderTime(orderCreatedAt: string): string {
+  return new Date(orderCreatedAt).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/**
  * GS V m — corte de papel. `m = 0` (`0x00`) é corte total (guilhotina),
  * padrão suficiente para um ticket de comanda (não precisa do corte
  * parcial, `m = 1`, que deixa uma aba presa).
@@ -122,9 +147,12 @@ export function buildEscPosTicket(content: PrintJobContent): Buffer {
     ALIGN_CENTER,
     PRINT_MODE_COMMAND_HIGHLIGHT,
     textLine(`COMANDA ${content.commandNumber}`),
-    PRINT_MODE_NORMAL,
+    PRINT_MODE_BODY,
     ALIGN_LEFT,
     textLine(stationLine(content.productionStation)),
+    textLine(SEPARATOR),
+    textLine(`Cliente: ${content.customerName ?? NOT_INFORMED}`),
+    textLine(`Fone: ${content.customerPhone ?? NOT_INFORMED}`),
     textLine(SEPARATOR),
   ];
 
@@ -136,8 +164,18 @@ export function buildEscPosTicket(content: PrintJobContent): Buffer {
     }
   }
 
+  parts.push(textLine(SEPARATOR));
+  parts.push(textLine(`Pedido as ${formatOrderTime(content.orderCreatedAt)}`));
+  parts.push(textLine(`Cliente: ${content.customerName ?? NOT_INFORMED}`));
+
+  // Espaço mínimo antes do corte, sempre o mesmo independente de quanto
+  // conteúdo veio antes — evita cortar em cima da última linha impressa
+  // (achado ao testar contra a impressora física, ver README.md).
   parts.push(textLine(""));
   parts.push(textLine(""));
+  parts.push(textLine(""));
+  parts.push(textLine(""));
+  parts.push(PRINT_MODE_NORMAL);
   parts.push(CUT);
 
   return Buffer.concat(parts);

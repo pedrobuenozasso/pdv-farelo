@@ -41,10 +41,14 @@ import {
   type PrintJob,
 } from "./printJobsClient.js";
 import { resolvePrinterAddress as resolvePrinterAddressImpl } from "./config.js";
+// ADR-003: modo gráfico (imagem renderizada + comando ESC/POS de imagem
+// raster) substituiu o modo texto de `escpos.ts` como formatador padrão —
+// ver `ticketImage.ts` para o porquê. `escpos.ts` continua no repositório
+// (testado, histórico do FARELO-078), só não é mais o default aqui.
 import {
-  buildEscPosTicket as buildEscPosTicketImpl,
-  buildCommandCheckEscPosTicket as buildCommandCheckEscPosTicketImpl,
-} from "./escpos.js";
+  buildEscPosImageTicket as buildEscPosTicketImpl,
+  buildCommandCheckEscPosImageTicket as buildCommandCheckEscPosTicketImpl,
+} from "./ticketImage.js";
 import { printOverTcp as printOverTcpImpl } from "./printerTransport.js";
 
 // FARELO-210/211: "estação" fictícia usada para resolver o endereço de
