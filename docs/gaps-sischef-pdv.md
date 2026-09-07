@@ -96,6 +96,84 @@ já abre a tela de pagamento em sequência — atalho pra quando o cliente já
 vai pagar ali (ex. balcão). Farelo OS trata confirmar e pagar como dois
 fluxos sempre separados.
 
+## Tickets propostos (FARELO-306 a FARELO-320)
+
+Numeração continua de FARELO-305 (último ticket real usado no projeto até
+07/09/2026). Cada ticket segue as mesmas regras já em vigor no projeto:
+um objetivo principal, ~500 linhas de lógica, testes pra regra de negócio,
+compatibilidade com a arquitetura existente, Conventional Commits, ler
+CLAUDE.md/AGENTS.md/docs/domain-model.md antes de começar, e **auditar o
+código atual antes de assumir que o ticket não existe** (mesma disciplina
+já seguida em todos os Blocos anteriores desta migração).
+
+### Domínio Caixa (novo — sem sobreposição com Order/Comanda)
+
+- **FARELO-306**: Criar `Turno` — template nomeado com conta de abertura e
+  conta de fechamento pré-configuradas (ex. "Caixa Dinheiro" →
+  "Tesouraria"), reaproveitado a cada abertura de caixa.
+- **FARELO-307**: Criar `Caixa` — abertura vinculada a um `Turno` e ao
+  usuário autenticado (`AuthenticatedPrincipal`), com timestamp de
+  abertura. Um caixa aberto por vez por operador (decidir a regra exata
+  olhando o `Turno` do Sischef como referência, não copiar 1:1 sem
+  necessidade).
+- **FARELO-308**: Fechamento de caixa — informa valor de fechamento
+  (dinheiro), grava timestamp de fechamento, fica com status inicial "não
+  conferido".
+- **FARELO-309**: Conferência de caixa — bate o valor informado no
+  fechamento contra o total calculado pelo sistema (pagamentos registrados
+  no turno); resultado (confere/não confere) e quem conferiu.
+- **FARELO-310**: Sangria e Suprimento — movimento de caixa durante o
+  turno (retirada/reforço de dinheiro), sem estar ligado a nenhum pedido;
+  auditável (ver `AuditLogService`, mesmo seam já usado por
+  Payment/Order-cancel).
+- **FARELO-311**: Lançar despesa/receita direto do caixa — movimento
+  financeiro ad-hoc, fora do fluxo de pedido/pagamento.
+
+### Novas entidades (Cliente e Mesa)
+
+- **FARELO-313**: Criar cadastro de `Cliente` (nome, telefone, outros
+  campos que fizerem sentido) + endpoint de busca/criação + hook no fluxo
+  do PDV pra selecionar um cliente existente ou cadastrar um novo sem sair
+  da tela de pedido. Decidir explicitamente: `Order.customerName`/
+  `customerPhone` continuam como estão (snapshot congelado, já
+  documentado) ou passam a ser preenchidos a partir do `Cliente`
+  selecionado — não migrar dado existente sem avaliar o impacto.
+- **FARELO-315**: Criar `Mesa` (número, capacidade) + campo opcional de
+  vínculo em `Command`/`Order` (uma comanda pode estar associada a uma mesa)
+  + os três indicadores de ocupação (mesas ocupadas, qtde de pessoas,
+  % ocupação) em algum lugar visível do PDV.
+
+### Fluxo de pedido/PDV (tickets sequenciais — todos tocam Order/OrderItem)
+
+- **FARELO-312**: Adicionar tipo de pedido `BALCÃO` (venda sem comanda,
+  cliente recebe/leva na hora) como alternativa ao fluxo de comanda
+  existente.
+- **FARELO-314**: Atribuir garçom/atendente responsável a um pedido
+  (campo opcional, editável).
+- **FARELO-316**: Observação geral do pedido — campo de texto livre no
+  `Order`, nível pedido (não item).
+- **FARELO-317**: Desconto por item — estende o desconto hoje só a nível
+  de comanda inteira (FARELO-230/231/232) pra também poder ser aplicado a
+  um `OrderItem` específico. Decidir se reaproveita a entidade `Discount`
+  existente (com uma referência opcional a item) ou precisa de modelagem
+  própria — avaliar antes de implementar, não assumir.
+- **FARELO-318**: Duplicar item (adiciona uma cópia do mesmo item no
+  pedido) e Renotificar item (reenvia aquele item específico pra
+  produção/impressão sem duplicar).
+- **FARELO-319**: Ações do pedido inteiro — "imprimir ao confirmar"
+  (comportamento configurável por pedido), "copiar resumo do pedido"
+  (texto formatado pronto pra colar em WhatsApp etc.), "reenviar todos os
+  itens pra produção".
+- **FARELO-320**: Botão "Confirmar e Receber" — atalho de UI que confirma
+  o pedido e já abre a tela de pagamento em sequência, sem exigir dois
+  cliques/duas telas separadas.
+
+**Fora de escopo por agora** (não criar ticket): "Complemento
+identificador" (dúvida aberta, item 7 acima — não confirmado o que faz) e
+"Adicionais"/modificadores de produto (item 8 acima — escopo grande
+demais pra um ticket só, precisa de desenho próprio antes de virar
+ticket).
+
 ## Já temos equivalente (não é gap)
 
 - **KDS**: Farelo OS já tem `/kds` — mesma ideia da tela KDS do Sischef.
