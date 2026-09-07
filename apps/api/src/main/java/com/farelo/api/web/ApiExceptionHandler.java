@@ -1,5 +1,7 @@
 package com.farelo.api.web;
 
+import com.farelo.api.cashier.ShiftNameAlreadyExistsException;
+import com.farelo.api.cashier.ShiftNotFoundException;
 import com.farelo.api.catalog.CategoryNotFoundException;
 import com.farelo.api.catalog.ProductNotAvailableException;
 import com.farelo.api.catalog.ProductNotFoundException;
@@ -332,6 +334,23 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public ErrorResponse handleInsufficientRole(InsufficientRoleException ex) {
         return new ErrorResponse("FORBIDDEN", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // FARELO-306: id given to a Shift-referencing operation doesn't exist
+    // (e.g. CashSessionService#open resolving shiftId, FARELO-307) — same
+    // "not found" shape as every other *NotFoundException handler above.
+    @ExceptionHandler(ShiftNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleShiftNotFound(ShiftNotFoundException ex) {
+        return new ErrorResponse("SHIFT_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: name is unique — see ShiftNameAlreadyExistsException's
+    // javadoc, same shape as UserEmailAlreadyExistsException above.
+    @ExceptionHandler(ShiftNameAlreadyExistsException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleShiftNameAlreadyExists(ShiftNameAlreadyExistsException ex) {
+        return new ErrorResponse("SHIFT_NAME_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {
