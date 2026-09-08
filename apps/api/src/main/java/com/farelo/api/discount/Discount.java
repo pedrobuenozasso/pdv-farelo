@@ -1,6 +1,7 @@
 package com.farelo.api.discount;
 
 import com.farelo.api.command.Command;
+import com.farelo.api.ordering.OrderItem;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -66,6 +67,10 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "discount")
+// (See package/class javadoc above for the core FARELO-230/231/232 design;
+// FARELO-317 extends it with an optional orderItem — see the
+// `orderItem` field's own comment below for the item-scope reasoning,
+// including why this ticket reuses this entity rather than a new one.)
 public class Discount {
 
     @Id
@@ -76,6 +81,15 @@ public class Discount {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "command_id", nullable = false, updatable = false)
     private Command command;
+
+    // FARELO-317: nullable — null for a comanda-wide discount (every row
+    // before this ticket), populated for a discount scoped to one specific
+    // OrderItem. See class-level comment above for why this entity is
+    // reused rather than a separate one, and why `command` above still
+    // stays populated (denormalized) even when this is set.
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "order_item_id", nullable = true, updatable = false)
+    private OrderItem orderItem;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "type", nullable = false, updatable = false)
@@ -117,7 +131,28 @@ public class Discount {
             String reason,
             UUID appliedByUserId,
             String appliedByUserName) {
+        this(command, null, type, percentage, originalAmount, discountedAmount, reason,
+                appliedByUserId, appliedByUserName);
+    }
+
+    // FARELO-317: the item-scoped counterpart — see class-level comment
+    // above. `command` is still required and denormalized from
+    // `orderItem.getOrder().getCommand()` by the caller (DiscountService),
+    // not derived here — same "caller resolves associations, entity just
+    // stores what it's given" split as every other entity constructor in
+    // this codebase.
+    public Discount(
+            Command command,
+            OrderItem orderItem,
+            DiscountType type,
+            BigDecimal percentage,
+            BigDecimal originalAmount,
+            BigDecimal discountedAmount,
+            String reason,
+            UUID appliedByUserId,
+            String appliedByUserName) {
         this.command = command;
+        this.orderItem = orderItem;
         this.type = type;
         this.percentage = percentage;
         this.originalAmount = originalAmount;
@@ -138,6 +173,10 @@ public class Discount {
 
     public Command getCommand() {
         return command;
+    }
+
+    public OrderItem getOrderItem() {
+        return orderItem;
     }
 
     public DiscountType getType() {

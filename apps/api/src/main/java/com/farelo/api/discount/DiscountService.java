@@ -2,6 +2,9 @@ package com.farelo.api.discount;
 
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandService;
+import com.farelo.api.ordering.Order;
+import com.farelo.api.ordering.OrderItem;
+import com.farelo.api.ordering.OrderItemAlreadyCancelledException;
 import com.farelo.api.ordering.OrderService;
 import com.farelo.api.security.User;
 import com.farelo.api.security.UserService;
@@ -121,6 +124,111 @@ public class DiscountService {
                 command, DiscountType.PERCENTAGE, percentage, totalOwed, discountedAmount, reason,
                 actor.getId(), actor.getName());
         return discountRepository.save(discount);
+    }
+
+    /**
+     * Applies a {@link DiscountType#FIXED_AMOUNT} discount to one specific
+     * {@link OrderItem} (FARELO-317) rather than a comanda's whole total —
+     * see {@link Discount}'s class-level comment for why this reuses the
+     * same entity/table. {@code originalAmount} is the item's own raw
+     * subtotal ({@code unitPrice × quantity}) at the moment of application
+     * — same "always the raw figure, never reduced by a previous discount
+     * on the same item" posture {@link #applyFixedAmount} already
+     * establishes at the comanda level (see that method's class javadoc,
+     * "Percentage computed against the raw totalOwed").
+     *
+     * @throws com.farelo.api.ordering.OrderNotFoundException {@code
+     *     orderId} doesn't exist.
+     * @throws com.farelo.api.ordering.OrderItemNotFoundException {@code
+     *     itemId} doesn't exist, or belongs to a different order.
+     * @throws OrderItemAlreadyCancelledException the item is already
+     *     cancelled — nothing owed for it, so nothing to discount.
+     * @throws ItemDiscountNotSupportedException the item's order has no
+     *     comanda (a {@code BALCAO} order, FARELO-312).
+     * @throws com.farelo.api.command.CommandCannotAcceptPaymentsException
+     *     same precondition as {@link #applyFixedAmount}.
+     */
+    @Transactional
+    public Discount applyFixedAmountToItem(
+            UUID orderId, UUID itemId, BigDecimal amount, String reason, UUID actorId) {
+        OrderItem item = resolveDiscountableItem(orderId, itemId);
+        Command command = commandFor(orderId, item);
+        BigDecimal originalAmount = itemSubtotal(item);
+        User actor = userService.getById(actorId);
+
+        Discount discount = new Discount(
+                command, item, DiscountType.FIXED_AMOUNT, null, originalAmount, amount, reason,
+                actor.getId(), actor.getName());
+        return discountRepository.save(discount);
+    }
+
+    /**
+     * Applies a {@link DiscountType#PERCENTAGE} discount to one specific
+     * {@link OrderItem} (FARELO-317). Same {@code BigDecimal}/{@code
+     * RoundingMode.HALF_UP} computation as {@link #applyPercentage}, just
+     * against the item's own subtotal instead of the comanda's {@code
+     * totalOwed}.
+     *
+     * @throws com.farelo.api.ordering.OrderNotFoundException {@code
+     *     orderId} doesn't exist.
+     * @throws com.farelo.api.ordering.OrderItemNotFoundException {@code
+     *     itemId} doesn't exist, or belongs to a different order.
+     * @throws OrderItemAlreadyCancelledException the item is already
+     *     cancelled.
+     * @throws ItemDiscountNotSupportedException the item's order has no
+     *     comanda (a {@code BALCAO} order, FARELO-312).
+     * @throws com.farelo.api.command.CommandCannotAcceptPaymentsException
+     *     same precondition as {@link #applyFixedAmount}.
+     */
+    @Transactional
+    public Discount applyPercentageToItem(
+            UUID orderId, UUID itemId, BigDecimal percentage, String reason, UUID actorId) {
+        OrderItem item = resolveDiscountableItem(orderId, itemId);
+        Command command = commandFor(orderId, item);
+        BigDecimal originalAmount = itemSubtotal(item);
+        BigDecimal discountedAmount = originalAmount
+                .multiply(percentage)
+                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+        User actor = userService.getById(actorId);
+
+        Discount discount = new Discount(
+                command, item, DiscountType.PERCENTAGE, percentage, originalAmount, discountedAmount, reason,
+                actor.getId(), actor.getName());
+        return discountRepository.save(discount);
+    }
+
+    // Shared precondition for both item-discount methods above: the item
+    // must actually belong to orderId (OrderService#getItem's own check)
+    // and must not already be cancelled — nothing owed for a cancelled
+    // item, so nothing left to discount.
+    private OrderItem resolveDiscountableItem(UUID orderId, UUID itemId) {
+        OrderItem item = orderService.getItem(orderId, itemId);
+        if (item.isCancelled()) {
+            throw new OrderItemAlreadyCancelledException(itemId);
+        }
+        return item;
+    }
+
+    // Resolves (and payable-status-validates) the Command an item-scoped
+    // discount denormalizes onto Discount#getCommand() — see that field's
+    // class-level comment. Goes through CommandService#findForPayment
+    // (not just item.getOrder().getCommand()) so the exact same status
+    // check applyFixedAmount/applyPercentage already enforce for a
+    // comanda-level discount also applies here.
+    private Command commandFor(UUID orderId, OrderItem item) {
+        Order order = item.getOrder();
+        if (order.getCommand() == null) {
+            throw new ItemDiscountNotSupportedException(orderId);
+        }
+        return commandService.findForPayment(order.getCommand().getNumber());
+    }
+
+    // Shared by applyFixedAmountToItem/applyPercentageToItem above — the
+    // item's own raw subtotal, always computed fresh from unitPrice ×
+    // quantity, never reduced by a discount already applied to this same
+    // item (see applyFixedAmountToItem's javadoc).
+    private BigDecimal itemSubtotal(OrderItem item) {
+        return item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity()));
     }
 
     @Transactional(readOnly = true)

@@ -56,7 +56,11 @@ import {
   type OrderStatus,
 } from "@/lib/api/orders";
 import { listUsers } from "@/lib/api/users";
-import { applyDiscount } from "@/lib/api/discounts";
+import {
+  applyDiscount,
+  applyItemDiscount,
+  type DiscountType,
+} from "@/lib/api/discounts";
 import {
   getPaymentBalance,
   recordPayment,
@@ -1579,6 +1583,15 @@ function OrderItemRow({
   const [reason, setReason] = useState<OrderItemCancelReason | "">("");
   const [description, setDescription] = useState("");
 
+  // FARELO-317: desconto por item — same inline toggle-and-mini-form shape
+  // as the cancellation flow above, kept as its own independent piece of
+  // state (a row can't be cancelling and discounting at once in this UI,
+  // but nothing enforces that beyond not opening both toggles together).
+  const [discounting, setDiscounting] = useState(false);
+  const [discountType, setDiscountType] = useState<DiscountType>("FIXED_AMOUNT");
+  const [discountValue, setDiscountValue] = useState("");
+  const [discountReason, setDiscountReason] = useState("");
+
   const cancelItemMutation = useMutation({
     mutationFn: () => {
       if (!reason) {
@@ -1600,6 +1613,39 @@ function OrderItemRow({
     cancelItemMutation.error,
     "Não foi possível cancelar o item.",
   );
+
+  const applyItemDiscountMutation = useMutation({
+    mutationFn: () => {
+      const value = Number(discountValue);
+      const input =
+        discountType === "PERCENTAGE"
+          ? { type: "PERCENTAGE" as const, percentage: value, reason: discountReason || undefined }
+          : { type: "FIXED_AMOUNT" as const, amount: value, reason: discountReason || undefined };
+      return applyItemDiscount(orderId, item.id, input);
+    },
+    onSuccess: () => {
+      setDiscounting(false);
+      setDiscountValue("");
+      setDiscountReason("");
+      queryClient.invalidateQueries({
+        queryKey: ["pdv", "command", commandNumber, "orders"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["pdv", "command", commandNumber, "paymentBalance"],
+      });
+    },
+  });
+
+  const discountErrorMessage = apiErrorMessage(
+    applyItemDiscountMutation.error,
+    "Não foi possível aplicar o desconto.",
+  );
+  const discountValueNumber = Number(discountValue);
+  const canConfirmDiscount =
+    discountValue.trim() !== "" &&
+    !Number.isNaN(discountValueNumber) &&
+    discountValueNumber > 0 &&
+    (discountType !== "PERCENTAGE" || discountValueNumber <= 100);
 
   // description is required only when reason is OTHER (mirrors
   // OrderItemCancelRequest's @AssertTrue on the backend).
@@ -1642,6 +1688,15 @@ function OrderItemRow({
           {canCancel ? (
             <button
               type="button"
+              onClick={() => setDiscounting((current) => !current)}
+              className="text-primary text-[12px] font-semibold hover:opacity-80"
+            >
+              {discounting ? "Fechar" : "Desconto"}
+            </button>
+          ) : null}
+          {canCancel ? (
+            <button
+              type="button"
               onClick={() => setCancelling((current) => !current)}
               className="text-red text-[12px] font-semibold hover:opacity-80"
             >
@@ -1650,6 +1705,56 @@ function OrderItemRow({
           ) : null}
         </div>
       </div>
+
+      {discounting ? (
+        <div className="bg-bg-alt flex flex-col gap-2 rounded-lg p-2">
+          <div className="flex gap-2">
+            <select
+              value={discountType}
+              onChange={(event) => setDiscountType(event.target.value as DiscountType)}
+              className="border-line rounded-md border bg-transparent px-2 py-1.5 text-[13px]"
+            >
+              <option value="FIXED_AMOUNT">Valor fixo (R$)</option>
+              <option value="PERCENTAGE">Percentual (%)</option>
+            </select>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={discountValue}
+              onChange={(event) => setDiscountValue(event.target.value)}
+              placeholder={discountType === "PERCENTAGE" ? "%" : "R$"}
+              className="border-line w-20 rounded-md border bg-transparent px-2 py-1.5 text-[13px]"
+            />
+          </div>
+          <input
+            type="text"
+            value={discountReason}
+            onChange={(event) => setDiscountReason(event.target.value)}
+            placeholder="Motivo (opcional)"
+            className="border-line rounded-md border bg-transparent px-2 py-1.5 text-[13px]"
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              disabled={!canConfirmDiscount || applyItemDiscountMutation.isPending}
+              onClick={() => applyItemDiscountMutation.mutate()}
+              className="px-3 py-1.5 text-[12px]"
+            >
+              {applyItemDiscountMutation.isPending ? "Aplicando..." : "Confirmar"}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={applyItemDiscountMutation.isPending}
+              onClick={() => setDiscounting(false)}
+              className="px-3 py-1.5 text-[12px]"
+            >
+              Voltar
+            </Button>
+          </div>
+          {discountErrorMessage ? (
+            <p className="text-red text-[12px]">{discountErrorMessage}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {cancelling ? (
         <div className="bg-bg-alt flex flex-col gap-2 rounded-lg p-2">

@@ -510,10 +510,7 @@ public class OrderService {
             String description,
             UUID actorId) {
         Order order = getById(orderId);
-
-        OrderItem item = orderItemRepository.findByIdWithProduct(itemId)
-                .filter(candidate -> candidate.getOrder().getId().equals(orderId))
-                .orElseThrow(() -> new OrderItemNotFoundException(orderId, itemId));
+        OrderItem item = getItem(orderId, itemId);
 
         if (ITEM_CANCELLATION_BLOCKED_STATUSES.contains(order.getStatus())) {
             throw new OrderItemCancellationNotAllowedException(orderId, itemId, order.getStatus());
@@ -526,6 +523,24 @@ public class OrderService {
         item.cancel(actor.getId(), actor.getName(), reason, description);
 
         return orderItemRepository.save(item);
+    }
+
+    /**
+     * Resolves an {@link OrderItem} that belongs to {@code orderId} —
+     * {@link #cancelItem}'s original fetch logic (FARELO-200/201),
+     * extracted here (FARELO-317) so other domains needing "the item {@code
+     * itemId}, but only if it's really part of order {@code orderId}"
+     * (e.g. {@code com.farelo.api.discount.DiscountService}, for an
+     * item-level discount) reuse the same ownership check instead of each
+     * repeating it.
+     *
+     * @throws OrderItemNotFoundException {@code itemId} doesn't exist, or
+     *     exists but belongs to a different order.
+     */
+    public OrderItem getItem(UUID orderId, UUID itemId) {
+        return orderItemRepository.findByIdWithProduct(itemId)
+                .filter(candidate -> candidate.getOrder().getId().equals(orderId))
+                .orElseThrow(() -> new OrderItemNotFoundException(orderId, itemId));
     }
 
     /**

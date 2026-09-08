@@ -9,6 +9,7 @@ import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
 import com.farelo.api.command.CommandNotFullyPaidException;
+import com.farelo.api.discount.ItemDiscountNotSupportedException;
 import com.farelo.api.fiscal.CompanyFiscalConfigurationNotFoundException;
 import com.farelo.api.fiscal.FiscalDocumentInvalidTransitionException;
 import com.farelo.api.fiscal.FiscalDocumentNotFoundException;
@@ -177,6 +178,15 @@ public class ApiExceptionHandler {
     public ErrorResponse handleOrderItemCancellationNotAllowed(OrderItemCancellationNotAllowedException ex) {
         return new ErrorResponse(
                 "ORDER_ITEM_CANCELLATION_NOT_ALLOWED", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: an item-level discount (FARELO-317) was requested
+    // against an OrderItem whose order has no comanda (a BALCAO order,
+    // FARELO-312) — see ItemDiscountNotSupportedException's javadoc.
+    @ExceptionHandler(ItemDiscountNotSupportedException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleItemDiscountNotSupported(ItemDiscountNotSupportedException ex) {
+        return new ErrorResponse("ITEM_DISCOUNT_NOT_SUPPORTED", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     @ExceptionHandler(PrintJobNotFoundException.class)
