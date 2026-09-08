@@ -128,6 +128,22 @@ public class OrderService {
     @Transactional
     public OrderWithItems create(
             int commandNumber, List<NewOrderItem> newItems, String customerName, String customerPhone) {
+        return create(commandNumber, newItems, customerName, customerPhone, null);
+    }
+
+    /**
+     * Same as {@link #create(int, List, String, String)}, plus {@code
+     * note} — the order-level free-text observation (FARELO-316,
+     * "Observação geral do pedido"; see {@link Order}'s javadoc, "Design
+     * decision — note"). A separate overload rather than widening the
+     * original signature in place: every existing caller (in particular
+     * the public, unauthenticated Cardápio QR checkout via {@code
+     * OrderController#create}) keeps working unchanged, and the {@code
+     * note} field is genuinely optional — most callers have none.
+     */
+    @Transactional
+    public OrderWithItems create(
+            int commandNumber, List<NewOrderItem> newItems, String customerName, String customerPhone, String note) {
         Command command = commandService.openForOrdering(commandNumber);
 
         // FARELO-190/191: write-through to the comanda's central customer
@@ -140,7 +156,50 @@ public class OrderService {
         // (FARELO-182), which collects no customer info at all.
         commandService.applyCustomerInfoIfProvided(command, customerName, customerPhone);
 
-        Order order = orderRepository.save(new Order(command, customerName, customerPhone));
+        Order order = orderRepository.save(new Order(command, customerName, customerPhone, note));
+        return buildAndPublish(order, newItems);
+    }
+
+    /**
+     * Creates a {@code BALCAO} order (FARELO-312) — a walk-up counter sale
+     * with no comanda at all (docs/gaps-sischef-pdv.md item 2). Same price-
+     * snapshot/inventory-consumption/status-history/outbox-publish shape as
+     * {@link #create(int, List, String, String)} (both delegate to {@link
+     * #buildAndPublish(Order, List)}), just skipping every step above that
+     * only makes sense for a comanda: no {@link CommandService#openForOrdering}
+     * (there is no comanda number to resolve), no write-through to a
+     * comanda's central customer record (there is no comanda to write
+     * through to — {@code customerName}/{@code customerPhone} here are
+     * only ever this order's own snapshot, same as {@code Order}'s
+     * javadoc already documents for a comanda order missing that data).
+     *
+     * <p>See {@link Order}'s javadoc, "Design decision — BALCAO", for the
+     * known follow-up this ticket deliberately does not solve: nothing in
+     * {@code payment} can charge a {@code BALCAO} order yet.
+     */
+    @Transactional
+    public OrderWithItems createBalcao(List<NewOrderItem> newItems, String customerName, String customerPhone) {
+        return createBalcao(newItems, customerName, customerPhone, null);
+    }
+
+    // FARELO-316 overload, same "add note without disturbing the original
+    // signature" reasoning as create(int, List, String, String, String)
+    // above.
+    @Transactional
+    public OrderWithItems createBalcao(
+            List<NewOrderItem> newItems, String customerName, String customerPhone, String note) {
+        Order order = orderRepository.save(new Order(customerName, customerPhone, note));
+        return buildAndPublish(order, newItems);
+    }
+
+    // Shared by create()/createBalcao() above (FARELO-312 extraction — this
+    // was create()'s own body until this ticket split it in two): writes
+    // the first OrderStatusHistory entry, validates+snapshots every item's
+    // price, consumes recipe ingredients, and publishes OrderCreated — all
+    // of it independent of whether `order` has a Command or not. The
+    // caller is responsible for persisting `order` itself first (its two
+    // different Command-resolution paths don't belong here).
+    private OrderWithItems buildAndPublish(Order order, List<NewOrderItem> newItems) {
         orderStatusHistoryRepository.save(new OrderStatusHistory(order, null, OrderStatus.CREATED));
 
         List<OrderItem> items = new ArrayList<>();
@@ -467,6 +526,52 @@ public class OrderService {
         item.cancel(actor.getId(), actor.getName(), reason, description);
 
         return orderItemRepository.save(item);
+    }
+
+    /**
+     * Assigns (or reassigns) the waiter/attendant responsible for {@code
+     * orderId} (FARELO-314, "Garçom responsável pelo pedido"). No status
+     * precondition — unlike the transitions above, this isn't itself an
+     * {@code Order} lifecycle step, and there's no operational reason to
+     * forbid correcting who's serving a table after the fact (e.g. even a
+     * {@code DELIVERED} order's record of who served it is still
+     * meaningful for reporting).
+     *
+     * @throws OrderNotFoundException {@code orderId} doesn't exist.
+     * @throws com.farelo.api.security.UserNotFoundException {@code userId}
+     *     doesn't resolve to a real {@link User}.
+     */
+    @Transactional
+    public OrderWithItems assignWaiter(UUID orderId, UUID userId) {
+        Order order = getById(orderId);
+        User waiter = userService.getById(userId);
+        order.assignWaiter(waiter.getId(), waiter.getName());
+        return withItems(orderRepository.save(order));
+    }
+
+    /**
+     * Clears the waiter assignment (FARELO-314, "removível"). Separate
+     * method from {@link #assignWaiter(UUID, UUID)} rather than accepting a
+     * nullable {@code userId} there — a {@code PATCH .../waiter} with no
+     * body/a null field reads more clearly as its own action ({@code
+     * DELETE}-shaped intent) than an "assign to nobody" edge case of the
+     * assign method; see {@code OrderController} for how the two map onto
+     * one endpoint.
+     */
+    @Transactional
+    public OrderWithItems unassignWaiter(UUID orderId) {
+        Order order = getById(orderId);
+        order.unassignWaiter();
+        return withItems(orderRepository.save(order));
+    }
+
+    // Shared by assignWaiter/unassignWaiter above: wraps an already-saved
+    // Order back into an OrderWithItems for the controller to build a full
+    // OrderResponse from, same shape every other mutation in this class
+    // returns. A fresh fetch (not reused from the caller) since neither
+    // caller already holds the items list.
+    private OrderWithItems withItems(Order order) {
+        return new OrderWithItems(order, orderItemRepository.findByOrder(order));
     }
 
     // Single-origin convenience overload, used by markAsPreparing/

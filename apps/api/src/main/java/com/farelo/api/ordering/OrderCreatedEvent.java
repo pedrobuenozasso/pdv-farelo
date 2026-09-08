@@ -17,8 +17,12 @@ import java.util.UUID;
  * outbox worker is still a stub); this only proves the publish mechanism
  * against a real use case, not a finished event contract for future
  * consumers to build against.
+ *
+ * <p>{@code commandNumber} is nullable as of FARELO-312 — {@code null} for
+ * a {@code BALCAO} order (see {@link Order}'s javadoc, "Design decision —
+ * BALCAO"), which has no {@link com.farelo.api.command.Command} to name.
  */
-public record OrderCreatedEvent(UUID orderId, int commandNumber, List<Item> items) {
+public record OrderCreatedEvent(UUID orderId, Integer commandNumber, List<Item> items) {
 
     public record Item(UUID productId, int quantity, BigDecimal unitPrice) {
     }
@@ -28,10 +32,10 @@ public record OrderCreatedEvent(UUID orderId, int commandNumber, List<Item> item
                 .map(item -> new Item(item.getProduct().getId(), item.getQuantity(), item.getUnitPrice()))
                 .toList();
 
-        return new OrderCreatedEvent(
-                result.order().getId(),
-                result.order().getCommand().getNumber(),
-                items);
+        Order order = result.order();
+        Integer commandNumber = order.getCommand() != null ? order.getCommand().getNumber() : null;
+
+        return new OrderCreatedEvent(order.getId(), commandNumber, items);
     }
 
 }

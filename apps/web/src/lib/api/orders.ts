@@ -18,6 +18,11 @@ import { authHeaders, parseResponse } from "./client";
 export type OrderStatus =
   "CREATED" | "CONFIRMED" | "PREPARING" | "READY" | "DELIVERED" | "CANCELLED";
 
+// FARELO-312: a walk-up counter sale (BALCAO) has no comanda at all,
+// alongside every order until now (COMANDA) — see the backend's
+// Order#getType() javadoc ("Design decision — BALCAO").
+export type OrderType = "COMANDA" | "BALCAO";
+
 // FARELO-200/201: the five fixed cancellation reasons — must match
 // OrderItemCancelReason on the backend exactly (same string values, sent
 // as-is in cancelOrderItem's request body).
@@ -39,11 +44,19 @@ export type OrderItem = {
 
 export type Order = {
   id: string;
-  commandNumber: number;
+  type: OrderType;
+  // FARELO-312: null for a BALCAO order — there is no comanda to name.
+  commandNumber: number | null;
   status: OrderStatus;
   items: OrderItem[];
   customerName: string | null;
   customerPhone: string | null;
+  // FARELO-314: the waiter/attendant responsible for this order, if any —
+  // removable/changeable via assignOrderWaiter below.
+  assignedUserId: string | null;
+  assignedUserName: string | null;
+  // FARELO-316: free-text "Observação do pedido", order-level.
+  note: string | null;
   createdAt: string;
 };
 
@@ -52,12 +65,35 @@ export type CreateOrderInput = {
   items: { productId: string; quantity: number }[];
   customerName?: string;
   customerPhone?: string;
+  note?: string;
 };
 
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const response = await fetch("/api/v1/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return parseResponse<Order>(response);
+}
+
+// POST /api/v1/orders/balcao (FARELO-312) — a walk-up counter sale, no
+// comanda. Unlike createOrder above, this is a staff-only action (there is
+// no customer-facing flow for it), so it requires an Authorization header,
+// same as every other write in this file below.
+export type CreateBalcaoOrderInput = {
+  items: { productId: string; quantity: number }[];
+  customerName?: string;
+  customerPhone?: string;
+  note?: string;
+};
+
+export async function createBalcaoOrder(
+  input: CreateBalcaoOrderInput,
+): Promise<Order> {
+  const response = await fetch("/api/v1/orders/balcao", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(input),
   });
   return parseResponse<Order>(response);
@@ -156,4 +192,19 @@ export async function cancelOrderItem(
     },
   );
   return parseResponse<OrderItem>(response);
+}
+
+// PATCH /api/v1/orders/{id}/waiter (FARELO-314) — assign/reassign the
+// waiter/attendant responsible for the order (userId truthy), or clear the
+// assignment (userId null/undefined).
+export async function assignOrderWaiter(
+  orderId: string,
+  userId: string | null,
+): Promise<Order> {
+  const response = await fetch(`/api/v1/orders/${orderId}/waiter`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ userId }),
+  });
+  return parseResponse<Order>(response);
 }

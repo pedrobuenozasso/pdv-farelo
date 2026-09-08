@@ -10,6 +10,7 @@ import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -58,11 +59,38 @@ public class OrderController {
                 .toList();
 
         OrderWithItems result = orderService.create(
-                request.commandNumber(), items, request.customerName(), request.customerPhone());
+                request.commandNumber(), items, request.customerName(), request.customerPhone(), request.note());
 
         // No GET /api/v1/orders/{id} yet (future ticket) — the Location
         // header still names the resource's URI, which is correct even
         // before a handler exists to resolve it.
+        URI location = uriComponentsBuilder
+                .path("/api/v1/orders/{id}")
+                .buildAndExpand(result.order().getId())
+                .toUri();
+
+        return ResponseEntity.created(location).body(OrderResponse.from(result));
+    }
+
+    // FARELO-312: BALCAO — a walk-up counter sale with no comanda. Unlike
+    // create() above (deliberately public — the customer-facing QR
+    // checkout's only path to placing an order), there is no customer-
+    // facing flow for a counter sale: it's exclusively a staff/PDV action,
+    // so this endpoint requires a staff role from the start, same list
+    // markAsDelivered/markAsCancelled below use for other front-of-house
+    // actions.
+    @PostMapping("/balcao")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
+    public ResponseEntity<OrderResponse> createBalcao(
+            @Valid @RequestBody CreateBalcaoOrderRequest request,
+            UriComponentsBuilder uriComponentsBuilder) {
+        List<NewOrderItem> items = request.items().stream()
+                .map(item -> new NewOrderItem(item.productId(), item.quantity()))
+                .toList();
+
+        OrderWithItems result = orderService.createBalcao(
+                items, request.customerName(), request.customerPhone(), request.note());
+
         URI location = uriComponentsBuilder
                 .path("/api/v1/orders/{id}")
                 .buildAndExpand(result.order().getId())
@@ -181,6 +209,19 @@ public class OrderController {
         OrderItem item = orderService.cancelItem(
                 orderId, itemId, request.reason(), request.description(), principal.userId());
         return OrderItemResponse.from(item);
+    }
+
+    // FARELO-314: assigns/reassigns/clears the waiter responsible for this
+    // order. Same role list as markAsDelivered/markAsCancelled above — this
+    // is the same class of front-of-house action (who's serving this
+    // table), made from the same PDV screen.
+    @PatchMapping("/{id}/waiter")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
+    public OrderResponse assignWaiter(@PathVariable UUID id, @RequestBody AssignWaiterRequest request) {
+        OrderWithItems result = request.userId() != null
+                ? orderService.assignWaiter(id, request.userId())
+                : orderService.unassignWaiter(id);
+        return OrderResponse.from(result);
     }
 
 }

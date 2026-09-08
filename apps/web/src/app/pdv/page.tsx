@@ -43,7 +43,9 @@ import {
   type CommandStatus,
 } from "@/lib/api/commands";
 import {
+  assignOrderWaiter,
   cancelOrderItem,
+  createBalcaoOrder,
   createOrder,
   listCommandOrders,
   markOrderCancelled,
@@ -53,6 +55,7 @@ import {
   type OrderItemCancelReason,
   type OrderStatus,
 } from "@/lib/api/orders";
+import { listUsers } from "@/lib/api/users";
 import { applyDiscount } from "@/lib/api/discounts";
 import {
   getPaymentBalance,
@@ -138,15 +141,28 @@ const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
 
 export default function PdvCommandsPage() {
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
+  const [balcaoOpen, setBalcaoOpen] = useState(false);
 
   return (
     <AuthGuard allow={["ADMIN", "MANAGER", "CASHIER", "ATTENDANT"]}>
       <InternalNav />
       <main className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
-        <div>
-          <p className="text-ink-soft text-sm">PDV</p>
-          <h1 className="font-serif text-2xl font-semibold">Comandas</h1>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-ink-soft text-sm">PDV</p>
+            <h1 className="font-serif text-2xl font-semibold">Comandas</h1>
+          </div>
+          <Button
+            variant={balcaoOpen ? "outline" : "dark"}
+            onClick={() => setBalcaoOpen((open) => !open)}
+          >
+            {balcaoOpen ? "Fechar venda balcão" : "+ Venda balcão"}
+          </Button>
         </div>
+
+        {balcaoOpen ? (
+          <BalcaoPanel onClose={() => setBalcaoOpen(false)} />
+        ) : null}
 
         <div className="grid grid-cols-5 gap-2.5 sm:grid-cols-10">
           {COMMAND_NUMBERS.map((number) => (
@@ -385,6 +401,9 @@ function AddItemPanel({
     null,
   );
   const [quantity, setQuantity] = useState(1);
+  // FARELO-316: "Observação geral do pedido" — applies to this order (the
+  // one this "Adicionar" click creates), not to the comanda as a whole.
+  const [note, setNote] = useState("");
 
   const productsQuery = useQuery({
     queryKey: ["pdv", "products"],
@@ -400,10 +419,12 @@ function AddItemPanel({
       createOrder({
         commandNumber,
         items: [{ productId: product.id, quantity }],
+        note: note.trim() || undefined,
       }),
     onSuccess: () => {
       setSelectedProductId(null);
       setQuantity(1);
+      setNote("");
       onAdded();
     },
   });
@@ -486,42 +507,237 @@ function AddItemPanel({
       </div>
 
       {selectedProduct ? (
-        <div className="border-line flex items-center gap-3 border-t pt-3">
-          <span className="flex-1 text-sm font-semibold">
-            {selectedProduct.name}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setQuantity((qty) => Math.max(1, qty - 1))}
-              className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
-              aria-label="Diminuir quantidade"
-            >
-              −
-            </button>
-            <span className="w-6 text-center text-sm font-bold">
-              {quantity}
+        <div className="border-line flex flex-col gap-2 border-t pt-3">
+          <div className="flex items-center gap-3">
+            <span className="flex-1 text-sm font-semibold">
+              {selectedProduct.name}
             </span>
-            <button
-              type="button"
-              onClick={() => setQuantity((qty) => qty + 1)}
-              className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
-              aria-label="Aumentar quantidade"
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setQuantity((qty) => Math.max(1, qty - 1))}
+                className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+                aria-label="Diminuir quantidade"
+              >
+                −
+              </button>
+              <span className="w-6 text-center text-sm font-bold">
+                {quantity}
+              </span>
+              <button
+                type="button"
+                onClick={() => setQuantity((qty) => qty + 1)}
+                className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+                aria-label="Aumentar quantidade"
+              >
+                +
+              </button>
+            </div>
+            <Button
+              disabled={addItemMutation.isPending}
+              onClick={() => addItemMutation.mutate(selectedProduct)}
+              className="px-4 py-2 text-[13px]"
             >
-              +
-            </button>
+              {addItemMutation.isPending ? "Adicionando..." : "Adicionar"}
+            </Button>
           </div>
-          <Button
-            disabled={addItemMutation.isPending}
-            onClick={() => addItemMutation.mutate(selectedProduct)}
-            className="px-4 py-2 text-[13px]"
-          >
-            {addItemMutation.isPending ? "Adicionando..." : "Adicionar"}
-          </Button>
+          <input
+            type="text"
+            placeholder="Observação do pedido (opcional)"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            maxLength={500}
+            className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-[13px] outline-none"
+          />
         </div>
       ) : null}
       {errorMessage ? <p className="text-red text-sm">{errorMessage}</p> : null}
     </div>
+  );
+}
+
+// FARELO-312 — walk-up counter sale (BALCAO), no comanda at all. Same
+// product-search/quantity-stepper shape as AddItemPanel above (a small,
+// deliberate duplication rather than a deeper shared-component refactor —
+// AddItemPanel is tightly coupled to `commandNumber`/createOrder, and this
+// panel has no comanda to key off of), but calls createBalcaoOrder instead
+// of createOrder, and shows a plain success confirmation instead of
+// closing into a comanda detail panel — there is no PDV screen for a
+// BALCAO order to land on yet (see the backend's Order javadoc, "Design
+// decision — BALCAO", for the known payment-flow follow-up this doesn't
+// solve).
+function BalcaoPanel({ onClose }: { onClose: () => void }) {
+  const [search, setSearch] = useState("");
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(
+    null,
+  );
+  const [quantity, setQuantity] = useState(1);
+  const [note, setNote] = useState("");
+  const [lastCreated, setLastCreated] = useState<Order | null>(null);
+
+  const productsQuery = useQuery({
+    queryKey: ["pdv", "products"],
+    queryFn: listProducts,
+  });
+  const categoriesQuery = useQuery({
+    queryKey: ["pdv", "categories"],
+    queryFn: listCategories,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (product: Product) =>
+      createBalcaoOrder({
+        items: [{ productId: product.id, quantity }],
+        note: note.trim() || undefined,
+      }),
+    onSuccess: (order) => {
+      setSelectedProductId(null);
+      setQuantity(1);
+      setNote("");
+      setLastCreated(order);
+    },
+  });
+
+  const errorMessage = apiErrorMessage(
+    createMutation.error,
+    "Não foi possível criar a venda balcão.",
+  );
+
+  const availableProducts = (productsQuery.data ?? []).filter(
+    (product) =>
+      product.active &&
+      product.availableOnPos &&
+      product.name.toLowerCase().includes(search.toLowerCase()),
+  );
+  const categoryNameById = new Map(
+    (categoriesQuery.data ?? []).map((category: Category) => [
+      category.id,
+      category.name,
+    ]),
+  );
+  const sections = new Map<string, Product[]>();
+  for (const product of availableProducts) {
+    const categoryName = categoryNameById.get(product.categoryId) ?? "Outros";
+    sections.set(categoryName, [
+      ...(sections.get(categoryName) ?? []),
+      product,
+    ]);
+  }
+
+  const selectedProduct = availableProducts.find(
+    (product) => product.id === selectedProductId,
+  );
+
+  return (
+    <Card className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <h2 className="font-serif text-xl font-semibold">Venda balcão</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-ink-soft hover:text-ink text-sm"
+        >
+          Fechar
+        </button>
+      </div>
+      <p className="text-ink-soft text-sm">
+        Cliente leva/recebe na hora — sem vincular a nenhuma comanda.
+      </p>
+
+      <input
+        type="text"
+        placeholder="Buscar produto..."
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+      />
+
+      <div className="flex max-h-56 flex-col gap-3 overflow-y-auto">
+        {productsQuery.isLoading ? (
+          <p className="text-ink-faint text-sm">Carregando...</p>
+        ) : null}
+        {availableProducts.length === 0 && !productsQuery.isLoading ? (
+          <p className="text-ink-faint text-sm">Nenhum produto encontrado.</p>
+        ) : null}
+        {Array.from(sections.entries()).map(([categoryName, products]) => (
+          <div key={categoryName} className="flex flex-col gap-1">
+            <div className="text-ink-faint text-[11px] font-bold tracking-wide uppercase">
+              {categoryName}
+            </div>
+            {products.map((product) => (
+              <button
+                key={product.id}
+                type="button"
+                onClick={() => setSelectedProductId(product.id)}
+                className={cn(
+                  "flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
+                  selectedProductId === product.id
+                    ? "bg-primary-soft text-primary-dark font-semibold"
+                    : "hover:bg-bg-alt",
+                )}
+              >
+                <span>{product.name}</span>
+                <span className="font-semibold">
+                  {currencyFormatter.format(product.price)}
+                </span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {selectedProduct ? (
+        <div className="border-line flex flex-col gap-2 border-t pt-3">
+          <div className="flex items-center gap-3">
+            <span className="flex-1 text-sm font-semibold">
+              {selectedProduct.name}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setQuantity((qty) => Math.max(1, qty - 1))}
+                className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+                aria-label="Diminuir quantidade"
+              >
+                −
+              </button>
+              <span className="w-6 text-center text-sm font-bold">
+                {quantity}
+              </span>
+              <button
+                type="button"
+                onClick={() => setQuantity((qty) => qty + 1)}
+                className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+                aria-label="Aumentar quantidade"
+              >
+                +
+              </button>
+            </div>
+            <Button
+              disabled={createMutation.isPending}
+              onClick={() => createMutation.mutate(selectedProduct)}
+              className="px-4 py-2 text-[13px]"
+            >
+              {createMutation.isPending ? "Criando..." : "Criar venda"}
+            </Button>
+          </div>
+          <input
+            type="text"
+            placeholder="Observação do pedido (opcional)"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            maxLength={500}
+            className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-[13px] outline-none"
+          />
+        </div>
+      ) : null}
+      {errorMessage ? <p className="text-red text-sm">{errorMessage}</p> : null}
+      {lastCreated ? (
+        <p className="text-primary-dark bg-primary-soft rounded-lg px-3 py-2 text-sm font-semibold">
+          Venda balcão criada — pedido enviado para a cozinha/bar.
+        </p>
+      ) : null}
+    </Card>
   );
 }
 
@@ -1126,6 +1342,65 @@ function PrintConferenceButton({ commandNumber }: { commandNumber: number }) {
   );
 }
 
+// FARELO-314 — "Garçom/atendente responsável pelo pedido", removível e
+// trocável (docs/gaps-sischef-pdv.md item 4). A plain <select> populated
+// from GET /api/v1/users (now also readable by CASHIER/ATTENDANT, see the
+// backend's UserController#list javadoc) — the empty option unassigns.
+function WaiterPicker({
+  order,
+  ordersQueryKey,
+}: {
+  order: Order;
+  ordersQueryKey: (string | number)[];
+}) {
+  const queryClient = useQueryClient();
+
+  const usersQuery = useQuery({
+    queryKey: ["pdv", "users"],
+    queryFn: listUsers,
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: (userId: string | null) => assignOrderWaiter(order.id, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ordersQueryKey });
+    },
+  });
+
+  const errorMessage = apiErrorMessage(
+    assignMutation.error,
+    "Não foi possível atribuir o atendente.",
+  );
+
+  const activeUsers = (usersQuery.data ?? []).filter((user) => user.active);
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <span className="text-ink-faint text-[11px] font-bold tracking-wide uppercase">
+        Atendente
+      </span>
+      <select
+        value={order.assignedUserId ?? ""}
+        onChange={(event) =>
+          assignMutation.mutate(event.target.value || null)
+        }
+        disabled={assignMutation.isPending}
+        className="border-line bg-surface rounded-md border px-2 py-1 text-[13px] outline-none"
+      >
+        <option value="">Sem atendente</option>
+        {activeUsers.map((user) => (
+          <option key={user.id} value={user.id}>
+            {user.name}
+          </option>
+        ))}
+      </select>
+      {errorMessage ? (
+        <span className="text-red text-[12px]">{errorMessage}</span>
+      ) : null}
+    </div>
+  );
+}
+
 function OrderCard({
   order,
   commandNumber,
@@ -1193,6 +1468,15 @@ function OrderCard({
           {ORDER_STATUS_LABEL[order.status]}
         </Badge>
       </div>
+
+      <WaiterPicker order={order} ordersQueryKey={ordersQueryKey} />
+
+      {order.note ? (
+        <p className="text-ink-soft bg-bg-alt mt-2 rounded-lg px-3 py-2 text-[13px] italic">
+          &ldquo;{order.note}&rdquo;
+        </p>
+      ) : null}
+
       <ul className="border-line mt-2 flex flex-col gap-1 border-t pt-2">
         {order.items.map((item) => (
           <OrderItemRow

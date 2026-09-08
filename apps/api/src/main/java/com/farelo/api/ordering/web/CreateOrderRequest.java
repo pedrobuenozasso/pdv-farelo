@@ -3,6 +3,7 @@ package com.farelo.api.ordering.web;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
@@ -20,10 +21,16 @@ import java.util.List;
  * {@code int}: a missing field must fail validation with a clear 400
  * ({@code @NotNull}), not silently default to {@code 0} and produce a
  * confusing 404 ("Command not found: 0") instead.
+ *
+ * <p>{@code note} (FARELO-316, "Observação geral do pedido") is optional,
+ * capped at 500 characters — same length {@code
+ * OrderItemCancelRequest#description}/{@code DiscountRequest#reason}
+ * already use for a free-text field on this codebase.
  */
 public record CreateOrderRequest(
         @NotNull Integer commandNumber,
         @NotEmpty @Valid List<OrderItemRequest> items,
         String customerName,
-        String customerPhone) {
+        String customerPhone,
+        @Size(max = 500, message = "note deve ter no máximo 500 caracteres") String note) {
 }
