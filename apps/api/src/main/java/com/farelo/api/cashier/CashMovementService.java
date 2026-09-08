@@ -16,11 +16,13 @@ import java.util.UUID;
  * FARELO-310 ("Sangria e Suprimento") gave this class its first two
  * producers, {@link #recordWithdrawal} and {@link #recordSupply}, plus
  * {@link #listByCashSession} (backing {@code GET
- * /api/v1/cash-sessions/{id}/movements}). Both producers delegate to the
- * private {@link #record} helper, which {@link #recordExpense}/{@link
- * #recordIncome} (FARELO-311) reuse unchanged — see {@link CashMovement}'s
- * javadoc for why all four {@link CashMovementType} values already exist
- * on the entity/table as of FARELO-310.
+ * /api/v1/cash-sessions/{id}/movements}). FARELO-311 ("Lançar despesa/
+ * receita direto do caixa") adds {@link #recordExpense}/{@link
+ * #recordIncome} — both new methods, same shape and same private {@link
+ * #record} helper the FARELO-310 pair already established, requiring no
+ * migration (see {@link CashMovement}'s javadoc for why all four {@link
+ * CashMovementType} values already existed on the entity/table as of
+ * FARELO-310).
  *
  * <p>Depends on {@link CashSessionService#findOpen(UUID)} to resolve and
  * validate the target session (409 {@link CashSessionNotOpenException} if
@@ -80,6 +82,34 @@ public class CashMovementService {
     @Transactional
     public CashMovement recordSupply(UUID cashSessionId, BigDecimal amount, String description, UUID actorId) {
         return record(cashSessionId, CashMovementType.SUPPLY, amount, description, actorId);
+    }
+
+    /**
+     * Despesa — an ad-hoc expense paid directly from the drawer, outside
+     * the order/payment flow (FARELO-311), recorded against an open {@link
+     * CashSession}.
+     *
+     * @throws CashSessionNotFoundException {@code cashSessionId} doesn't
+     *     exist.
+     * @throws CashSessionNotOpenException the session isn't {@code OPEN}.
+     */
+    @Transactional
+    public CashMovement recordExpense(UUID cashSessionId, BigDecimal amount, String description, UUID actorId) {
+        return record(cashSessionId, CashMovementType.EXPENSE, amount, description, actorId);
+    }
+
+    /**
+     * Receita — an ad-hoc income received directly into the drawer,
+     * outside the order/payment flow (FARELO-311), recorded against an
+     * open {@link CashSession}.
+     *
+     * @throws CashSessionNotFoundException {@code cashSessionId} doesn't
+     *     exist.
+     * @throws CashSessionNotOpenException the session isn't {@code OPEN}.
+     */
+    @Transactional
+    public CashMovement recordIncome(UUID cashSessionId, BigDecimal amount, String description, UUID actorId) {
+        return record(cashSessionId, CashMovementType.INCOME, amount, description, actorId);
     }
 
     private CashMovement record(

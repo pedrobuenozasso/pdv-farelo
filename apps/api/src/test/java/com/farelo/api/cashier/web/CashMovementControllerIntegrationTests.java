@@ -35,8 +35,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Integration test for {@code POST /api/v1/cash-sessions/{id}/withdrawals}/
- * {@code .../supplies} and {@code GET .../movements} (FARELO-310), against
- * a real PostgreSQL instance (Testcontainers).
+ * {@code .../supplies} and {@code GET .../movements} (FARELO-310), plus
+ * {@code .../expenses}/{@code .../incomes} (FARELO-311), against a real
+ * PostgreSQL instance (Testcontainers).
  *
  * <p>Every test clears {@code cash_movement}/{@code cash_session}/{@code
  * shift} first — own dedicated tables, no other domain's FK touches them.
@@ -302,6 +303,139 @@ class CashMovementControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(get("/api/v1/cash-sessions/{id}/movements", sessionId))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    // FARELO-311 — POST .../expenses and .../incomes below. Same shape/
+    // preconditions as withdrawals/supplies above, so coverage here is
+    // deliberately lighter (success + audit trail + the OPEN precondition
+    // once each) rather than repeating every RBAC/validation case already
+    // proven identical by the FARELO-310 tests above (both endpoints share
+    // the exact same CashMovementRequest DTO and @RequireRole list).
+
+    @Test
+    void recordsExpenseAndPersistsIt() throws Exception {
+        User cashier = persistedUser(UserRole.CASHIER);
+        String token = tokenFor(cashier);
+        UUID sessionId = openSession(token);
+
+        MvcResult result = mockMvc.perform(post("/api/v1/cash-sessions/{id}/expenses", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"amount": 35.00, "description": "Compra de material de limpeza"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.cashSessionId").value(sessionId.toString()))
+                .andExpect(jsonPath("$.type").value("EXPENSE"))
+                .andExpect(jsonPath("$.amount").value(35.00))
+                .andExpect(jsonPath("$.description").value("Compra de material de limpeza"))
+                .andReturn();
+
+        CashMovementResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), CashMovementResponse.class);
+        assertThat(cashMovementRepository.findById(response.id())).isPresent();
+
+        List<AuditLog> auditTrail = auditLogRepository
+                .findByEntityTypeAndEntityIdOrderByCreatedAtDesc("CashMovement", response.id());
+        assertThat(auditTrail).hasSize(1);
+        assertThat(auditTrail.get(0).getAction()).isEqualTo("CASH_EXPENSE_RECORDED");
+    }
+
+    @Test
+    void recordsIncomeAndPersistsIt() throws Exception {
+        String token = tokenFor(UserRole.CASHIER);
+        UUID sessionId = openSession(token);
+
+        MvcResult result = mockMvc.perform(post("/api/v1/cash-sessions/{id}/incomes", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"amount": 12.50}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.type").value("INCOME"))
+                .andExpect(jsonPath("$.amount").value(12.50))
+                .andReturn();
+
+        CashMovementResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), CashMovementResponse.class);
+
+        List<AuditLog> auditTrail = auditLogRepository
+                .findByEntityTypeAndEntityIdOrderByCreatedAtDesc("CashMovement", response.id());
+        assertThat(auditTrail).hasSize(1);
+        assertThat(auditTrail.get(0).getAction()).isEqualTo("CASH_INCOME_RECORDED");
+    }
+
+    @Test
+    void rejectsExpenseOnClosedSession() throws Exception {
+        String token = tokenFor(UserRole.CASHIER);
+        UUID sessionId = openSession(token);
+        closeSession(token, sessionId);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/expenses", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 10}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CASH_SESSION_NOT_OPEN"));
+    }
+
+    @Test
+    void rejectsIncomeOnClosedSession() throws Exception {
+        String token = tokenFor(UserRole.CASHIER);
+        UUID sessionId = openSession(token);
+        closeSession(token, sessionId);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/incomes", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 10}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CASH_SESSION_NOT_OPEN"));
+    }
+
+    @Test
+    void expensesAndIncomesAppearInMovementsListAlongsideWithdrawalsAndSupplies() throws Exception {
+        String token = tokenFor(UserRole.CASHIER);
+        UUID sessionId = openSession(token);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/withdrawals", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 1}"))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/supplies", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 2}"))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/expenses", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 3}"))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/incomes", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 4}"))
+                .andExpect(status().isCreated());
+
+        MvcResult result = mockMvc.perform(get("/api/v1/cash-sessions/{id}/movements", sessionId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(4)))
+                .andReturn();
+
+        List<CashMovementResponse> movements = objectMapper.readValue(
+                result.getResponse().getContentAsString(),
+                objectMapper.getTypeFactory().constructCollectionType(List.class, CashMovementResponse.class));
+
+        assertThat(movements).extracting(CashMovementResponse::type)
+                .containsExactly(
+                        com.farelo.api.cashier.CashMovementType.WITHDRAWAL,
+                        com.farelo.api.cashier.CashMovementType.SUPPLY,
+                        com.farelo.api.cashier.CashMovementType.EXPENSE,
+                        com.farelo.api.cashier.CashMovementType.INCOME);
     }
 
 }

@@ -21,8 +21,10 @@ import java.util.UUID;
 
 /**
  * {@code /api/v1/cash-sessions/{id}/...} — {@link #recordWithdrawal}
- * (sangria) and {@link #recordSupply} (suprimento) (FARELO-310), plus
- * {@link #list} (backing {@code GET .../movements}). Same URL-prefix
+ * (sangria) and {@link #recordSupply} (suprimento) (FARELO-310), {@link
+ * #recordExpense} (despesa) and {@link #recordIncome} (receita)
+ * (FARELO-311), plus {@link #list} (backing {@code GET .../movements}).
+ * Same URL-prefix
  * placement as {@code CashSessionController} (this stays inside {@code
  * cashier.web}, not a separate top-level path) — {@link CashMovement}
  * already depends on {@code CashSession} ({@code @ManyToOne}), so keeping
@@ -78,6 +80,34 @@ public class CashMovementController {
             AuthenticatedPrincipal principal,
             UriComponentsBuilder uriComponentsBuilder) {
         CashMovement movement = cashMovementService.recordSupply(
+                id, request.amount(), request.description(), principal.userId());
+        return created(movement, id, uriComponentsBuilder);
+    }
+
+    // FARELO-311. Same role list/shape as recordWithdrawal/recordSupply
+    // above — despesa is an action the operator performs themselves.
+    @PostMapping("/{id}/expenses")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
+    public ResponseEntity<CashMovementResponse> recordExpense(
+            @PathVariable UUID id,
+            @Valid @RequestBody CashMovementRequest request,
+            AuthenticatedPrincipal principal,
+            UriComponentsBuilder uriComponentsBuilder) {
+        CashMovement movement = cashMovementService.recordExpense(
+                id, request.amount(), request.description(), principal.userId());
+        return created(movement, id, uriComponentsBuilder);
+    }
+
+    // FARELO-311. Same role list/shape as recordWithdrawal/recordSupply
+    // above — receita is an action the operator performs themselves.
+    @PostMapping("/{id}/incomes")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
+    public ResponseEntity<CashMovementResponse> recordIncome(
+            @PathVariable UUID id,
+            @Valid @RequestBody CashMovementRequest request,
+            AuthenticatedPrincipal principal,
+            UriComponentsBuilder uriComponentsBuilder) {
+        CashMovement movement = cashMovementService.recordIncome(
                 id, request.amount(), request.description(), principal.userId());
         return created(movement, id, uriComponentsBuilder);
     }
