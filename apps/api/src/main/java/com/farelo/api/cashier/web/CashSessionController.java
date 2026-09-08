@@ -35,6 +35,16 @@ import java.util.UUID;
  * yet). {@link #close} (FARELO-308) reuses that same role list — closing a
  * caixa is as much a cash-handling action as opening/recording a payment
  * against one.
+ *
+ * <p><b>{@link #reconcile} (FARELO-309) requires only {@code ADMIN}/{@code
+ * MANAGER}, deliberately excluding {@code CASHIER}</b> — segregation of
+ * duties: conferência is a checking step over the operator's own cash
+ * handling, and letting that same operator self-certify their count would
+ * defeat the point of the control. No direct precedent for this exclusion
+ * elsewhere in this codebase (every other cash-handling action allows
+ * {@code CASHIER}) — a deliberate, non-trivial decision of this ticket,
+ * documented in full in {@code docs/domain-model.md}, section {@code
+ * cashier}.
  */
 @RestController
 @RequestMapping("/api/v1/cash-sessions")
@@ -84,6 +94,17 @@ public class CashSessionController {
             @Valid @RequestBody CashSessionCloseRequest request,
             AuthenticatedPrincipal principal) {
         CashSession session = cashSessionService.close(id, request.closingAmount(), principal.userId());
+        return CashSessionResponse.from(session);
+    }
+
+    // FARELO-309. No request body — the comparison is entirely computed
+    // server-side (see CashSessionService#reconcile's javadoc). Restricted
+    // to ADMIN/MANAGER, deliberately excluding CASHIER — see this class's
+    // javadoc for the segregation-of-duties reasoning.
+    @PostMapping("/{id}/reconcile")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
+    public CashSessionResponse reconcile(@PathVariable UUID id, AuthenticatedPrincipal principal) {
+        CashSession session = cashSessionService.reconcile(id, principal.userId());
         return CashSessionResponse.from(session);
     }
 

@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -34,5 +35,21 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
     // 0 instead of null, same reasoning as that precedent.
     @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p WHERE p.command = :command")
     BigDecimal sumAmountByCommand(@Param("command") Command command);
+
+    // FARELO-309 ("Conferência de caixa", com.farelo.api.cashier.CashSessionService#reconcile):
+    // the one point of contact between `cashier` and `payment` — a pure
+    // read, never a write (see docs/domain-model.md, section `cashier`,
+    // for the scope boundary this respects). Sums the CASH payments
+    // recorded while a CashSession was open (createdAt between its
+    // openedAt/closedAt), the "total calculado pelo sistema" a caixa's
+    // informed closing amount is checked against. Same COALESCE(..., 0)
+    // convention as sumAmountByCommand above — a window with no cash
+    // payments reports 0, not null.
+    @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p "
+            + "WHERE p.method = :method AND p.createdAt BETWEEN :from AND :to")
+    BigDecimal sumAmountByMethodAndCreatedAtBetween(
+            @Param("method") PaymentMethod method,
+            @Param("from") OffsetDateTime from,
+            @Param("to") OffsetDateTime to);
 
 }

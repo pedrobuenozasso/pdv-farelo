@@ -1,5 +1,7 @@
 package com.farelo.api.cashier;
 
+import com.farelo.api.payment.PaymentMethod;
+import com.farelo.api.payment.PaymentRepository;
 import com.farelo.api.security.User;
 import com.farelo.api.security.UserService;
 import org.springframework.stereotype.Service;
@@ -19,7 +21,11 @@ import java.util.UUID;
  * java.math.BigDecimal, UUID)} (backing {@code POST
  * /api/v1/cash-sessions/{id}/close}) and the {@link #findOpen(UUID)}
  * helper it shares with {@code CashMovementService} (FARELO-310/311).
- * Depends on {@link ShiftService} to
+ * FARELO-309 adds {@link #reconcile(UUID, UUID)} (backing {@code POST
+ * /api/v1/cash-sessions/{id}/reconcile}) and its {@link #findClosed(UUID)}
+ * helper — see {@link #reconcile(UUID, UUID)}'s javadoc for the full
+ * comparison/scope reasoning, including the one new dependency this adds,
+ * on {@link PaymentRepository} (read-only). Depends on {@link ShiftService} to
  * resolve the {@code shiftId} given at open time (404 {@link
  * ShiftNotFoundException} when it doesn't exist) and on {@link UserService}
  * to resolve the acting operator's current name (same {@code UUID actorId}
@@ -54,12 +60,17 @@ public class CashSessionService {
     private final CashSessionRepository cashSessionRepository;
     private final ShiftService shiftService;
     private final UserService userService;
+    private final PaymentRepository paymentRepository;
 
     public CashSessionService(
-            CashSessionRepository cashSessionRepository, ShiftService shiftService, UserService userService) {
+            CashSessionRepository cashSessionRepository,
+            ShiftService shiftService,
+            UserService userService,
+            PaymentRepository paymentRepository) {
         this.cashSessionRepository = cashSessionRepository;
         this.shiftService = shiftService;
         this.userService = userService;
+        this.paymentRepository = paymentRepository;
     }
 
     /**
@@ -165,6 +176,83 @@ public class CashSessionService {
         session.setClosedByUserName(actor.getName());
 
         return cashSessionRepository.save(session);
+    }
+
+    /**
+     * Reconciles a closed {@link CashSession} (FARELO-309, "Conferência de
+     * caixa") — a step deliberately separate from {@link #close}, matching
+     * {@code docs/gaps-sischef-pdv.md}'s "passo separado do fechamento".
+     * Compares {@code closingAmount} (the physical cash counted, informed
+     * at close time) against {@code expectedAmount} (the system-calculated
+     * figure computed here): the sum of every {@code CASH} {@code Payment}
+     * whose {@code createdAt} falls within the session's {@code openedAt}–
+     * {@code closedAt} window, via {@link
+     * PaymentRepository#sumAmountByMethodAndCreatedAtBetween} — the one,
+     * read-only point of contact this domain has with {@code payment} (see
+     * {@code docs/domain-model.md}, section {@code cashier}, for why this
+     * respects the "no máximo, leitura" scope boundary given to this whole
+     * ticket batch).
+     *
+     * <p><b>Known limitation, not fixed here</b>: {@code CashMovement}
+     * (sangria/suprimento/despesa/receita) doesn't exist yet as of this
+     * ticket (FARELO-310/311 come after) — a withdrawal/supply/expense/
+     * income recorded during a session is <b>not</b> subtracted/added into
+     * {@code expectedAmount} today. See this class's package-level design
+     * notes in {@code docs/domain-model.md} for the full writeup; fixing
+     * this is a future ticket's job, not silently guessed at here.
+     *
+     * <p><b>No tolerance</b>: {@code MATCHED} requires the difference to be
+     * exactly zero ({@link BigDecimal#compareTo}); any other value,
+     * positive or negative, is {@code MISMATCHED}. Runs exactly once — see
+     * {@link CashSessionAlreadyReconciledException}'s javadoc.
+     *
+     * @throws CashSessionNotFoundException {@code id} doesn't exist.
+     * @throws CashSessionNotClosedException the session isn't {@code
+     *     CLOSED} yet.
+     * @throws CashSessionAlreadyReconciledException the session was already
+     *     reconciled.
+     */
+    @Transactional
+    public CashSession reconcile(UUID id, UUID actorId) {
+        CashSession session = findClosed(id);
+        if (session.getReconciliationStatus() != CashSessionReconciliationStatus.PENDING) {
+            throw new CashSessionAlreadyReconciledException(id);
+        }
+
+        User actor = userService.getById(actorId);
+
+        BigDecimal expectedAmount = paymentRepository.sumAmountByMethodAndCreatedAtBetween(
+                PaymentMethod.CASH, session.getOpenedAt(), session.getClosedAt());
+        BigDecimal difference = session.getClosingAmount().subtract(expectedAmount);
+        CashSessionReconciliationStatus result = difference.compareTo(BigDecimal.ZERO) == 0
+                ? CashSessionReconciliationStatus.MATCHED
+                : CashSessionReconciliationStatus.MISMATCHED;
+
+        session.setExpectedAmount(expectedAmount);
+        session.setReconciliationDifference(difference);
+        session.setReconciliationStatus(result);
+        session.setReconciledAt(OffsetDateTime.now(ZoneOffset.UTC));
+        session.setReconciledByUserId(actor.getId());
+        session.setReconciledByUserName(actor.getName());
+
+        return cashSessionRepository.save(session);
+    }
+
+    /**
+     * Resolves a {@link CashSession} ready to be reconciled — the status
+     * half of {@link #reconcile}'s precondition, same "resolve + validate,
+     * no save" shape as {@link #findOpen(UUID)}.
+     *
+     * @throws CashSessionNotFoundException {@code id} doesn't exist.
+     * @throws CashSessionNotClosedException the session isn't {@code
+     *     CLOSED} yet.
+     */
+    public CashSession findClosed(UUID id) {
+        CashSession session = findWithShift(id);
+        if (session.getStatus() != CashSessionStatus.CLOSED) {
+            throw new CashSessionNotClosedException(id, session.getStatus());
+        }
+        return session;
     }
 
 }

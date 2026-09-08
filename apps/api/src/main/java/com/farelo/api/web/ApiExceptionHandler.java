@@ -1,6 +1,8 @@
 package com.farelo.api.web;
 
 import com.farelo.api.cashier.CashSessionAlreadyOpenException;
+import com.farelo.api.cashier.CashSessionAlreadyReconciledException;
+import com.farelo.api.cashier.CashSessionNotClosedException;
 import com.farelo.api.cashier.CashSessionNotFoundException;
 import com.farelo.api.cashier.CashSessionNotOpenException;
 import com.farelo.api.cashier.ShiftNameAlreadyExistsException;
@@ -380,6 +382,22 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleCashSessionNotOpen(CashSessionNotOpenException ex) {
         return new ErrorResponse("CASH_SESSION_NOT_OPEN", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: reconcile() (FARELO-309) requires a CLOSED session —
+    // see CashSessionNotClosedException's javadoc.
+    @ExceptionHandler(CashSessionNotClosedException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleCashSessionNotClosed(CashSessionNotClosedException ex) {
+        return new ErrorResponse("CASH_SESSION_NOT_CLOSED", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: reconcile() (FARELO-309) runs at most once per session
+    // — see CashSessionAlreadyReconciledException's javadoc.
+    @ExceptionHandler(CashSessionAlreadyReconciledException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleCashSessionAlreadyReconciled(CashSessionAlreadyReconciledException ex) {
+        return new ErrorResponse("CASH_SESSION_ALREADY_RECONCILED", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

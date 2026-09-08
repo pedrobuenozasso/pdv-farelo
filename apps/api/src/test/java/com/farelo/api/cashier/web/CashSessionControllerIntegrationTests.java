@@ -4,6 +4,11 @@ import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.cashier.CashSessionRepository;
 import com.farelo.api.cashier.Shift;
 import com.farelo.api.cashier.ShiftRepository;
+import com.farelo.api.command.Command;
+import com.farelo.api.command.CommandRepository;
+import com.farelo.api.payment.Payment;
+import com.farelo.api.payment.PaymentMethod;
+import com.farelo.api.payment.PaymentRepository;
 import com.farelo.api.security.User;
 import com.farelo.api.security.UserRepository;
 import com.farelo.api.security.UserRole;
@@ -19,6 +24,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -65,10 +72,48 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private CommandRepository commandRepository;
+
+    @Autowired
+    private PaymentRepository paymentRepository;
+
+    // FARELO-309: Payments/Commands this class creates purely to feed
+    // CashSessionService#reconcile's expected-amount calculation — tracked
+    // here so cleanUpReconcileFixtures() below deletes exactly these rows,
+    // never the shared 1-100 command seed (same "delete only what I made"
+    // discipline PaymentControllerIntegrationTests documents).
+    private final List<Payment> createdPayments = new ArrayList<>();
+    private final List<Command> createdCommands = new ArrayList<>();
+
     @AfterEach
     void cleanUp() {
         cashSessionRepository.deleteAll();
         shiftRepository.deleteAll();
+    }
+
+    @AfterEach
+    void cleanUpReconcileFixtures() {
+        paymentRepository.deleteAll(createdPayments);
+        commandRepository.deleteAll(createdCommands);
+        createdPayments.clear();
+        createdCommands.clear();
+    }
+
+    // Business numbers well outside the shared 1-100 seed (FARELO-031) —
+    // no CHECK constraint restricts Command.number's range, and using a
+    // number far outside that seed guarantees zero collision with any
+    // other test class's reserved-number registry.
+    private Command createCommand(int number) {
+        Command command = commandRepository.save(new Command(number));
+        createdCommands.add(command);
+        return command;
+    }
+
+    private Payment createCashPayment(Command command, BigDecimal amount) {
+        Payment payment = paymentRepository.save(new Payment(command, amount, PaymentMethod.CASH));
+        createdPayments.add(payment);
+        return payment;
     }
 
     private User persistedUser(UserRole role) {
@@ -400,5 +445,144 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
+    // FARELO-309 — POST .../reconcile below.
+
+    private UUID openAndCloseSession(String token, Shift shift, BigDecimal closingAmount) throws Exception {
+        UUID id = openSession(token, shift);
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": %s}".formatted(closingAmount)))
+                .andExpect(status().isOk());
+        return id;
+    }
+
+    @Test
+    void reconcilesAsMatchedWhenClosingAmountEqualsCashPayments() throws Exception {
+        Shift shift = persistedShift();
+        String cashierToken = tokenFor(UserRole.CASHIER);
+        Command command = createCommand(900001);
+
+        UUID id = openSession(cashierToken, shift);
+        createCashPayment(command, new BigDecimal("30.00"));
+        createCashPayment(command, new BigDecimal("20.00"));
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + cashierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 50.00}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", id)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reconciliationStatus").value("MATCHED"))
+                .andExpect(jsonPath("$.expectedAmount").value(50.00))
+                .andExpect(jsonPath("$.reconciliationDifference").value(0))
+                .andExpect(jsonPath("$.reconciledAt").exists())
+                .andExpect(jsonPath("$.reconciledByUserId").exists());
+    }
+
+    @Test
+    void reconcilesAsMismatchedWhenClosingAmountDiffersFromCashPayments() throws Exception {
+        Shift shift = persistedShift();
+        String cashierToken = tokenFor(UserRole.CASHIER);
+        Command command = createCommand(900002);
+
+        UUID id = openSession(cashierToken, shift);
+        createCashPayment(command, new BigDecimal("40.00"));
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + cashierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 55.00}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", id)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reconciliationStatus").value("MISMATCHED"))
+                .andExpect(jsonPath("$.expectedAmount").value(40.00))
+                .andExpect(jsonPath("$.reconciliationDifference").value(15.00));
+    }
+
+    // Non-CASH payments must never enter the expected-amount sum.
+    @Test
+    void ignoresNonCashPaymentsWhenReconciling() throws Exception {
+        Shift shift = persistedShift();
+        String cashierToken = tokenFor(UserRole.CASHIER);
+        Command command = createCommand(900003);
+
+        UUID id = openSession(cashierToken, shift);
+        createCashPayment(command, new BigDecimal("10.00"));
+        createdPayments.add(paymentRepository.save(new Payment(command, new BigDecimal("500.00"), PaymentMethod.PIX)));
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + cashierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 10.00}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", id)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reconciliationStatus").value("MATCHED"))
+                .andExpect(jsonPath("$.expectedAmount").value(10.00));
+    }
+
+    @Test
+    void rejectsReconcilingStillOpenSession() throws Exception {
+        Shift shift = persistedShift();
+        UUID id = openSession(tokenFor(UserRole.CASHIER), shift);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", id)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CASH_SESSION_NOT_CLOSED"));
+    }
+
+    @Test
+    void rejectsReconcilingAlreadyReconciledSession() throws Exception {
+        Shift shift = persistedShift();
+        UUID id = openAndCloseSession(tokenFor(UserRole.CASHIER), shift, BigDecimal.ZERO);
+        String adminToken = tokenFor(UserRole.ADMIN);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", id)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", id)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CASH_SESSION_ALREADY_RECONCILED"));
+    }
+
+    @Test
+    void returnsNotFoundReconcilingUnknownCashSessionId() throws Exception {
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CASH_SESSION_NOT_FOUND"));
+    }
+
+    @Test
+    void rejectsReconcileWithNoAuthorizationHeader() throws Exception {
+        Shift shift = persistedShift();
+        UUID id = openAndCloseSession(tokenFor(UserRole.CASHIER), shift, BigDecimal.ZERO);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", id))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    // Segregation of duties: CASHIER is forbidden, unlike open()/close().
+    @Test
+    void rejectsReconcileForCashierRole() throws Exception {
+        Shift shift = persistedShift();
+        String cashierToken = tokenFor(UserRole.CASHIER);
+        UUID id = openAndCloseSession(cashierToken, shift, BigDecimal.ZERO);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", id)
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
 
 }

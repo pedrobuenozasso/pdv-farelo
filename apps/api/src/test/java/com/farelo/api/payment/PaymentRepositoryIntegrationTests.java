@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -63,6 +65,15 @@ class PaymentRepositoryIntegrationTests extends AbstractIntegrationTest {
     private static final int SUM_COMMAND_NUMBER = 67;
     private static final int SUM_OTHER_COMMAND_NUMBER = 68;
     private static final int SUM_EMPTY_COMMAND_NUMBER = 69;
+
+    // FARELO-309 (sumAmountByMethodAndCreatedAtBetween) — a business number
+    // well outside the shared 1-100 seed, created and torn down by this
+    // test itself (see cleanUpReconcileFixtures below), rather than
+    // borrowing another free 1-100 slot from this suite's shared registry:
+    // this is the only method in this class that needs a Command it fully
+    // controls the lifecycle of (created fresh so no other test's payments
+    // can ever land in the query's from/to window).
+    private static final int RECONCILE_COMMAND_NUMBER = 900010;
 
     @Autowired
     private PaymentRepository paymentRepository;
@@ -157,6 +168,56 @@ class PaymentRepositoryIntegrationTests extends AbstractIntegrationTest {
         Command command = command(SUM_EMPTY_COMMAND_NUMBER);
 
         BigDecimal total = paymentRepository.sumAmountByCommand(command);
+
+        assertThat(total).isNotNull();
+        assertThat(total).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    // --- FARELO-309: sumAmountByMethodAndCreatedAtBetween -------------------
+
+    @Test
+    void sumAmountByMethodAndCreatedAtBetweenSumsOnlyMatchingMethodWithinWindow() {
+        Command command = commandRepository.save(new Command(RECONCILE_COMMAND_NUMBER));
+
+        // A tight window around exactly this test's own writes, not a wide
+        // +/-1-hour pad: this suite's other tests (in this very class, e.g.
+        // savesEveryPaymentMethod/findByCommandOrderByCreatedAtAscReturnsOldestFirstScopedToCommand)
+        // also write CASH payments, with no per-test cleanup (see class
+        // javadoc) — a wide window would sum every CASH payment anyone in
+        // the whole suite ever wrote near "now", not just this test's own
+        // three rows (this is exactly the failure a first version of this
+        // test hit: expected 50.00, got 65.00 — 15.00 leaked in from
+        // another test's own CASH payment written moments earlier). JUnit
+        // runs one test method at a time (never concurrently) in this
+        // suite, so a window drawn tightly around only this method's own
+        // saves cannot observe any other method's writes, which happen
+        // strictly before or after it, never during.
+        OffsetDateTime from = OffsetDateTime.now(ZoneOffset.UTC);
+
+        paymentRepository.saveAndFlush(new Payment(command, new BigDecimal("30.00"), PaymentMethod.CASH));
+        paymentRepository.saveAndFlush(new Payment(command, new BigDecimal("20.00"), PaymentMethod.CASH));
+        // A non-CASH payment in the exact same window must never enter the sum.
+        paymentRepository.saveAndFlush(new Payment(command, new BigDecimal("500.00"), PaymentMethod.PIX));
+
+        OffsetDateTime to = OffsetDateTime.now(ZoneOffset.UTC);
+
+        BigDecimal total = paymentRepository.sumAmountByMethodAndCreatedAtBetween(PaymentMethod.CASH, from, to);
+
+        assertThat(total).isEqualByComparingTo("50.00");
+
+        paymentRepository.deleteAll(paymentRepository.findByCommandOrderByCreatedAtAsc(command));
+        commandRepository.delete(command);
+    }
+
+    @Test
+    void sumAmountByMethodAndCreatedAtBetweenReturnsZeroNotNullOutsideWindow() {
+        // A window entirely in the past — no payment in this suite was ever
+        // created there, so this must report 0 regardless of what any other
+        // test class has written to the shared payment table.
+        OffsetDateTime from = OffsetDateTime.parse("2000-01-01T00:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2000-01-02T00:00:00Z");
+
+        BigDecimal total = paymentRepository.sumAmountByMethodAndCreatedAtBetween(PaymentMethod.CASH, from, to);
 
         assertThat(total).isNotNull();
         assertThat(total).isEqualByComparingTo(BigDecimal.ZERO);
