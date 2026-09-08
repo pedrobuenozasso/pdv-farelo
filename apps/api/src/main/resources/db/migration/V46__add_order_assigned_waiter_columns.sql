@@ -1,4 +1,4 @@
--- V40__add_order_assigned_waiter_columns.sql
+-- V46__add_order_assigned_waiter_columns.sql
 -- FARELO-314: the "garçom/atendente responsável" (waiter/attendant
 -- assigned to a pedido) the Sischef gap analysis calls out
 -- (docs/gaps-sischef-pdv.md item 4) — "Garçom Principal", removable and

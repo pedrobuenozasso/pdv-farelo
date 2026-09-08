@@ -1,4 +1,4 @@
--- V39__add_order_type_and_nullable_command.sql
+-- V45__add_order_type_and_nullable_command.sql
 -- FARELO-312: adds the BALCAO order type (a walk-up counter sale with no
 -- comanda, docs/gaps-sischef-pdv.md item 2) alongside the existing COMANDA
 -- flow every order has used until now.

@@ -1,4 +1,4 @@
--- V42__add_discount_order_item_id_column.sql
+-- V48__add_discount_order_item_id_column.sql
 -- FARELO-317: "Desconto por item" — extends the existing discount domain
 -- (FARELO-230/231/232, V37) to also apply to one specific OrderItem, not
 -- only a comanda's whole total. Reuses the `discount` table/entity rather

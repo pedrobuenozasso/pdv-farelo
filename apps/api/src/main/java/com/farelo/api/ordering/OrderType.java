@@ -18,7 +18,7 @@ package com.farelo.api.ordering;
  * A {@code BALCAO} order has no comanda to attach to by definition, so
  * {@link Order#getCommand()} had to become optional (see that class's
  * javadoc, "Design decision — BALCAO"). {@code
- * ck_orders_type_command_scope} (V39__add_order_type_and_nullable_command
+ * ck_orders_type_command_scope} (V45__add_order_type_and_nullable_command
  * .sql) enforces the exclusivity — {@code COMANDA} always has a {@code
  * command_id}, {@code BALCAO} never does — at the database level too, the
  * same defense-in-depth convention {@code ck_print_job_type_scope} (V36)

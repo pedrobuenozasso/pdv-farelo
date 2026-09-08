@@ -1,4 +1,4 @@
--- V41__add_order_note_column.sql
+-- V47__add_order_note_column.sql
 -- FARELO-316: "Observação geral do pedido" — a free-text note at the
 -- pedido level (docs/gaps-sischef-pdv.md item 6), distinct from OrderItem's
 -- existing cancellation description (V35), which is about one specific

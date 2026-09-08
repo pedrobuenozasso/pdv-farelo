@@ -1,4 +1,4 @@
--- V43__add_order_print_on_confirm_column.sql
+-- V49__add_order_print_on_confirm_column.sql
 -- FARELO-319: "Imprimir ao confirmar" (docs/gaps-sischef-pdv.md item 9) —
 -- a per-order checkbox controlling whether the automatic kitchen-ticket
 -- printing that already happens on OrderCreated (FARELO-072) fires for
