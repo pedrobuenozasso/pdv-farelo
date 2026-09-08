@@ -1,5 +1,7 @@
 package com.farelo.api.command;
 
+import com.farelo.api.table.DiningTable;
+import com.farelo.api.table.DiningTableService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,10 +46,24 @@ public class CommandService {
     private static final Set<CommandStatus> PAYABLE_STATUSES =
             EnumSet.of(CommandStatus.OPEN, CommandStatus.PAYMENT_REQUESTED);
 
-    private final CommandRepository commandRepository;
+    // FARELO-315: a table counts as "occupied" while its linked comanda is
+    // in active use — the same two statuses CLOSABLE_STATUSES/
+    // PAYABLE_STATUSES above already settled on for "this comanda is a
+    // live, ongoing visit" (OPEN, or PAYMENT_REQUESTED — staff marked it
+    // awaiting payment, but the table hasn't been cleared yet). AVAILABLE
+    // is excluded: a comanda that's AVAILABLE has no order/visit
+    // happening, so its table (if any is still linked from a previous
+    // cycle) isn't actually in use. CLOSED/BLOCKED are excluded for the
+    // same reason they're excluded from PAYABLE_STATUSES.
+    private static final Set<CommandStatus> OCCUPIED_TABLE_STATUSES =
+            EnumSet.of(CommandStatus.OPEN, CommandStatus.PAYMENT_REQUESTED);
 
-    public CommandService(CommandRepository commandRepository) {
+    private final CommandRepository commandRepository;
+    private final DiningTableService diningTableService;
+
+    public CommandService(CommandRepository commandRepository, DiningTableService diningTableService) {
         this.commandRepository = commandRepository;
+        this.diningTableService = diningTableService;
     }
 
     public Command findByNumber(int number) {
@@ -245,6 +261,57 @@ public class CommandService {
             digits = "55" + digits;
         }
         return digits;
+    }
+
+    /**
+     * Staff-facing link/unlink of a comanda's optional {@link DiningTable}
+     * (FARELO-315, {@code PATCH /api/v1/commands/{number}/table}). No
+     * status precondition, same reasoning as {@link #updateCustomer} —
+     * this isn't a {@code Command} state transition, so a cashier can
+     * associate or clear a table at any point in the comanda's lifecycle.
+     *
+     * <p>Full-replace semantics, same convention as {@link #updateCustomer}:
+     * {@code tableNumber == null} clears the association ({@code
+     * command.setTable(null)}) rather than leaving whatever was there
+     * untouched — omitting the field on the request is how a caller
+     * unlinks a table.
+     *
+     * @throws CommandNotFoundException {@code number} doesn't exist.
+     * @throws com.farelo.api.table.DiningTableNotFoundException {@code
+     *     tableNumber} is given but doesn't exist (via {@link
+     *     DiningTableService#findByNumber}).
+     */
+    @Transactional
+    public Command updateTable(int number, Integer tableNumber) {
+        Command command = findByNumber(number);
+        DiningTable table = tableNumber == null ? null : diningTableService.findByNumber(tableNumber);
+        command.setTable(table);
+        return commandRepository.save(command);
+    }
+
+    /**
+     * The "mesas ocupadas" half of FARELO-315's three occupancy indicators
+     * ({@code GET /api/v1/tables/occupancy}) — the count of distinct
+     * tables currently linked to a comanda in {@link
+     * #OCCUPIED_TABLE_STATUSES}.
+     *
+     * <p>Lives here, in {@code command}, rather than in {@code
+     * com.farelo.api.table.DiningTableService}, even though it's exposed
+     * from {@code DiningTableController} — the same kind of cross-domain
+     * placement decision {@code OrderService#getTotalOwed} (FARELO-143)
+     * already made: this class already depends on {@code table} (for the
+     * {@code Command.table} field and {@link #updateTable}), so adding
+     * this one aggregate query here costs no new dependency direction.
+     * Putting it in {@code table} instead would require {@code
+     * DiningTableService} to depend on {@code CommandRepository}, which
+     * would point the {@code table}↔{@code command} dependency both ways —
+     * exactly the tangle {@code docs/domain-model.md} (line 24, "evitar
+     * dependências cruzadas desnecessárias") and the FARELO-143 precedent
+     * both steer away from. See {@code DiningTableService}'s javadoc for
+     * the other half of this reasoning.
+     */
+    public long countOccupiedTables() {
+        return commandRepository.countDistinctOccupiedTables(OCCUPIED_TABLE_STATUSES);
     }
 
 }

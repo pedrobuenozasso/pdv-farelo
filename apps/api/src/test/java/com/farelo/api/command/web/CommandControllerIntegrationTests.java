@@ -70,6 +70,13 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
     private static final int CUSTOMER_UPDATE_NUMBER = 4;
     private static final int RBAC_CUSTOMER_NUMBER = 5;
 
+    // FARELO-315 — RBAC-only checks for PATCH .../table, so no real
+    // DiningTable row is needed (both fail before the service is
+    // reached). The success/not-found paths for this same endpoint are
+    // exercised in DiningTableControllerIntegrationTests instead, since
+    // those need a real table row to link to.
+    private static final int RBAC_TABLE_NUMBER = 11;
+
     private static final String PASSWORD = "senha-forte-123";
 
     @Autowired
@@ -302,6 +309,29 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsCustomerUpdateWhenCallerRoleIsNotAllowed() throws Exception {
         mockMvc.perform(patch("/api/v1/commands/{number}/customer", RBAC_CUSTOMER_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    // --- FARELO-315: RBAC on PATCH .../table --------------------------------
+
+    @Test
+    void rejectsTableUpdateWithNoAuthorizationHeader() throws Exception {
+        mockMvc.perform(patch("/api/v1/commands/{number}/table", RBAC_TABLE_NUMBER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    // KITCHEN has no business seating a comanda at a table either — same
+    // reasoning as the other role checks in this class.
+    @Test
+    void rejectsTableUpdateWhenCallerRoleIsNotAllowed() throws Exception {
+        mockMvc.perform(patch("/api/v1/commands/{number}/table", RBAC_TABLE_NUMBER)
                         .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))

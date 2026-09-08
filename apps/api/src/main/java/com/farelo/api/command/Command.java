@@ -1,10 +1,14 @@
 package com.farelo.api.command;
 
+import com.farelo.api.table.DiningTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -46,6 +50,25 @@ import java.util.UUID;
  * stored normalized (digits only, country code prepended when missing —
  * see {@code CommandService#normalizePhone}), never however staff typed
  * it.
+ *
+ * <p><b>{@code table}</b> (FARELO-315): an <b>optional</b> reference to the
+ * physical {@link DiningTable} this comanda is currently associated with —
+ * {@code null} means "no table" (delivery/balcão, cardápio QR without
+ * table service), a legitimate and common permanent state, never a
+ * placeholder to fill in later. This is deliberately the only direction of
+ * this relationship: {@code DiningTable} has no reference back to {@code
+ * Command} (see that class's javadoc) — a table can only ever be looked up
+ * from a comanda, not the other way around, which keeps {@code
+ * com.farelo.api.table}'s core (entity/repository/service) free of any
+ * dependency on {@code command}. Written via {@code
+ * CommandService#updateTable} ({@code PATCH
+ * /api/v1/commands/{number}/table}), same full-replace convention as
+ * {@code updateCustomer}. {@code Order} gains no equivalent field: it
+ * already references {@code Command} (mandatory {@code @ManyToOne}), so a
+ * table associated with the order's comanda is already reachable
+ * transitively — a second, redundant reference directly on {@code Order}
+ * would risk disagreeing with the one on {@code Command}, which is worse
+ * than not having it.
  */
 @Entity
 @Table(name = "command")
@@ -70,6 +93,16 @@ public class Command {
 
     @Column(name = "customer_phone")
     private String customerPhone;
+
+    // Optional — see this field's own javadoc above. EAGER, same
+    // pragmatic choice already made project-wide for small,
+    // frequently-needed @ManyToOne associations (avoids a
+    // LazyInitializationException on CommandResponse#from reading
+    // getTable() outside a transaction, the exact lesson FARELO-055's
+    // JOIN FETCH already documents for a similar case).
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "table_id")
+    private DiningTable table;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -131,6 +164,14 @@ public class Command {
 
     public void setCustomerPhone(String customerPhone) {
         this.customerPhone = customerPhone;
+    }
+
+    public DiningTable getTable() {
+        return table;
+    }
+
+    public void setTable(DiningTable table) {
+        this.table = table;
     }
 
     public OffsetDateTime getCreatedAt() {

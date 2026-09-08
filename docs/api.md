@@ -2820,4 +2820,240 @@ subseção FARELO-157, para a tabela completa com o raciocínio por aresta):
   }
   ```
 
+### `POST /api/v1/customers`
+
+Registra um novo `Customer` no cadastro. (FARELO-313)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT`** — lista mais ampla
+que `POST /api/v1/categories`/`POST /api/v1/products` (`ADMIN`/`MANAGER`
+apenas): cadastrar um cliente é ação operacional de quem atende, não
+autoria de cardápio. Ver a seção `customer` de `docs/domain-model.md`
+para o raciocínio completo.
+
+**Request body**
+
+```json
+{
+  "name": "Maria Souza",
+  "phone": "(31) 99876-5432"
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
+| `phone` | string | não | Aceita pontuação de telefone comum; normalizado no servidor (dígitos + DDI) — mesma heurística de `CommandService#normalizePhone` |
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/customers/{id}`.
+
+```json
+{
+  "id": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "name": "Maria Souza",
+  "phone": "5531998765432",
+  "createdAt": "2026-09-01T13:00:00Z",
+  "updatedAt": "2026-09-01T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `name` ausente/em branco, ou `phone` com caracteres
+  fora do padrão esperado, `code: "VALIDATION_ERROR"`.
+- `401 Unauthorized`/`403 Forbidden` — sem token ou papel fora dos
+  permitidos acima.
+
+Sem `PUT`/`DELETE` neste ticket — só cadastro e busca.
+
+### `GET /api/v1/customers`
+
+Busca clientes por substring de `name` OU `phone` (case-insensitive no
+nome), ordenados por `name`. (FARELO-313)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT`** — diferente de
+`GET /api/v1/categories`/`GET /api/v1/products` (públicos): não existe
+consumidor anônimo para dados de cliente. Ver `docs/domain-model.md`.
+
+**Query params**
+
+| Campo | Obrigatório | Observações |
+|---|---|---|
+| `query` | não | Ausente/vazio retorna todos os clientes cadastrados, ordenados por nome |
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+    "name": "Maria Souza",
+    "phone": "5531998765432",
+    "createdAt": "2026-09-01T13:00:00Z",
+    "updatedAt": "2026-09-01T13:00:00Z"
+  }
+]
+```
+
+### `PATCH /api/v1/commands/{number}/table`
+
+Associa ou desvincula a `DiningTable` de uma comanda. (FARELO-315)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT`** — mesma lista de
+`PATCH .../customer` (FARELO-190/191): ação de front-of-house, sem
+implicação financeira.
+
+**Full-replace**, mesma semântica de `PATCH .../customer`: ausência (ou
+`null`) de `tableNumber` desvincula a mesa atualmente associada.
+
+**Request body**
+
+```json
+{
+  "tableNumber": 12
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `tableNumber` | int | não | Precisa apontar para uma `DiningTable` existente quando enviado; `@Positive` (não valida quando ausente/`null`) |
+
+**Response — `200 OK`**
+
+`CommandResponse` (mesmo formato de `GET`/`POST .../open`/`PATCH
+.../customer`) com o novo campo `tableNumber` (FARELO-315) refletindo o
+vínculo atual, `null` quando não há mesa associada:
+
+```json
+{
+  "id": "b3f1c2e0-6c9a-4a2b-9e3a-1a2b3c4d5e6f",
+  "number": 12,
+  "status": "OPEN",
+  "customerName": null,
+  "customerPhone": null,
+  "tableNumber": 12,
+  "createdAt": "2026-09-01T13:00:00Z",
+  "updatedAt": "2026-09-01T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `401 Unauthorized`/`403 Forbidden` — sem token ou papel fora dos
+  permitidos acima.
+- `400 Bad Request` — `tableNumber` não-positivo enviado explicitamente,
+  `code: "VALIDATION_ERROR"`.
+- `404 Not Found` — `number` não corresponde a nenhuma comanda existente
+  (`code: "COMMAND_NOT_FOUND"`), **ou** `tableNumber` enviado não
+  corresponde a nenhuma `DiningTable` existente (`code:
+  "TABLE_NOT_FOUND"`).
+
+### `POST /api/v1/tables`
+
+Cria uma `DiningTable`. (FARELO-315)
+
+**Requer: `ADMIN`, `MANAGER`** — mesma lista de `POST
+/api/v1/categories`/`POST /api/v1/products`: montar o layout físico do
+salão é back-office pouco frequente, ao contrário do cadastro de cliente
+acima. Ver `docs/domain-model.md`, seção `table`.
+
+**Request body**
+
+```json
+{
+  "number": 12,
+  "capacity": 4
+}
+```
+
+| Campo | Tipo | Obrigatório | Observações |
+|---|---|---|---|
+| `number` | int | sim | Único — `409 Conflict` se já existir outra mesa com o mesmo número |
+| `capacity` | int | sim | `@Positive`, sem `CHECK` no banco (mesma escolha de `OrderItem.quantity`) |
+
+**Response — `201 Created`**
+
+Header `Location: /api/v1/tables/{id}`.
+
+```json
+{
+  "id": "8a1b2c3d-4e5f-6789-0abc-def123456789",
+  "number": 12,
+  "capacity": 4,
+  "createdAt": "2026-09-01T13:00:00Z",
+  "updatedAt": "2026-09-01T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `400 Bad Request` — `number`/`capacity` ausente ou não-positivo,
+  `code: "VALIDATION_ERROR"`.
+- `401 Unauthorized`/`403 Forbidden` — sem token ou papel fora de
+  `ADMIN`/`MANAGER`.
+- `409 Conflict` — `number` já pertence a outra mesa:
+
+  ```json
+  {
+    "code": "TABLE_NUMBER_ALREADY_EXISTS",
+    "message": "Dining table number already exists: 12",
+    "correlationId": "..."
+  }
+  ```
+
+### `GET /api/v1/tables`
+
+Lista todas as mesas, ordenadas por `number`. (FARELO-315)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT`** — protegido (sem
+consumidor anônimo, mesma divergência do padrão "listagem pública" de
+`catalog` já documentada em `customer` acima), mas com a lista mais ampla
+porque quem trabalha o salão precisa ver o mapa de mesas.
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": "8a1b2c3d-4e5f-6789-0abc-def123456789",
+    "number": 12,
+    "capacity": 4,
+    "createdAt": "2026-09-01T13:00:00Z",
+    "updatedAt": "2026-09-01T13:00:00Z"
+  }
+]
+```
+
+### `GET /api/v1/tables/occupancy`
+
+Retorna os indicadores de ocupação do salão. (FARELO-315)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT`** — mesma lista de
+`GET /api/v1/tables` acima.
+
+Dos três indicadores do levantamento Sischef ("Mesas ocupadas", "Qtde de
+Pessoas", "Ocupação %"), só os dois primeiros — renomeados
+`occupiedTables`/`occupancyPercentage` — estão implementados. **"Qtde de
+Pessoas" ficou de fora deliberadamente** — ver a seção `table` de
+`docs/domain-model.md` para o porquê (exigiria um campo de headcount que
+não existe hoje em `Command`/`DiningTable`, fora do escopo deste ticket).
+
+Uma mesa conta como "ocupada" quando está vinculada (`Command.table`) a
+uma comanda com `status` `OPEN` ou `PAYMENT_REQUESTED`; a contagem é por
+mesa distinta, não por comanda.
+
+**Response — `200 OK`**
+
+```json
+{
+  "occupiedTables": 3,
+  "totalTables": 10,
+  "occupancyPercentage": 30.0
+}
+```
+
+`occupancyPercentage` é `0.0` quando não há nenhuma mesa cadastrada
+(evita divisão por zero), arredondado para uma casa decimal.
+
 _(demais endpoints a preencher conforme implementados)_

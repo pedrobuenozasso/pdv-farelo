@@ -8,8 +8,9 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 |---|---|---|
 | `security` | `User` (contas de quem opera o sistema), futura autenticação/RBAC | Em andamento |
 | `catalog` | `Product`, `Category` — fonte única de verdade do cardápio | Em andamento |
-| `customer` | Dados do cliente coletados no fluxo de pedido (nome, WhatsApp) | Snapshot simples em `orders` (ver seção `ordering`) — domínio próprio ainda **não iniciado** |
+| `customer` | `Customer` — cadastro pesquisável de clientes (nome, telefone), independente do snapshot em `orders`/`command` | Em andamento (FARELO-313) |
 | `command` | `Command` (comanda) e seu ciclo de vida | Em andamento |
+| `table` | `DiningTable` (mesa física do salão) e indicadores de ocupação, com vínculo opcional em `Command` | Em andamento (FARELO-315) |
 | `ordering` | `Order`, `OrderItem`, snapshot de preço, histórico de status | Em andamento |
 | `kitchen` | KDS — visualização e transição de status de preparo | Não iniciado — `GET /api/v1/orders` (fila da cozinha, FARELO-059) já existe, mas ficou em `ordering` por enquanto; ver nota na seção `ordering` abaixo |
 | `printing` | `Printer`, `PrintJob`, integração com Edge Agent | Em andamento |
@@ -531,6 +532,142 @@ follow-up não ticketado que já aconteceu com FARELO-019).
   interna da validação de fechamento; ver a subseção FARELO-143 em
   `payment` para o raciocínio completo (dependência cross-domain,
   semântica de comparação, exclusão de `CANCELLED`, testes).
+
+## customer
+
+Pacote: `com.farelo.api.customer`. Domínio reservado na tabela acima desde
+FARELO-045/FARELO-050 ("domínio próprio ainda não iniciado") — este
+ticket é o que efetivamente o inicia.
+
+- **`Customer`** (FARELO-313): entidade JPA — `id` (UUID, mesma estratégia
+  de `Category`), `name` (String, obrigatório), `phone` (String,
+  opcional, sempre armazenado normalizado — mesma heurística de
+  `CommandService#normalizePhone`, deliberadamente duplicada aqui em vez
+  de extraída para um utilitário compartilhado: é a segunda ocorrência
+  dessa lógica no código, mas extrair um helper para dois consumidores
+  ainda seria abstração prematura; revisitar se um terceiro aparecer),
+  `createdAt`/`updatedAt` (UTC). Tabela `customer` criada pela migration
+  `V39__create_customer_table.sql`, com índice em `phone` (o principal
+  caso de uso de busca). Sem `UNIQUE` em `phone` — política de
+  deduplicação é uma decisão de produto fora do escopo de "criar
+  cadastro" deste ticket.
+
+  **Decisão explícita (pedida no ticket): `Order.customerName`/
+  `customerPhone` continuam exatamente como estão.** Este ticket não
+  migra, não substitui e não modifica esse mecanismo — nenhuma linha de
+  `OrderController`/`OrderService`/`Order` foi tocada. Também não modifica
+  `Command.customerName`/`customerPhone` (FARELO-190/191, o registro
+  central "quem está nesta comanda agora"). `Customer` é um terceiro
+  conceito, deliberadamente desacoplado dos outros dois: um cadastro
+  pesquisável de pessoas através de múltiplas visitas/comandas — o gatilho
+  que a própria seção `ordering` acima já havia nomeado para quando o
+  domínio `customer` deveria começar a existir de verdade. A opção mais
+  simples (não tocar no snapshot existente, tratar `Customer` como fonte
+  opcional futura para preenchê-lo) foi escolhida em vez de qualquer
+  alternativa que reescrevesse `Order`/`Command` — não há evidência de que
+  o snapshot esteja errado, só que faltava uma capacidade de *busca*.
+  Vincular `Customer` ao fluxo de criação de pedido (a "hook no fluxo do
+  PDV" mencionada no levantamento original) é escopo do lote sequencial
+  FARELO-312/314/316-320, que já toca `Order`/`OrderItem` em outro
+  workstream — implementar aqui arriscaria colidir com esse trabalho nos
+  mesmos arquivos.
+
+`POST /api/v1/customers` (criação) e `GET /api/v1/customers?query=` (busca
+por substring de nome OU telefone, case-insensitive; sem `query` retorna
+todos ordenados por nome) — ambos em `CustomerController`, exigindo
+`ADMIN`/`MANAGER`/`CASHIER`/`ATTENDANT` (a mesma lista "front-of-house" de
+`CommandController#open`/`#updateCustomer`, não a lista `ADMIN`+`MANAGER`
+de `CategoryController`/`ProductController` — cadastrar/buscar um cliente
+é ação operacional de quem atende, não autoria de cardápio). `GET`
+também é protegido, ao contrário de `GET /api/v1/categories`/`GET
+/api/v1/products`: não há consumidor anônimo/público para dados de
+cliente (nome + telefone), então a regra padrão (proteger) se aplica —
+divergência deliberada do padrão "listagem pública" do domínio `catalog`.
+Ver `docs/api.md`.
+
+## table
+
+Pacote: `com.farelo.api.table`. Domínio novo — não constava na tabela de
+domínios até este ticket.
+
+- **`DiningTable`** (FARELO-315): entidade JPA representando uma mesa
+  física do salão ("Mesa" no levantamento Sischef,
+  `docs/gaps-sischef-pdv.md` item 3) — `id` (UUID), `number` (int,
+  identificador de negócio único, mesma convenção de `Command.number`,
+  mas criado via API em vez de seed migration — por isso
+  `DiningTableService#create` também valida unicidade em código, não só
+  via `UNIQUE` no banco), `capacity` (int, validado só na camada de DTO
+  via `@Positive`, sem `CHECK` no banco — mesma escolha de
+  `OrderItem.quantity`), `createdAt`/`updatedAt` (UTC). Tabela
+  `dining_table` (não `table` — palavra reservada em SQL, mesma razão de
+  `orders` não ser `order`), criada pela migration
+  `V40__create_dining_table_table.sql`. Classe Java nomeada
+  `DiningTable`, não `Table`, para não colidir com a anotação
+  `jakarta.persistence.Table` já importada no mesmo arquivo.
+
+  **Vínculo em `Command`, não em `Order`, e só numa direção**:
+  `Command.table` (`@ManyToOne` opcional, coluna `table_id`, migration
+  `V41__add_command_table_id_column.sql`) é a **única** ponta dessa
+  relação — `DiningTable` não tem nenhuma referência de volta a
+  `Command`, o que mantém o núcleo de `table` (entidade/repositório/
+  serviço) livre de qualquer dependência de `command`. `Order` não ganha
+  campo equivalente: já referencia `Command` obrigatoriamente, então uma
+  mesa associada à comanda do pedido já é alcançável transitivamente — um
+  segundo campo direto em `Order` duplicaria o dado com risco de
+  divergir do valor em `Command`. Nullable, sem default: `null` significa
+  "sem mesa" (delivery/balcão, cardápio QR sem atendimento de mesa) — um
+  estado legítimo e permanente, nunca obrigatório, preservando todo fluxo
+  de comanda-sem-mesa que já existia. Editado via
+  `CommandService#updateTable` (`PATCH /api/v1/commands/{number}/table`,
+  mesma semântica full-replace de `updateCustomer`; ausência/`null` de
+  `tableNumber` desvincula).
+
+  **Indicadores de ocupação** (`GET /api/v1/tables/occupancy`,
+  `DiningTableController#occupancy`): dos três indicadores do
+  levantamento Sischef ("Mesas ocupadas", "Qtde de Pessoas", "Ocupação %
+  = mesas ocupadas / total"), apenas os dois primeiros — "Mesas ocupadas"
+  e "Ocupação %" — foram implementados. **"Qtde de Pessoas" ficou de
+  fora deliberadamente**: exigiria capturar um número real de pessoas
+  sentadas em algum ponto do fluxo de abertura de comanda/pedido, e nem
+  `DiningTable.capacity` (capacidade máxima, não ocupação real) nem
+  `Command` guardam esse dado hoje — adicioná-lo tocaria exatamente a
+  fronteira "não tocar em OrderController/OrderService/telas de PDV" que
+  este ticket respeitou; fica como lacuna conhecida para um ticket
+  futuro (ex.: um campo `partySize` capturado na abertura da comanda).
+
+  **Onde a contagem de "mesas ocupadas" mora, e por quê**: em
+  `CommandService#countOccupiedTables` (pacote `command`), não em
+  `DiningTableService` (pacote `table`) — mesmo tipo de decisão de
+  posicionamento cross-domain que `OrderService#getTotalOwed` (FARELO-143)
+  já tomou. `command` já depende de `table` (pelo campo `Command.table` e
+  por `CommandService#updateTable`, que usa `DiningTableService` para
+  resolver um número de mesa); colocar a agregação em `table` exigiria o
+  inverso — `DiningTableService` dependendo de `CommandRepository` —, o
+  que apontaria a dependência `table`↔`command` nas duas direções ao
+  mesmo tempo, exatamente o tipo de acoplamento que a introdução deste
+  documento (linha 24, "evitar dependências cruzadas desnecessárias") e o
+  precedente do FARELO-143 orientam a evitar. `DiningTableController`
+  (pacote `table.web`, distinto do núcleo `table`) é quem finalmente
+  combina os dois números — injeta tanto `DiningTableService` (total de
+  mesas) quanto `CommandService` (mesas ocupadas) —, uma dependência
+  `table.web → command` isolada no controller, sem tocar o núcleo do
+  domínio `table`. "Ocupada" = mesa com `Command.table` apontando para
+  ela e `Command.status` em `OPEN`/`PAYMENT_REQUESTED` (as mesmas duas
+  situações já usadas por `CLOSABLE_STATUSES`/`PAYABLE_STATUSES` para "a
+  comanda é uma visita ativa"), contada por mesa distinta (não por
+  comanda) — nada impede hoje duas comandas referenciarem a mesma mesa,
+  então a contagem não pode dobrar nesse caso.
+
+`POST /api/v1/tables` (criação) exige `ADMIN`/`MANAGER` — mesma lista de
+`CategoryController`/`ProductController`: configurar o layout físico do
+salão é trabalho de back-office pouco frequente, ao contrário do cadastro
+de `Customer` acima (ação operacional de front-of-house). `GET
+/api/v1/tables` e `GET /api/v1/tables/occupancy` exigem
+`ADMIN`/`MANAGER`/`CASHIER`/`ATTENDANT` — protegidos (sem consumidor
+anônimo, mesma divergência do domínio `catalog` já documentada em
+`customer` acima), mas com a lista mais ampla porque quem trabalha o
+salão precisa ver o mapa de mesas/ocupação operacionalmente. Ver
+`docs/api.md`.
 
 ## printing
 
