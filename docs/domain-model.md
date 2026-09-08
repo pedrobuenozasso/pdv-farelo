@@ -20,6 +20,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `fiscal` | `FiscalProfile`, `FiscalDocument`, NFC-e (futuro) | Em andamento |
 | `reporting` | Relatórios e analytics | Não iniciado |
 | `audit` | `AuditLog` de operações sensíveis | Em andamento |
+| `cashier` | `Shift` (Turno), `CashSession` (Caixa), `CashMovement` (sangria/suprimento/despesa/receita) | Em andamento |
 
 Cada domínio deve expor serviços claros e evitar dependências cruzadas desnecessárias.
 
@@ -4250,6 +4251,218 @@ Pacote: `com.farelo.api.payment`.
   (`cleanUpOrderFixtures`) que deleta exatamente as linhas de `OrderItem`/
   `Order`/`Product`/`Category` que a própria classe criou (rastreadas em
   listas de instância), nunca a tabela inteira.
+
+## cashier
+
+Pacote: `com.farelo.api.cashier`. Domínio novo, definido em
+`docs/gaps-sischef-pdv.md` ("Domínio Caixa") a partir de uma comparação
+funcional com o Sischef — deliberadamente isolado de `Order`/`OrderItem`/
+`Command`: nenhuma entidade deste domínio tem uma associação para nenhuma
+delas, e o único acoplamento cross-domain é uma leitura agregada via
+`PaymentRepository` (FARELO-309, conferência), nunca uma escrita.
+
+- **`Shift`** (FARELO-306, "Turno"): entidade JPA — um template nomeado e
+  reutilizável para abrir um `CashSession` (ex. "TURNO 01"), com uma conta
+  de abertura e uma conta de fechamento pré-configuradas (ex. "Caixa
+  Dinheiro" → "Tesouraria"). `id`, `name` (único, `uk_shift_name`,
+  `V39__create_shift_table.sql`), `openingAccountName`/
+  `closingAccountName`, `active` (default `true`, mesmo padrão de
+  soft-deactivation de `Category`/`Product`/`User`), `createdAt`/
+  `updatedAt`.
+
+  **Decisão — contas como `String` livre, não uma entidade `Account`**: o
+  Sischef modela essas contas como referências ao próprio módulo de
+  contabilidade/plano de contas dele. Este código não tem (e não deveria
+  ganhar aqui) nenhum módulo de contabilidade de partida dobrada — o
+  próprio ticket avisa para não copiar o Sischef 1:1 sem necessidade.
+  Construir uma entidade `Account` só para rotular dois campos que nenhum
+  outro código ainda lê seria a abstração especulativa que este projeto
+  evita (AGENTS.md); os dois campos ficam como texto livre até um ticket
+  futuro precisar de algo mais.
+
+  `ShiftRepository#findByName` (pré-checagem de unicidade, mesma razão de
+  `UserRepository#findByEmail`). `ShiftService#create`/`#listAll`/
+  `#getById`. CRUD mínimo (`POST`/`GET /api/v1/shifts`), mesma superfície
+  minimalista de `CategoryController` (sem `PUT`, sem `GET /{id}` — nada
+  ainda precisa editar um Turno depois de criado).
+
+  **RBAC**: os dois endpoints exigem papel — diferente do precedente
+  "primeiro `GET` de um domínio fica aberto" (`Category`/`Payment`/
+  `AuditLog`/`Notification`), que existe especificamente porque um
+  consumidor público real (Cardápio QR) depende daquele `GET`. `Shift` não
+  tem consumidor público nenhum — só existe para ser escolhido na abertura
+  de um `CashSession`, uma ação já inerentemente restrita a quem opera
+  caixa. `POST` exige `ADMIN`/`MANAGER` (autoria de configuração, mesma
+  lista de `CategoryController#create`); `GET` também permite `CASHIER`
+  (precisa ver os Turnos disponíveis para escolher um ao abrir o caixa).
+
+  **Testes**: `ShiftRepositoryIntegrationTests` (mapeamento JPA, unicidade
+  de `name` via `DataIntegrityViolationException`) e
+  `ShiftControllerIntegrationTests` (criação, papéis permitidos/negados,
+  `409 SHIFT_NAME_ALREADY_EXISTS`, validação, listagem ordenada por nome).
+
+- **`CashSession`** (FARELO-307/308/309, "Caixa"): entidade JPA mutável com
+  ciclo de vida — mesmo formato de `Command`/`Order` (não um ledger
+  append-only como `Payment`/`Discount`/`AuditLog`), porque uma abertura de
+  caixa é um processo com estados reais (aberto → fechado → conferido), não
+  um fato instantâneo. `id`, `shift` (`@ManyToOne` obrigatório,
+  `updatable = false` — fixado na abertura), `openedByUserId`/
+  `openedByUserName` (par denormalizado id+nome, mesma convenção de
+  `Discount#appliedByUserId`/`#appliedByUserName` e
+  `OrderItem#cancelledByUserId`/`#cancelledByUserName` — sobrevive a uma
+  renomeação/desativação futura do usuário, sem FK para `app_user`),
+  `openedAt`, `status` (`CashSessionStatus`: `OPEN`/`CLOSED`),
+  `closingAmount`/`closedAt`/`closedByUserId`/`closedByUserName`
+  (nuláveis até o fechamento), `reconciliationStatus`
+  (`CashSessionReconciliationStatus`: `PENDING`/`MATCHED`/`MISMATCHED`,
+  default `PENDING`), `expectedAmount`/`reconciliationDifference`/
+  `reconciledAt`/`reconciledByUserId`/`reconciledByUserName` (nuláveis até
+  a conferência), `createdAt`/`updatedAt`. Tabela `cash_session`, criada
+  por `V40__create_cash_session_table.sql`.
+
+  **Decisão — tabela completa de uma vez (FARELO-307), não uma coluna por
+  ticket como `fiscal_profile` (V30/V32/V33 incrementais)**: ao contrário
+  daquela série (cada coluna era um atributo fiscal independente chegando
+  em ticket separado), fechamento e conferência são duas facetas
+  fortemente acopladas do mesmo ciclo de vida de uma única entidade — mesmo
+  raciocínio que já levou `command.status` (`V5__create_command_table.sql`)
+  a declarar o `CHECK` com os cinco valores completos desde o primeiro
+  ticket (FARELO-030), mesmo com as transições para `CLOSED`/`BLOCKED`
+  chegando só em tickets futuros (FARELO-032+). Duas constraints de
+  consistência, mesmo estilo defensivo de `ck_discount_percentage_scope`
+  (V37): `ck_cash_session_closed_scope` (as quatro colunas de fechamento
+  são todas `NULL` ou todas `NOT NULL`, nunca uma mistura) e
+  `ck_cash_session_reconciliation_scope` (idem para as colunas de
+  conferência).
+
+  **FARELO-307 — abertura**: `CashSessionService#open(UUID shiftId, UUID
+  actorId)`. Resolve o `User` ator via `UserService#getById` (mesmo padrão
+  `DiscountService#applyFixedAmount`/`#applyPercentage` já usam — recebe um
+  id, não um par id+nome espalhado). **Regra "um caixa aberto por vez por
+  operador"**: decisão própria deste ticket (o texto do ticket pedia para
+  decidir, não copiar o Sischef 1:1) — `CashSessionRepository
+  #findByOpenedByUserIdAndStatus(userId, OPEN)` checa se o operador já tem
+  uma sessão aberta antes de permitir uma nova; se sim, `409
+  CashSessionAlreadyOpenException`. Deliberadamente **não** restringido
+  por `Shift`: o mesmo template ("TURNO 01") pode estar em uso por vários
+  operadores simultaneamente em caixas diferentes — a restrição é sobre a
+  pessoa, não sobre o template, mesma leitura do "reaproveitado a cada
+  abertura" do `gaps-sischef-pdv.md`.
+
+  **FARELO-308 — fechamento**: `CashSessionService#close(UUID id,
+  BigDecimal closingAmount, UUID actorId)`. Precondição: sessão precisa
+  estar `OPEN` (`findOpen`, mesmo formato "resolve + valida, sem save" de
+  `CommandService#findForPayment`/`#findClosable` — reaproveitado também
+  por `CashMovementService`, FARELO-310/311). `409
+  CashSessionNotOpenException` caso contrário. Grava `closingAmount`,
+  `closedAt`, `closedByUserId`/`Name`; **não** altera
+  `reconciliationStatus` — fica `PENDING` até a conferência (FARELO-309),
+  exatamente como o Sischef descreve ("fica com status `Não conferido`
+  até alguém rodar a conferência").
+
+  **FARELO-309 — conferência**: `CashSessionService#reconcile(UUID id, UUID
+  actorId)`. Precondição: sessão precisa estar `CLOSED` (`findClosed`, 409
+  `CashSessionNotClosedException`) e ainda não conferida (409
+  `CashSessionAlreadyReconciledException` — conferência roda uma única vez;
+  uma conferência errada é corrigida operacionalmente, não re-executada,
+  mesmo espírito "sem edição in-place" do restante do código, mesmo esta
+  entidade não sendo um ledger append-only). `expectedAmount` é a soma dos
+  `Payment`s `CASH` cuja `createdAt` cai entre `openedAt` e `closedAt` da
+  sessão — via `PaymentRepository#sumAmountByMethodAndCreatedAtBetween`
+  (novo, FARELO-309; único ponto de contato deste domínio com `payment`,
+  leitura pura, nunca escrita — respeita o limite dado no ticket). Compara
+  `closingAmount` contra `expectedAmount`: igual → `MATCHED`, diferente →
+  `MISMATCHED` (guarda a diferença em `reconciliationDifference`, sem
+  tolerância — qualquer centavo de diferença já não confere).
+
+  **Limitação conhecida, deliberadamente não corrigida agora**: `Payment`
+  é o único dado somado em `expectedAmount` porque, na ordem dos tickets
+  (306→311), `CashMovement` (sangria/suprimento/despesa/receita) só existe
+  a partir do FARELO-310 — **depois** de FARELO-309 já ter fixado essa
+  fórmula. Sangrias/suprimentos/despesas/receitas registrados num turno
+  **não entram** no cálculo de conferência hoje, o que é uma lacuna real
+  (uma sangria de R$50 devia reduzir o dinheiro esperado em caixa). Corrigir
+  isso é trabalho de um ticket futuro dedicado a estender
+  `CashSessionService#reconcile` — fora do escopo definido para
+  FARELO-306..311 (nenhum dos seis ticket pede essa integração
+  explicitamente) e citado aqui para não ficar escondido.
+
+  **RBAC**: abrir/fechar exigem `ADMIN`/`MANAGER`/`CASHIER` (mesma lista de
+  `PaymentController#record`/`#close` — manuseio de caixa). **Conferir
+  exige só `ADMIN`/`MANAGER`, sem `CASHIER`** — decisão deliberada de
+  segregação de funções: a conferência é um passo de checagem sobre o
+  trabalho de quem operou o caixa; permitir que o próprio operador
+  autocertifique sua contagem esvaziaria o propósito do controle. Sem
+  precedente direto no código para essa exclusão (nenhum outro domínio
+  distingue "quem faz" de "quem confere" hoje) — decisão própria deste
+  ticket, registrada aqui por ser não-trivial.
+
+  **Testes**: `CashSessionRepositoryIntegrationTests` (mapeamento JPA,
+  constraints de escopo) e `CashSessionControllerIntegrationTests`
+  (abertura, uma sessão aberta por operador, fechamento, conferência
+  `MATCHED`/`MISMATCHED`, precondições de status, RBAC).
+
+- **`CashMovement`** (FARELO-310/311): entidade JPA — ledger append-only,
+  mesmo formato de `Payment`/`Discount` (toda coluna `updatable = false`,
+  sem setters, sem `update`/`delete`; uma correção é um lançamento novo,
+  nunca uma edição). `id`, `cashSession` (`@ManyToOne` obrigatório), `type`
+  (`CashMovementType`: `WITHDRAWAL`/`SUPPLY`/`EXPENSE`/`INCOME`), `amount`
+  (`BigDecimal`, sempre positivo — o sinal/direção vem de `type`, nunca de
+  um valor negativo, mesma convenção de `Payment#amount`), `description`
+  (opcional, mesmo padrão de `Discount#reason`), `createdByUserId`/
+  `createdByUserName` (par denormalizado, mesma convenção de
+  `CashSession#openedByUserId`/`Name`), `createdAt`. Tabela
+  `cash_movement`, criada por `V41__create_cash_movement_table.sql`.
+
+  **Decisão — os quatro valores de `CashMovementType` desde o FARELO-310,
+  não dois agora e dois depois**: diferente de `AuditLog.action` (vocabulário
+  genuinamente desconhecido de antemão, por isso `String` aberta), aqui o
+  conjunto é fechado e já totalmente dado por `docs/gaps-sischef-pdv.md`
+  antes de qualquer um dos dois tickets começar — sangria/suprimento
+  (FARELO-310) e despesa/receita (FARELO-311) são a mesma forma de dado
+  (um movimento de caixa ad-hoc, fora de um pedido), só chegando em dois
+  tickets separados por causa dos objetivos de negócio distintos, não por
+  incerteza sobre o modelo. Fixar o enum e o `CHECK` completos uma vez
+  evita uma segunda migration só para alargar uma constraint cujo valor
+  final já era conhecido.
+
+  **FARELO-310 — sangria e suprimento**: `CashMovementService
+  #recordWithdrawal`/`#recordSupply(UUID cashSessionId, BigDecimal amount,
+  String description, UUID actorId)`. Precondição: sessão precisa estar
+  `OPEN` (`CashSessionService#findOpen`, reaproveitado — mesmo raciocínio
+  de `PaymentService`/`DiscountService` reaproveitando `CommandService
+  #findForPayment`). **Auditável via `AuditLogService`** (pedido explícito
+  do ticket, mesmo seam de `PaymentService#record`/
+  `OrderService#markAsCancelled`) — `AUDIT_ACTION` distinto por tipo
+  (`CASH_WITHDRAWAL_RECORDED`/`CASH_SUPPLY_RECORDED`), `entityType`
+  `"CashMovement"`. Endpoints: `POST
+  /api/v1/cash-sessions/{id}/withdrawals` (sangria), `POST
+  /api/v1/cash-sessions/{id}/supplies` (suprimento) — dois endpoints
+  dedicados, não um único `POST .../movements` com um campo `type`
+  discriminador (diferente de `DiscountRequest#type`): o Sischef trata
+  sangria e suprimento como duas ações de UI distintas, e nomear a URL pela
+  ação (em vez de por um campo no corpo) deixa o log de acesso/APM já
+  autodescritivo por rota, sem precisar abrir o corpo da requisição.
+
+  **FARELO-311 — despesa e receita**: `CashMovementService
+  #recordExpense`/`#recordIncome`, mesma assinatura e mesma precondição
+  `findOpen`, mesmo seam de auditoria (`CASH_EXPENSE_RECORDED`/
+  `CASH_INCOME_RECORDED`). Endpoints irmãos: `POST
+  /api/v1/cash-sessions/{id}/expenses`, `POST
+  /api/v1/cash-sessions/{id}/incomes`. Como a entidade/tabela/enum já
+  ficaram completos no FARELO-310, este ticket não tem migration —
+  só os dois métodos de serviço, os dois endpoints e os testes.
+
+  **RBAC**: todos os quatro endpoints de escrita exigem `ADMIN`/`MANAGER`/
+  `CASHIER` (mesma lista de manuseio de caixa de `CashSessionController
+  #open`/`#close` — sangria/suprimento/despesa/receita são todas ações que
+  o próprio operador do caixa realiza no dia a dia, ao contrário da
+  conferência).
+
+  **Testes**: `CashMovementRepositoryIntegrationTests` (mapeamento JPA,
+  os quatro valores de `type`) e `CashMovementControllerIntegrationTests`
+  (sucesso para os quatro tipos, precondição de sessão `OPEN`, RBAC,
+  validação, `AuditLog` gravado por movimento).
 
 ## fiscal
 

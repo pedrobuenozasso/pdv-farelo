@@ -2220,6 +2220,226 @@ mesma classe (`PaymentController`), não mais em `CommandController` — ver
 `docs/domain-model.md`, subseção FARELO-143 de `payment`, para o
 raciocínio de dependência completo.
 
+### `POST /api/v1/shifts`
+
+Cria um `Shift` (Turno) — template nomeado e reutilizável para abrir um
+`CashSession`, com conta de abertura/fechamento pré-configuradas.
+(FARELO-306)
+
+**Requer: `ADMIN`, `MANAGER`** — autoria de configuração, mesma lista de
+`POST /api/v1/categories`.
+
+**Request body**
+
+```json
+{
+  "name": "TURNO 01",
+  "openingAccountName": "Caixa Dinheiro",
+  "closingAccountName": "Tesouraria"
+}
+```
+
+Todos os três campos são obrigatórios (`@NotBlank`) — ausente/vazio é `400
+VALIDATION_ERROR`.
+
+**Response — `201 Created`**
+
+```json
+{
+  "id": "b1a2c3d4-...",
+  "name": "TURNO 01",
+  "openingAccountName": "Caixa Dinheiro",
+  "closingAccountName": "Tesouraria",
+  "active": true,
+  "createdAt": "2026-09-07T13:00:00Z",
+  "updatedAt": "2026-09-07T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `409 Conflict` — `name` já existe, `code: "SHIFT_NAME_ALREADY_EXISTS"`.
+- `400 Bad Request` — campo obrigatório ausente/vazio, `code:
+  "VALIDATION_ERROR"`.
+
+### `GET /api/v1/shifts`
+
+Lista todos os Turnos, ordenados por `name`. (FARELO-306)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`** — um caixa precisa ver os Turnos
+disponíveis para escolher um ao abrir o caixa; diferente de `GET
+/api/v1/categories`, este endpoint não tem consumidor público (sem
+Cardápio QR envolvido), então fica protegido mesmo sendo o primeiro `GET`
+do domínio.
+
+**Response — `200 OK`**: array de `ShiftResponse` (mesmo formato do `POST`
+acima).
+
+### `POST /api/v1/cash-sessions`
+
+Abre um `CashSession` (Caixa) vinculado a um `Shift` e ao usuário
+autenticado. (FARELO-307)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`** — mesma lista de manuseio de
+caixa de `POST /api/v1/commands/{number}/payments`.
+
+**Request body**
+
+```json
+{ "shiftId": "b1a2c3d4-..." }
+```
+
+**Response — `201 Created`**
+
+```json
+{
+  "id": "c9e8d7f6-...",
+  "shiftId": "b1a2c3d4-...",
+  "shiftName": "TURNO 01",
+  "openedByUserId": "...",
+  "openedByUserName": "Maria",
+  "openedAt": "2026-09-07T13:00:00Z",
+  "status": "OPEN",
+  "closingAmount": null,
+  "closedAt": null,
+  "closedByUserId": null,
+  "closedByUserName": null,
+  "reconciliationStatus": "PENDING",
+  "expectedAmount": null,
+  "reconciliationDifference": null,
+  "reconciledAt": null,
+  "reconciledByUserId": null,
+  "reconciledByUserName": null,
+  "createdAt": "2026-09-07T13:00:00Z",
+  "updatedAt": "2026-09-07T13:00:00Z"
+}
+```
+
+**Erros**
+
+- `404 Not Found` — `shiftId` não existe, `code: "SHIFT_NOT_FOUND"`.
+- `409 Conflict` — o usuário autenticado já tem um caixa `OPEN`, `code:
+  "CASH_SESSION_ALREADY_OPEN"`. Ver `docs/domain-model.md`, seção
+  `cashier`, para o raciocínio ("um caixa aberto por vez por operador",
+  não por Turno).
+
+### `GET /api/v1/cash-sessions` / `GET /api/v1/cash-sessions/{id}`
+
+Lista todos os caixas (mais recente primeiro) ou busca um por id.
+(FARELO-307)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`**.
+
+**Erros** — `GET /{id}`: `404 Not Found`, `code: "CASH_SESSION_NOT_FOUND"`.
+
+### `POST /api/v1/cash-sessions/{id}/close`
+
+Fecha um caixa — informa o valor de fechamento em dinheiro contado.
+(FARELO-308)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`**.
+
+**Request body**
+
+```json
+{ "closingAmount": 250.00 }
+```
+
+`closingAmount` obrigatório, `@PositiveOrZero` (zero é aceito — um caixa
+pode fechar sem nenhum dinheiro físico se toda venda foi cartão/PIX).
+
+**Response — `200 OK`**: mesmo formato de `CashSessionResponse` do `POST`
+de abertura, com `status: "CLOSED"`, `closingAmount`/`closedAt`/
+`closedByUserId`/`closedByUserName` preenchidos. `reconciliationStatus`
+continua `PENDING` — a conferência é um passo separado (FARELO-309).
+
+**Erros**
+
+- `404 Not Found` — `code: "CASH_SESSION_NOT_FOUND"`.
+- `409 Conflict` — o caixa não está `OPEN`, `code: "CASH_SESSION_NOT_OPEN"`.
+- `400 Bad Request` — `closingAmount` ausente/negativo, `code:
+  "VALIDATION_ERROR"`.
+
+### `POST /api/v1/cash-sessions/{id}/reconcile`
+
+Confere um caixa fechado — soma os `Payment`s `CASH` registrados durante a
+janela do caixa (`openedAt` a `closedAt`) e compara contra o
+`closingAmount` informado no fechamento. (FARELO-309)
+
+**Requer: `ADMIN`, `MANAGER`** — deliberadamente sem `CASHIER`: segregação
+de funções (quem opera o caixa não deveria autocertificar sua própria
+contagem). Ver `docs/domain-model.md`, seção `cashier`, para o raciocínio
+completo, incluindo a limitação conhecida (sangria/suprimento/despesa/
+receita ainda não entram nesse cálculo).
+
+Sem corpo de requisição.
+
+**Response — `200 OK`**: `CashSessionResponse` com `reconciliationStatus`
+(`MATCHED`/`MISMATCHED`), `expectedAmount`, `reconciliationDifference`
+(`closingAmount - expectedAmount`), `reconciledAt`, `reconciledByUserId`/
+`Name` preenchidos.
+
+**Erros**
+
+- `404 Not Found` — `code: "CASH_SESSION_NOT_FOUND"`.
+- `409 Conflict` — caixa ainda não fechado, `code:
+  "CASH_SESSION_NOT_CLOSED"`; ou já conferido, `code:
+  "CASH_SESSION_ALREADY_RECONCILED"`.
+
+### `POST /api/v1/cash-sessions/{id}/withdrawals` (sangria) e `POST /api/v1/cash-sessions/{id}/supplies` (suprimento)
+
+Registra uma retirada (sangria) ou um reforço (suprimento) de dinheiro no
+caixa, sem estar ligado a nenhum pedido. (FARELO-310)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`**. Auditável — cada chamada grava
+um `AuditLog` (`CASH_WITHDRAWAL_RECORDED`/`CASH_SUPPLY_RECORDED`).
+
+**Request body**
+
+```json
+{ "amount": 50.00, "description": "Depósito bancário" }
+```
+
+`amount` obrigatório, `@Positive`. `description` opcional.
+
+**Response — `201 Created`**
+
+```json
+{
+  "id": "...",
+  "cashSessionId": "c9e8d7f6-...",
+  "type": "WITHDRAWAL",
+  "amount": 50.00,
+  "description": "Depósito bancário",
+  "createdByUserId": "...",
+  "createdByUserName": "Maria",
+  "createdAt": "2026-09-07T14:00:00Z"
+}
+```
+
+**Erros**
+
+- `404 Not Found` — `code: "CASH_SESSION_NOT_FOUND"`.
+- `409 Conflict` — o caixa não está `OPEN`, `code: "CASH_SESSION_NOT_OPEN"`.
+- `400 Bad Request` — `amount` ausente/zero/negativo, `code:
+  "VALIDATION_ERROR"`.
+
+### `GET /api/v1/cash-sessions/{id}/movements`
+
+Lista os movimentos (`CashMovement`) de um caixa, mais antigo primeiro.
+(FARELO-310)
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`**.
+
+### `POST /api/v1/cash-sessions/{id}/expenses` (despesa) e `POST /api/v1/cash-sessions/{id}/incomes` (receita)
+
+Lança uma despesa ou receita direto do caixa, fora do fluxo de pedido/
+pagamento. (FARELO-311)
+
+Mesmo formato de request/response/erros/RBAC de `.../withdrawals`/
+`.../supplies` acima, só com `type: "EXPENSE"`/`"INCOME"` na resposta e
+`AuditLog` `CASH_EXPENSE_RECORDED`/`CASH_INCOME_RECORDED`.
+
 ### `POST /api/v1/fiscal-profiles`
 
 Cria um perfil fiscal. (FARELO-150)
