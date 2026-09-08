@@ -13,7 +13,7 @@
 // section and docs/api.md's note on POST /api/v1/orders). Both are
 // optional on the wire and nullable on the response.
 
-import { authHeaders, parseResponse } from "./client";
+import { authHeaders, parseResponse, parseVoidResponse } from "./client";
 
 export type OrderStatus =
   "CREATED" | "CONFIRMED" | "PREPARING" | "READY" | "DELIVERED" | "CANCELLED";
@@ -57,6 +57,10 @@ export type Order = {
   assignedUserName: string | null;
   // FARELO-316: free-text "Observação do pedido", order-level.
   note: string | null;
+  // FARELO-319: "Imprimir ao confirmar" — whether this order's kitchen
+  // ticket printed automatically on creation (defaults true on the
+  // backend when omitted from the create request).
+  printOnConfirm: boolean;
   createdAt: string;
 };
 
@@ -66,6 +70,7 @@ export type CreateOrderInput = {
   customerName?: string;
   customerPhone?: string;
   note?: string;
+  printOnConfirm?: boolean;
 };
 
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
@@ -86,6 +91,7 @@ export type CreateBalcaoOrderInput = {
   customerName?: string;
   customerPhone?: string;
   note?: string;
+  printOnConfirm?: boolean;
 };
 
 export async function createBalcaoOrder(
@@ -192,6 +198,48 @@ export async function cancelOrderItem(
     },
   );
   return parseResponse<OrderItem>(response);
+}
+
+// POST /api/v1/orders/{orderId}/items/{itemId}/duplicate (FARELO-318,
+// "Duplicar item") — adds a new line for the same product/quantity, with
+// its own fresh price snapshot.
+export async function duplicateOrderItem(
+  orderId: string,
+  itemId: string,
+): Promise<OrderItem> {
+  const response = await fetch(
+    `/api/v1/orders/${orderId}/items/${itemId}/duplicate`,
+    { method: "POST", headers: authHeaders() },
+  );
+  return parseResponse<OrderItem>(response);
+}
+
+// POST /api/v1/orders/{orderId}/items/{itemId}/resend (FARELO-318,
+// "Renotificar item") — queues one more kitchen ticket for a single item,
+// without reprinting the rest of the order. Backend returns a PrintJob;
+// this UI only needs the confirmation that it was queued, so the response
+// isn't typed further here.
+export async function resendOrderItemToProduction(
+  orderId: string,
+  itemId: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/v1/orders/${orderId}/items/${itemId}/resend`,
+    { method: "POST", headers: authHeaders() },
+  );
+  return parseVoidResponse(response);
+}
+
+// POST /api/v1/orders/{orderId}/resend (FARELO-319, "Enviar novamente os
+// itens para produção") — reprints every current (non-cancelled) item of
+// the order, one kitchen ticket per production station, regardless of
+// this order's printOnConfirm flag (a manual resend always works).
+export async function resendOrderToProduction(orderId: string): Promise<void> {
+  const response = await fetch(`/api/v1/orders/${orderId}/resend`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  return parseVoidResponse(response);
 }
 
 // PATCH /api/v1/orders/{id}/waiter (FARELO-314) — assign/reassign the

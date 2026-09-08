@@ -144,6 +144,24 @@ public class OrderService {
     @Transactional
     public OrderWithItems create(
             int commandNumber, List<NewOrderItem> newItems, String customerName, String customerPhone, String note) {
+        return create(commandNumber, newItems, customerName, customerPhone, note, true);
+    }
+
+    /**
+     * Same as {@link #create(int, List, String, String, String)}, plus
+     * {@code printOnConfirm} (FARELO-319, "Imprimir ao confirmar" —
+     * docs/gaps-sischef-pdv.md item 9): whether the automatic kitchen-
+     * ticket printing that {@code OutboxWorker} triggers on {@code
+     * OrderCreated} should actually fire for this order — see {@link
+     * com.farelo.api.printing.PrintJobService#createForOrderIfEnabled(UUID)}
+     * for exactly how this flag is honored. Another additive overload,
+     * same "don't disturb existing callers" reasoning as the {@code note}
+     * one above.
+     */
+    @Transactional
+    public OrderWithItems create(
+            int commandNumber, List<NewOrderItem> newItems, String customerName, String customerPhone,
+            String note, boolean printOnConfirm) {
         Command command = commandService.openForOrdering(commandNumber);
 
         // FARELO-190/191: write-through to the comanda's central customer
@@ -156,7 +174,7 @@ public class OrderService {
         // (FARELO-182), which collects no customer info at all.
         commandService.applyCustomerInfoIfProvided(command, customerName, customerPhone);
 
-        Order order = orderRepository.save(new Order(command, customerName, customerPhone, note));
+        Order order = orderRepository.save(new Order(command, customerName, customerPhone, note, printOnConfirm));
         return buildAndPublish(order, newItems);
     }
 
@@ -188,7 +206,16 @@ public class OrderService {
     @Transactional
     public OrderWithItems createBalcao(
             List<NewOrderItem> newItems, String customerName, String customerPhone, String note) {
-        Order order = orderRepository.save(new Order(customerName, customerPhone, note));
+        return createBalcao(newItems, customerName, customerPhone, note, true);
+    }
+
+    // FARELO-319 overload, same reasoning as
+    // create(int, List, String, String, String, boolean) above.
+    @Transactional
+    public OrderWithItems createBalcao(
+            List<NewOrderItem> newItems, String customerName, String customerPhone,
+            String note, boolean printOnConfirm) {
+        Order order = orderRepository.save(new Order(customerName, customerPhone, note, printOnConfirm));
         return buildAndPublish(order, newItems);
     }
 
@@ -541,6 +568,57 @@ public class OrderService {
         return orderItemRepository.findByIdWithProduct(itemId)
                 .filter(candidate -> candidate.getOrder().getId().equals(orderId))
                 .orElseThrow(() -> new OrderItemNotFoundException(orderId, itemId));
+    }
+
+    /**
+     * "Duplicar item" (FARELO-318, docs/gaps-sischef-pdv.md item 8): adds a
+     * new line to {@code orderId} for the same product/quantity as {@code
+     * itemId} — a fresh {@link OrderItem}, not a copy of the existing row
+     * (it gets its own id, its own {@code createdAt}, and its own price
+     * snapshot re-captured from {@link Product#getPrice()} right now, same
+     * as every other order-item creation path in this codebase — never a
+     * copy of the original's possibly-stale {@code unitPrice}).
+     *
+     * <p><b>Known, deliberate gap: does NOT consume inventory for the
+     * duplicated quantity.</b> {@link InventoryMovementService#consumeForOrder}'s
+     * idempotency key is {@code (ORDER_CONSUMPTION, orderId, ingredientId)}
+     * — per-order, per-ingredient, not per-item (see that method's own
+     * javadoc, "FARELO-097 — idempotency"). Calling it again for this same
+     * {@code orderId} would find the original item's consumption of any
+     * shared ingredient already recorded and silently skip writing a new
+     * row for it — under-deducting stock for the duplicate, not over-
+     * deducting, which is the more dangerous direction to get wrong
+     * silently. Fixing this properly means widening that idempotency key's
+     * granularity (a change to {@code InventoryMovementService}/{@code
+     * InventoryMovementRepository}'s unique index, well outside this
+     * ticket's single-objective scope), so this method leaves it as a
+     * known, intentional gap rather than papering over it with an unsafe
+     * second call — same posture {@link #cancelItem}'s own javadoc already
+     * takes for its own deferred inventory-reversal gap (FARELO-203).
+     *
+     * @throws OrderNotFoundException {@code orderId} doesn't exist.
+     * @throws OrderItemNotFoundException {@code itemId} doesn't exist, or
+     *     belongs to a different order.
+     * @throws OrderNotModifiableException the order is {@code DELIVERED}
+     *     or {@code CANCELLED} (see {@link #ITEM_CANCELLATION_BLOCKED_STATUSES}).
+     * @throws ProductNotAvailableException the original item's product is
+     *     no longer active.
+     */
+    @Transactional
+    public OrderItem duplicateItem(UUID orderId, UUID itemId) {
+        Order order = getById(orderId);
+        if (ITEM_CANCELLATION_BLOCKED_STATUSES.contains(order.getStatus())) {
+            throw new OrderNotModifiableException(orderId, order.getStatus());
+        }
+
+        OrderItem original = getItem(orderId, itemId);
+        Product product = original.getProduct();
+        if (!product.isActive()) {
+            throw new ProductNotAvailableException(product.getId());
+        }
+
+        OrderItem duplicate = new OrderItem(order, product, original.getQuantity(), product.getPrice());
+        return orderItemRepository.save(duplicate);
     }
 
     /**

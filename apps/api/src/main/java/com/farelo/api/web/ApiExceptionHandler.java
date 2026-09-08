@@ -25,6 +25,7 @@ import com.farelo.api.ordering.OrderItemAlreadyCancelledException;
 import com.farelo.api.ordering.OrderItemCancellationNotAllowedException;
 import com.farelo.api.ordering.OrderItemNotFoundException;
 import com.farelo.api.ordering.OrderNotFoundException;
+import com.farelo.api.ordering.OrderNotModifiableException;
 import com.farelo.api.printing.PrintJobInvalidTransitionException;
 import com.farelo.api.printing.PrintJobNotFoundException;
 import com.farelo.api.printing.PrintJobRetryLimitExceededException;
@@ -187,6 +188,15 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleItemDiscountNotSupported(ItemDiscountNotSupportedException ex) {
         return new ErrorResponse("ITEM_DISCOUNT_NOT_SUPPORTED", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: FARELO-318 ("Duplicar item") targets an order that's
+    // DELIVERED or CANCELLED — see OrderNotModifiableException's javadoc
+    // for why this is a distinct code from ORDER_ITEM_CANCELLATION_NOT_ALLOWED.
+    @ExceptionHandler(OrderNotModifiableException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleOrderNotModifiable(OrderNotModifiableException ex) {
+        return new ErrorResponse("ORDER_NOT_MODIFIABLE", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     @ExceptionHandler(PrintJobNotFoundException.class)

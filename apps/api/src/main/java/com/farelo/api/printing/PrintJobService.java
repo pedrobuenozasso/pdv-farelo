@@ -10,6 +10,7 @@ import com.farelo.api.ordering.OrderItem;
 import com.farelo.api.ordering.OrderItemRepository;
 import com.farelo.api.ordering.OrderNotFoundException;
 import com.farelo.api.ordering.OrderRepository;
+import com.farelo.api.ordering.OrderService;
 import com.farelo.api.ordering.OrderStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -158,6 +159,7 @@ public class PrintJobService {
     private final OrderItemRepository orderItemRepository;
     private final PrintJobRepository printJobRepository;
     private final CommandService commandService;
+    private final OrderService orderService;
     private final ObjectMapper objectMapper;
 
     public PrintJobService(
@@ -165,11 +167,13 @@ public class PrintJobService {
             OrderItemRepository orderItemRepository,
             PrintJobRepository printJobRepository,
             CommandService commandService,
+            OrderService orderService,
             ObjectMapper objectMapper) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.printJobRepository = printJobRepository;
         this.commandService = commandService;
+        this.orderService = orderService;
         this.objectMapper = objectMapper;
     }
 
@@ -180,15 +184,31 @@ public class PrintJobService {
      * class javadoc), each with {@code content} snapshotting the command
      * number and that group's item names/quantities as of right now.
      *
-     * @return the created jobs, one per station group found (always at least
-     *         one — an order always has at least one item, enforced at
-     *         creation by {@code OrderRequest.items}' {@code @NotEmpty}).
+     * @return the created jobs, one per station group found among non-
+     *         cancelled items (always at least one for a freshly created
+     *         order — every item starts non-cancelled, and an order always
+     *         has at least one, enforced at creation by {@code
+     *         OrderRequest.items}' {@code @NotEmpty}; can be an empty list
+     *         for the manual resend path below if every item has since
+     *         been cancelled).
      * @throws OrderNotFoundException if no order exists for {@code
      *         orderId} — not expected in practice (the order was written
      *         in the same transaction that published the {@code
      *         OrderCreated} event this method is invoked for), but not
      *         guarded against beyond letting it propagate; see {@code
      *         OutboxWorker}'s javadoc for the resulting behavior.
+     *
+     *         <p>FARELO-319: also reused by {@code
+     *         OrderItemPrintController}/{@code OrderController} for the
+     *         manual "reenviar todos os itens para produção" action —
+     *         cancelled items ({@link OrderItem#isCancelled()}) are
+     *         excluded from every group, same exclusion {@code
+     *         OrderItemRepository#sumOwedByCommand} already applies for
+     *         "what's owed" (FARELO-200/201). This doesn't change the
+     *         automatic {@code OrderCreated} path's behavior in practice —
+     *         nothing can be cancelled yet at the exact moment an order is
+     *         first created — but makes a later manual resend correctly
+     *         skip items cancelled since.
      */
     @Transactional
     public List<PrintJob> createForOrder(UUID orderId) {
@@ -203,6 +223,9 @@ public class PrintJobService {
         // instead of blowing up the whole order's print job creation.
         Map<ProductionStation, List<OrderItem>> itemsByStation = new LinkedHashMap<>();
         for (OrderItem item : items) {
+            if (item.isCancelled()) {
+                continue;
+            }
             itemsByStation.computeIfAbsent(item.getProduct().getProductionStation(), key -> new ArrayList<>())
                     .add(item);
         }
@@ -213,6 +236,71 @@ public class PrintJobService {
             printJobs.add(printJobRepository.save(new PrintJob(order, serialize(content, "order " + orderId))));
         }
         return printJobs;
+    }
+
+    /**
+     * The {@code OutboxWorker}'s {@code OrderCreated} entry point as of
+     * FARELO-319 ("Imprimir ao confirmar", docs/gaps-sischef-pdv.md item
+     * 9): delegates to {@link #createForOrder(UUID)} only if {@code
+     * order.isPrintOnConfirm()} — otherwise a no-op, so an order created
+     * with the checkbox off simply gets no automatic {@link PrintJob} at
+     * all, and staff must trigger printing later via the manual "reenviar
+     * todos os itens" action ({@code createForOrder} itself, called
+     * directly and unconditionally by that action).
+     *
+     * <p><b>Why the flag check lives here, not inside {@link
+     * #createForOrder(UUID)} itself</b>: {@code createForOrder} is a
+     * general "build the print jobs for this order's current items"
+     * utility, used both by this automatic path <em>and</em> by the manual
+     * resend — a manual resend must always work, even for an order created
+     * with {@code printOnConfirm = false} (the flag only opts out of the
+     * <em>automatic</em> behavior, not printing altogether). Gating inside
+     * {@code createForOrder} would incorrectly block the manual path too.
+     *
+     * @throws OrderNotFoundException if no order exists for {@code
+     *         orderId} — same posture as {@link #createForOrder(UUID)}.
+     */
+    @Transactional
+    public List<PrintJob> createForOrderIfEnabled(UUID orderId) {
+        Order order = orderRepository.findByIdWithCommand(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        if (!order.isPrintOnConfirm()) {
+            return List.of();
+        }
+        return createForOrder(orderId);
+    }
+
+    /**
+     * "Renotificar item" (FARELO-318, docs/gaps-sischef-pdv.md item 8):
+     * queues one more {@code PENDING} {@link PrintJobType#KITCHEN_TICKET}
+     * for a single {@link OrderItem} — e.g. the kitchen says it never got
+     * the ticket for one line, without reprinting (and so re-confusing
+     * staff about) every other item on the order. Distinct from {@link
+     * #createForOrder(UUID)} (every item, grouped by station, triggered
+     * automatically on {@code OrderCreated}) and from "reenviar todos os
+     * itens" (FARELO-319, {@code createForOrder} reused wholesale for a
+     * manual whole-order resend) — this is the narrowest of the three.
+     *
+     * <p>Reuses {@link OrderService#getItem(UUID, UUID)} for the same
+     * "does {@code itemId} really belong to {@code orderId}" check every
+     * other item-scoped action in this codebase already applies (FARELO-
+     * 200/201's {@code cancelItem}, FARELO-317's item discount) — one
+     * source of truth for that check rather than a fourth copy of it here.
+     *
+     * @throws OrderNotFoundException {@code orderId} doesn't exist.
+     * @throws com.farelo.api.ordering.OrderItemNotFoundException {@code
+     *     itemId} doesn't exist, or belongs to a different order.
+     */
+    @Transactional
+    public PrintJob createForOrderItem(UUID orderId, UUID itemId) {
+        Order order = orderRepository.findByIdWithCommand(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        OrderItem item = orderService.getItem(orderId, itemId);
+
+        PrintJobContent content = PrintJobContent.from(
+                order, item.getProduct().getProductionStation(), List.of(item));
+        return printJobRepository.save(
+                new PrintJob(order, serialize(content, "order " + orderId + " item " + itemId)));
     }
 
     /**

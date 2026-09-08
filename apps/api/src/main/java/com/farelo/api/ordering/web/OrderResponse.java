@@ -38,6 +38,7 @@ public record OrderResponse(
         UUID assignedUserId,
         String assignedUserName,
         String note,
+        boolean printOnConfirm,
         OffsetDateTime createdAt) {
 
     public static OrderResponse from(OrderWithItems result) {
@@ -59,6 +60,7 @@ public record OrderResponse(
                 order.getAssignedUserId(),
                 order.getAssignedUserName(),
                 order.getNote(),
+                order.isPrintOnConfirm(),
                 order.getCreatedAt());
     }
 

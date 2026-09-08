@@ -14,11 +14,19 @@ import java.util.List;
  * BALCAO"): {@code items} (required, reuses {@link OrderItemRequest}), the
  * same optional {@code customerName}/{@code customerPhone} snapshot pair
  * every order creation flow accepts, and the same optional {@code note}
- * (FARELO-316).
+ * (FARELO-316)/{@code printOnConfirm} (FARELO-319) fields — see {@link
+ * CreateOrderRequest#printOnConfirmOrDefault()}'s javadoc for why that one
+ * is a {@code Boolean} wrapper.
  */
 public record CreateBalcaoOrderRequest(
         @NotEmpty @Valid List<OrderItemRequest> items,
         String customerName,
         String customerPhone,
-        @Size(max = 500, message = "note deve ter no máximo 500 caracteres") String note) {
+        @Size(max = 500, message = "note deve ter no máximo 500 caracteres") String note,
+        Boolean printOnConfirm) {
+
+    public boolean printOnConfirmOrDefault() {
+        return printOnConfirm == null || printOnConfirm;
+    }
+
 }

@@ -26,11 +26,25 @@ import java.util.List;
  * capped at 500 characters — same length {@code
  * OrderItemCancelRequest#description}/{@code DiscountRequest#reason}
  * already use for a free-text field on this codebase.
+ *
+ * <p>{@code printOnConfirm} (FARELO-319, "Imprimir ao confirmar") is a
+ * {@code Boolean} wrapper, not a primitive {@code boolean} — a request
+ * that omits the field entirely (the common case — most callers never
+ * think about this checkbox) must default to {@code true} (see {@link
+ * #printOnConfirmOrDefault()}), not silently coerce to Jackson's
+ * primitive-boolean default of {@code false}, which would invert the
+ * feature's own stated default.
  */
 public record CreateOrderRequest(
         @NotNull Integer commandNumber,
         @NotEmpty @Valid List<OrderItemRequest> items,
         String customerName,
         String customerPhone,
-        @Size(max = 500, message = "note deve ter no máximo 500 caracteres") String note) {
+        @Size(max = 500, message = "note deve ter no máximo 500 caracteres") String note,
+        Boolean printOnConfirm) {
+
+    public boolean printOnConfirmOrDefault() {
+        return printOnConfirm == null || printOnConfirm;
+    }
+
 }

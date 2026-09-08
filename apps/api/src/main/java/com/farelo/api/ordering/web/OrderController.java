@@ -59,7 +59,8 @@ public class OrderController {
                 .toList();
 
         OrderWithItems result = orderService.create(
-                request.commandNumber(), items, request.customerName(), request.customerPhone(), request.note());
+                request.commandNumber(), items, request.customerName(), request.customerPhone(), request.note(),
+                request.printOnConfirmOrDefault());
 
         // No GET /api/v1/orders/{id} yet (future ticket) — the Location
         // header still names the resource's URI, which is correct even
@@ -89,7 +90,8 @@ public class OrderController {
                 .toList();
 
         OrderWithItems result = orderService.createBalcao(
-                items, request.customerName(), request.customerPhone(), request.note());
+                items, request.customerName(), request.customerPhone(), request.note(),
+                request.printOnConfirmOrDefault());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/orders/{id}")
@@ -209,6 +211,17 @@ public class OrderController {
         OrderItem item = orderService.cancelItem(
                 orderId, itemId, request.reason(), request.description(), principal.userId());
         return OrderItemResponse.from(item);
+    }
+
+    // FARELO-318 ("Duplicar item", docs/gaps-sischef-pdv.md item 8): adds a
+    // new line for the same product/quantity as itemId. Same role list as
+    // cancelItem above — the same class of front-of-house line-item
+    // action, made from the same PDV screen.
+    @PostMapping("/{orderId}/items/{itemId}/duplicate")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
+    public OrderItemResponse duplicateItem(@PathVariable UUID orderId, @PathVariable UUID itemId) {
+        OrderItem duplicate = orderService.duplicateItem(orderId, itemId);
+        return OrderItemResponse.from(duplicate);
     }
 
     // FARELO-314: assigns/reassigns/clears the waiter responsible for this

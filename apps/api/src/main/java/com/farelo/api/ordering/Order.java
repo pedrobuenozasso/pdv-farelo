@@ -143,6 +143,14 @@ public class Order {
     @Column(name = "note")
     private String note;
 
+    // FARELO-319 ("Imprimir ao confirmar", docs/gaps-sischef-pdv.md item
+    // 9): defaults true — every order prints automatically on creation
+    // (FARELO-072's existing OrderCreated -> PrintJobService#createForOrder
+    // wiring) unless explicitly turned off. See PrintJobService#
+    // createForOrderIfEnabled's javadoc for exactly how this is honored.
+    @Column(name = "print_on_confirm", nullable = false)
+    private boolean printOnConfirm = true;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -163,23 +171,41 @@ public class Order {
 
     // FARELO-316: adds `note` — see class javadoc, "Design decision —
     // note". The 3-arg overload above stays for every caller (mostly test
-    // fixtures) that has no note to set.
+    // fixtures) that has no note to set. Defaults printOnConfirm to true
+    // (FARELO-319's own default) for every caller that doesn't care.
     public Order(Command command, String customerName, String customerPhone, String note) {
+        this(command, customerName, customerPhone, note, true);
+    }
+
+    // FARELO-319: adds `printOnConfirm` — see class javadoc, "Design
+    // decision — note" (same immediate-neighbor field, same reasoning
+    // applies: set once at creation).
+    public Order(
+            Command command, String customerName, String customerPhone, String note, boolean printOnConfirm) {
         this.command = command;
         this.type = OrderType.COMANDA;
         this.customerName = customerName;
         this.customerPhone = customerPhone;
         this.note = note;
+        this.printOnConfirm = printOnConfirm;
     }
 
     // FARELO-312: the BALCAO counterpart — no Command at all. See class
-    // javadoc, "Design decision — BALCAO".
+    // javadoc, "Design decision — BALCAO". Defaults printOnConfirm to
+    // true, same reasoning as the 4-arg COMANDA overload above.
     public Order(String customerName, String customerPhone, String note) {
+        this(customerName, customerPhone, note, true);
+    }
+
+    // FARELO-319: the BALCAO counterpart of the 5-arg COMANDA overload
+    // above.
+    public Order(String customerName, String customerPhone, String note, boolean printOnConfirm) {
         this.command = null;
         this.type = OrderType.BALCAO;
         this.customerName = customerName;
         this.customerPhone = customerPhone;
         this.note = note;
+        this.printOnConfirm = printOnConfirm;
     }
 
     @PrePersist
@@ -228,6 +254,10 @@ public class Order {
 
     public String getNote() {
         return note;
+    }
+
+    public boolean isPrintOnConfirm() {
+        return printOnConfirm;
     }
 
     public UUID getAssignedUserId() {

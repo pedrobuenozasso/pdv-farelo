@@ -1633,4 +1633,126 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
+    // FARELO-318: "Duplicar item" — adds a new line for the same product/
+    // quantity, with its own fresh price snapshot (never a copy of the
+    // original's possibly-stale unitPrice). See OrderService#duplicateItem's
+    // javadoc.
+    @Test
+    void duplicatesItemWithFreshPriceSnapshot() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+        UUID itemId = firstItemId(orderId);
+
+        // Price changes after the original item was created — the
+        // duplicate must snapshot this new price, not the original's 7.50.
+        Product updated = productRepository.findById(espresso.getId()).orElseThrow();
+        updated.setPrice(new BigDecimal("8.00"));
+        productRepository.save(updated);
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/duplicate", orderId, itemId)
+                        .header("Authorization", "Bearer " + cashierToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.productId").value(espresso.getId().toString()))
+                .andExpect(jsonPath("$.quantity").value(1))
+                .andExpect(jsonPath("$.unitPrice").value(8.00))
+                .andReturn();
+
+        OrderItemResponse duplicate = objectMapper.readValue(
+                result.getResponse().getContentAsString(), OrderItemResponse.class);
+        assertThat(duplicate.id()).isNotEqualTo(itemId);
+
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        assertThat(orderItemRepository.findByOrder(order)).hasSize(2);
+    }
+
+    @Test
+    void returnsConflictWhenDuplicatingItemOnDeliveredOrder() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+        UUID itemId = firstItemId(orderId);
+        setOrderStatus(orderId, OrderStatus.DELIVERED);
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/duplicate", orderId, itemId)
+                        .header("Authorization", "Bearer " + cashierToken()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ORDER_NOT_MODIFIABLE"));
+    }
+
+    @Test
+    void returnsNotFoundWhenDuplicatingUnknownItem() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/duplicate", orderId, UUID.randomUUID())
+                        .header("Authorization", "Bearer " + cashierToken()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ORDER_ITEM_NOT_FOUND"));
+    }
+
+    @Test
+    void rejectsDuplicateItemWithNoAuthorizationHeader() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+        UUID itemId = firstItemId(orderId);
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/duplicate", orderId, itemId))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rejectsDuplicateItemWhenCallerRoleIsNotAllowed() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+        UUID itemId = firstItemId(orderId);
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/duplicate", orderId, itemId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
+                .andExpect(status().isForbidden());
+    }
+
+    // FARELO-319: "Imprimir ao confirmar" — defaults to true when omitted,
+    // and is honored/persisted when explicitly sent false.
+    @Test
+    void createsOrderWithPrintOnConfirmDefaultingToTrue() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}]
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId());
+
+        mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.printOnConfirm").value(true));
+    }
+
+    @Test
+    void createsOrderWithPrintOnConfirmExplicitlyFalse() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}],
+                  "printOnConfirm": false
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.printOnConfirm").value(false))
+                .andReturn();
+
+        OrderResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), OrderResponse.class);
+        Order persisted = orderRepository.findById(response.id()).orElseThrow();
+        assertThat(persisted.isPrintOnConfirm()).isFalse();
+    }
+
 }
