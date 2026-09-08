@@ -1,5 +1,7 @@
 package com.farelo.api.web;
 
+import com.farelo.api.cashier.CashSessionAlreadyOpenException;
+import com.farelo.api.cashier.CashSessionNotFoundException;
 import com.farelo.api.cashier.ShiftNameAlreadyExistsException;
 import com.farelo.api.cashier.ShiftNotFoundException;
 import com.farelo.api.catalog.CategoryNotFoundException;
@@ -351,6 +353,23 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleShiftNameAlreadyExists(ShiftNameAlreadyExistsException ex) {
         return new ErrorResponse("SHIFT_NAME_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // FARELO-307: id given to a CashSession-referencing operation doesn't
+    // exist — same "not found" shape as every other *NotFoundException
+    // handler above.
+    @ExceptionHandler(CashSessionNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleCashSessionNotFound(CashSessionNotFoundException ex) {
+        return new ErrorResponse("CASH_SESSION_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: the acting operator already has an OPEN cash session —
+    // see CashSessionAlreadyOpenException's javadoc.
+    @ExceptionHandler(CashSessionAlreadyOpenException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleCashSessionAlreadyOpen(CashSessionAlreadyOpenException ex) {
+        return new ErrorResponse("CASH_SESSION_ALREADY_OPEN", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {
