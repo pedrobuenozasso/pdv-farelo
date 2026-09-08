@@ -2,6 +2,7 @@ package com.farelo.api.web;
 
 import com.farelo.api.cashier.CashSessionAlreadyOpenException;
 import com.farelo.api.cashier.CashSessionNotFoundException;
+import com.farelo.api.cashier.CashSessionNotOpenException;
 import com.farelo.api.cashier.ShiftNameAlreadyExistsException;
 import com.farelo.api.cashier.ShiftNotFoundException;
 import com.farelo.api.catalog.CategoryNotFoundException;
@@ -370,6 +371,15 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleCashSessionAlreadyOpen(CashSessionAlreadyOpenException ex) {
         return new ErrorResponse("CASH_SESSION_ALREADY_OPEN", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: the session isn't OPEN (FARELO-308's close(), and
+    // FARELO-310/311's CashMovement producers) — see
+    // CashSessionNotOpenException's javadoc.
+    @ExceptionHandler(CashSessionNotOpenException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleCashSessionNotOpen(CashSessionNotOpenException ex) {
+        return new ErrorResponse("CASH_SESSION_NOT_OPEN", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

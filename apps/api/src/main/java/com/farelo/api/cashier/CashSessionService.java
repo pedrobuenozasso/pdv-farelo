@@ -5,6 +5,9 @@ import com.farelo.api.security.UserService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -12,7 +15,11 @@ import java.util.UUID;
  * FARELO-307 gave this class its first two methods, {@link #open(UUID,
  * UUID)} (backing {@code POST /api/v1/cash-sessions}) and {@link
  * #getById(UUID)}/{@link #listAll()} (backing {@code GET
- * /api/v1/cash-sessions}[/{id}]). Depends on {@link ShiftService} to
+ * /api/v1/cash-sessions}[/{id}]). FARELO-308 adds {@link #close(UUID,
+ * java.math.BigDecimal, UUID)} (backing {@code POST
+ * /api/v1/cash-sessions/{id}/close}) and the {@link #findOpen(UUID)}
+ * helper it shares with {@code CashMovementService} (FARELO-310/311).
+ * Depends on {@link ShiftService} to
  * resolve the {@code shiftId} given at open time (404 {@link
  * ShiftNotFoundException} when it doesn't exist) and on {@link UserService}
  * to resolve the acting operator's current name (same {@code UUID actorId}
@@ -104,6 +111,60 @@ public class CashSessionService {
     @Transactional(readOnly = true)
     public List<CashSession> listAll() {
         return cashSessionRepository.findAllWithShiftByOrderByOpenedAtDesc();
+    }
+
+    /**
+     * Resolves a {@link CashSession} that's ready to be closed (FARELO-308)
+     * or to have a {@code CashMovement} recorded against it (FARELO-310/
+     * 311: sangria/suprimento/despesa/receita all require an open session)
+     * — same "resolve + validate, no save" shape as {@code
+     * CommandService#findForPayment}/{@code #findClosable}. Uses {@link
+     * CashSessionRepository#findWithShiftById} (not plain {@code findById})
+     * so the returned session's {@code shift} is safe to read after this
+     * method's transaction (or its caller's) has closed.
+     *
+     * @throws CashSessionNotFoundException {@code id} doesn't exist.
+     * @throws CashSessionNotOpenException the session exists but isn't
+     *     {@code OPEN} (already {@code CLOSED}).
+     */
+    public CashSession findOpen(UUID id) {
+        CashSession session = findWithShift(id);
+        if (session.getStatus() != CashSessionStatus.OPEN) {
+            throw new CashSessionNotOpenException(id, session.getStatus());
+        }
+        return session;
+    }
+
+    private CashSession findWithShift(UUID id) {
+        return cashSessionRepository.findWithShiftById(id)
+                .orElseThrow(() -> new CashSessionNotFoundException(id));
+    }
+
+    /**
+     * Closes a {@link CashSession} (FARELO-308) — records the physical cash
+     * amount counted ({@code closingAmount}), {@code closedAt}, and who
+     * closed it. Does <b>not</b> touch {@code reconciliationStatus} — it
+     * stays {@code PENDING} until a separate reconciliation call
+     * (FARELO-309, a future ticket as of this one), matching {@code
+     * docs/gaps-sischef-pdv.md}'s "fica com status Não conferido até
+     * alguém rodar a conferência".
+     *
+     * @throws CashSessionNotFoundException {@code id} doesn't exist.
+     * @throws CashSessionNotOpenException the session isn't {@code OPEN}
+     *     (already closed).
+     */
+    @Transactional
+    public CashSession close(UUID id, BigDecimal closingAmount, UUID actorId) {
+        CashSession session = findOpen(id);
+        User actor = userService.getById(actorId);
+
+        session.setStatus(CashSessionStatus.CLOSED);
+        session.setClosingAmount(closingAmount);
+        session.setClosedAt(OffsetDateTime.now(ZoneOffset.UTC));
+        session.setClosedByUserId(actor.getId());
+        session.setClosedByUserName(actor.getName());
+
+        return cashSessionRepository.save(session);
     }
 
 }

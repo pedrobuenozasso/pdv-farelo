@@ -32,7 +32,9 @@ import java.util.UUID;
  * cash-handling role list {@code PaymentController#record}/{@code #close}
  * already use. {@link #list}/{@link #getById} allow the same three roles
  * (a read over the same operational data, no stricter need identified
- * yet).
+ * yet). {@link #close} (FARELO-308) reuses that same role list — closing a
+ * caixa is as much a cash-handling action as opening/recording a payment
+ * against one.
  */
 @RestController
 @RequestMapping("/api/v1/cash-sessions")
@@ -72,6 +74,17 @@ public class CashSessionController {
     @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
     public CashSessionResponse getById(@PathVariable UUID id) {
         return CashSessionResponse.from(cashSessionService.getById(id));
+    }
+
+    // FARELO-308. Same cash-handling role list as open() above.
+    @PostMapping("/{id}/close")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
+    public CashSessionResponse close(
+            @PathVariable UUID id,
+            @Valid @RequestBody CashSessionCloseRequest request,
+            AuthenticatedPrincipal principal) {
+        CashSession session = cashSessionService.close(id, request.closingAmount(), principal.userId());
+        return CashSessionResponse.from(session);
     }
 
 }

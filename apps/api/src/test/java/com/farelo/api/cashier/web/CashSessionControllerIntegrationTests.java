@@ -269,4 +269,136 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.code").value("CASH_SESSION_NOT_FOUND"));
     }
 
+    // FARELO-308 -- POST .../close below.
+
+    private UUID openSession(String token, Shift shift) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/cash-sessions")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return objectMapper.readValue(result.getResponse().getContentAsString(), CashSessionResponse.class).id();
+    }
+
+    @Test
+    void closesOpenSessionAndPersistsClosingFields() throws Exception {
+        Shift shift = persistedShift();
+        User cashier = persistedUser(UserRole.CASHIER);
+        UUID id = openSession(tokenFor(cashier), shift);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + tokenFor(cashier))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"closingAmount": 250.00}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"))
+                .andExpect(jsonPath("$.closingAmount").value(250.00))
+                .andExpect(jsonPath("$.closedAt").exists())
+                .andExpect(jsonPath("$.closedByUserId").value(cashier.getId().toString()))
+                .andExpect(jsonPath("$.reconciliationStatus").value("PENDING"));
+
+        assertThat(cashSessionRepository.findById(id).orElseThrow().getStatus())
+                .isEqualTo(com.farelo.api.cashier.CashSessionStatus.CLOSED);
+    }
+
+    @Test
+    void closesWithZeroClosingAmount() throws Exception {
+        Shift shift = persistedShift();
+        UUID id = openSession(tokenFor(UserRole.CASHIER), shift);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"closingAmount": 0}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.closingAmount").value(0));
+    }
+
+    @Test
+    void rejectsClosingAlreadyClosedSession() throws Exception {
+        Shift shift = persistedShift();
+        String token = tokenFor(UserRole.CASHIER);
+        UUID id = openSession(token, shift);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 100}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 100}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CASH_SESSION_NOT_OPEN"));
+    }
+
+    @Test
+    void returnsNotFoundClosingUnknownCashSessionId() throws Exception {
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 100}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CASH_SESSION_NOT_FOUND"));
+    }
+
+    @Test
+    void rejectsCloseWithNoAuthorizationHeader() throws Exception {
+        Shift shift = persistedShift();
+        UUID id = openSession(tokenFor(UserRole.CASHIER), shift);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 100}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    void rejectsCloseWhenCallerRoleIsNotAllowed() throws Exception {
+        Shift shift = persistedShift();
+        UUID id = openSession(tokenFor(UserRole.CASHIER), shift);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 100}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void rejectsNegativeClosingAmountWithStandardErrorFormat() throws Exception {
+        Shift shift = persistedShift();
+        UUID id = openSession(tokenFor(UserRole.CASHIER), shift);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": -10}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void rejectsMissingClosingAmountWithStandardErrorFormat() throws Exception {
+        Shift shift = persistedShift();
+        UUID id = openSession(tokenFor(UserRole.CASHIER), shift);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+
 }
