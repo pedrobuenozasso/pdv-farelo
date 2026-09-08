@@ -22,11 +22,17 @@ import java.util.UUID;
  * {@link OrderCreatedEvent} carries one: a human inspecting {@code
  * outbox_event.payload} directly (e.g. during an incident) can identify which
  * comanda this event is about without joining back to {@code orders}.
+ *
+ * <p>{@code commandNumber} is nullable as of FARELO-312 — {@code null} for
+ * a {@code BALCAO} order (see {@link Order}'s javadoc, "Design decision —
+ * BALCAO"), which has no {@link com.farelo.api.command.Command} to name.
  */
-public record OrderReadyEvent(UUID orderId, int commandNumber) {
+public record OrderReadyEvent(UUID orderId, Integer commandNumber) {
 
     public static OrderReadyEvent from(OrderWithItems result) {
-        return new OrderReadyEvent(result.order().getId(), result.order().getCommand().getNumber());
+        Order order = result.order();
+        Integer commandNumber = order.getCommand() != null ? order.getCommand().getNumber() : null;
+        return new OrderReadyEvent(order.getId(), commandNumber);
     }
 
 }

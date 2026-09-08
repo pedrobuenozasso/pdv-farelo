@@ -111,8 +111,17 @@ public class UserController {
 
     // No active-only filter yet — YAGNI, same as CategoryController/
     // IngredientController's list(), no consumer (Admin) asking for it yet.
+    //
+    // FARELO-314: also allows CASHIER/ATTENDANT (beyond the original
+    // ADMIN+MANAGER of FARELO-123) — the PDV's "assign waiter to this
+    // order" picker (OrderController#assignWaiter) needs the staff roster
+    // to populate itself, and front-of-house staff are exactly who'd use
+    // it day-to-day. Same "low-stakes read, no privilege-escalation risk"
+    // reasoning the class javadoc already gives for widening this one
+    // method beyond the controller's ADMIN-only default — UserResponse
+    // never includes passwordHash regardless of caller.
     @GetMapping
-    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
     public List<UserResponse> list() {
         return userService.listAll().stream()
                 .map(UserResponse::from)

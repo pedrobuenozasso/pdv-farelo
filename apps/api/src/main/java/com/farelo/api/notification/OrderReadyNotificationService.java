@@ -106,15 +106,21 @@ public class OrderReadyNotificationService {
         return Optional.of(notification);
     }
 
+    // FARELO-312: order.getCommand() is null for a BALCAO order (see
+    // Order's javadoc, "Design decision — BALCAO") — "da comanda X" makes
+    // no sense for a counter sale with no comanda, so that phrase is
+    // dropped entirely rather than printing a bogus/missing number.
     private String buildContent(Order order) {
-        int commandNumber = order.getCommand().getNumber();
+        String orderReference = order.getCommand() != null
+                ? "da comanda " + order.getCommand().getNumber()
+                : "do balcão";
         String customerName = order.getCustomerName();
 
         if (customerName != null && !customerName.isBlank()) {
-            return "Olá, " + customerName + "! Seu pedido da comanda " + commandNumber
+            return "Olá, " + customerName + "! Seu pedido " + orderReference
                     + " já está pronto para retirada. Obrigado por escolher o Farelo!";
         }
-        return "Seu pedido da comanda " + commandNumber
+        return "Seu pedido " + orderReference
                 + " já está pronto para retirada. Obrigado por escolher o Farelo!";
     }
 

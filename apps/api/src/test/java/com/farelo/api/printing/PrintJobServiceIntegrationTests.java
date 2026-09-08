@@ -248,6 +248,41 @@ class PrintJobServiceIntegrationTests extends AbstractIntegrationTest {
         return result.order();
     }
 
+    private Order createOrder(boolean printOnConfirm, NewOrderItem... items) {
+        OrderWithItems result = orderService.create(COMMAND_NUMBER, List.of(items), null, null, null, printOnConfirm);
+        createdOrderId = result.order().getId();
+        return result.order();
+    }
+
+    // FARELO-319: createForOrderIfEnabled — the OutboxWorker's real
+    // OrderCreated entry point as of this ticket — honors Order#
+    // isPrintOnConfirm(). See PrintJobService#createForOrderIfEnabled's
+    // javadoc for why the check lives there, not inside createForOrder.
+    @Test
+    void createForOrderIfEnabledSkipsPrintingWhenPrintOnConfirmIsFalse() {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        Order order = createOrder(false, new NewOrderItem(espresso.getId(), 1));
+
+        List<PrintJob> printJobs = printJobService.createForOrderIfEnabled(order.getId());
+
+        assertThat(printJobs).isEmpty();
+        assertThat(printJobRepository.findByOrder(order)).isEmpty();
+    }
+
+    @Test
+    void createForOrderIfEnabledPrintsWhenPrintOnConfirmIsTrue() {
+        Product espresso = createProduct("Café Espresso", new BigDecimal("5.00"), ProductionStation.BAR);
+        // true is also this order's default (Order#printOnConfirm) — passed
+        // explicitly here just to keep the "why does this one print" reason
+        // visible at the call site, matching the false case's own overload.
+        Order order = createOrder(true, new NewOrderItem(espresso.getId(), 1));
+
+        List<PrintJob> printJobs = printJobService.createForOrderIfEnabled(order.getId());
+
+        assertThat(printJobs).hasSize(1);
+        assertThat(printJobRepository.findByOrder(order)).hasSize(1);
+    }
+
     private List<JsonNode> itemsOf(JsonNode content) {
         List<JsonNode> items = new ArrayList<>();
         content.get("items").forEach(items::add);

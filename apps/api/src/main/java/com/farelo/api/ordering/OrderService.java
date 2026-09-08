@@ -128,6 +128,40 @@ public class OrderService {
     @Transactional
     public OrderWithItems create(
             int commandNumber, List<NewOrderItem> newItems, String customerName, String customerPhone) {
+        return create(commandNumber, newItems, customerName, customerPhone, null);
+    }
+
+    /**
+     * Same as {@link #create(int, List, String, String)}, plus {@code
+     * note} — the order-level free-text observation (FARELO-316,
+     * "Observação geral do pedido"; see {@link Order}'s javadoc, "Design
+     * decision — note"). A separate overload rather than widening the
+     * original signature in place: every existing caller (in particular
+     * the public, unauthenticated Cardápio QR checkout via {@code
+     * OrderController#create}) keeps working unchanged, and the {@code
+     * note} field is genuinely optional — most callers have none.
+     */
+    @Transactional
+    public OrderWithItems create(
+            int commandNumber, List<NewOrderItem> newItems, String customerName, String customerPhone, String note) {
+        return create(commandNumber, newItems, customerName, customerPhone, note, true);
+    }
+
+    /**
+     * Same as {@link #create(int, List, String, String, String)}, plus
+     * {@code printOnConfirm} (FARELO-319, "Imprimir ao confirmar" —
+     * docs/gaps-sischef-pdv.md item 9): whether the automatic kitchen-
+     * ticket printing that {@code OutboxWorker} triggers on {@code
+     * OrderCreated} should actually fire for this order — see {@link
+     * com.farelo.api.printing.PrintJobService#createForOrderIfEnabled(UUID)}
+     * for exactly how this flag is honored. Another additive overload,
+     * same "don't disturb existing callers" reasoning as the {@code note}
+     * one above.
+     */
+    @Transactional
+    public OrderWithItems create(
+            int commandNumber, List<NewOrderItem> newItems, String customerName, String customerPhone,
+            String note, boolean printOnConfirm) {
         Command command = commandService.openForOrdering(commandNumber);
 
         // FARELO-190/191: write-through to the comanda's central customer
@@ -140,7 +174,59 @@ public class OrderService {
         // (FARELO-182), which collects no customer info at all.
         commandService.applyCustomerInfoIfProvided(command, customerName, customerPhone);
 
-        Order order = orderRepository.save(new Order(command, customerName, customerPhone));
+        Order order = orderRepository.save(new Order(command, customerName, customerPhone, note, printOnConfirm));
+        return buildAndPublish(order, newItems);
+    }
+
+    /**
+     * Creates a {@code BALCAO} order (FARELO-312) — a walk-up counter sale
+     * with no comanda at all (docs/gaps-sischef-pdv.md item 2). Same price-
+     * snapshot/inventory-consumption/status-history/outbox-publish shape as
+     * {@link #create(int, List, String, String)} (both delegate to {@link
+     * #buildAndPublish(Order, List)}), just skipping every step above that
+     * only makes sense for a comanda: no {@link CommandService#openForOrdering}
+     * (there is no comanda number to resolve), no write-through to a
+     * comanda's central customer record (there is no comanda to write
+     * through to — {@code customerName}/{@code customerPhone} here are
+     * only ever this order's own snapshot, same as {@code Order}'s
+     * javadoc already documents for a comanda order missing that data).
+     *
+     * <p>See {@link Order}'s javadoc, "Design decision — BALCAO", for the
+     * known follow-up this ticket deliberately does not solve: nothing in
+     * {@code payment} can charge a {@code BALCAO} order yet.
+     */
+    @Transactional
+    public OrderWithItems createBalcao(List<NewOrderItem> newItems, String customerName, String customerPhone) {
+        return createBalcao(newItems, customerName, customerPhone, null);
+    }
+
+    // FARELO-316 overload, same "add note without disturbing the original
+    // signature" reasoning as create(int, List, String, String, String)
+    // above.
+    @Transactional
+    public OrderWithItems createBalcao(
+            List<NewOrderItem> newItems, String customerName, String customerPhone, String note) {
+        return createBalcao(newItems, customerName, customerPhone, note, true);
+    }
+
+    // FARELO-319 overload, same reasoning as
+    // create(int, List, String, String, String, boolean) above.
+    @Transactional
+    public OrderWithItems createBalcao(
+            List<NewOrderItem> newItems, String customerName, String customerPhone,
+            String note, boolean printOnConfirm) {
+        Order order = orderRepository.save(new Order(customerName, customerPhone, note, printOnConfirm));
+        return buildAndPublish(order, newItems);
+    }
+
+    // Shared by create()/createBalcao() above (FARELO-312 extraction — this
+    // was create()'s own body until this ticket split it in two): writes
+    // the first OrderStatusHistory entry, validates+snapshots every item's
+    // price, consumes recipe ingredients, and publishes OrderCreated — all
+    // of it independent of whether `order` has a Command or not. The
+    // caller is responsible for persisting `order` itself first (its two
+    // different Command-resolution paths don't belong here).
+    private OrderWithItems buildAndPublish(Order order, List<NewOrderItem> newItems) {
         orderStatusHistoryRepository.save(new OrderStatusHistory(order, null, OrderStatus.CREATED));
 
         List<OrderItem> items = new ArrayList<>();
@@ -451,10 +537,7 @@ public class OrderService {
             String description,
             UUID actorId) {
         Order order = getById(orderId);
-
-        OrderItem item = orderItemRepository.findByIdWithProduct(itemId)
-                .filter(candidate -> candidate.getOrder().getId().equals(orderId))
-                .orElseThrow(() -> new OrderItemNotFoundException(orderId, itemId));
+        OrderItem item = getItem(orderId, itemId);
 
         if (ITEM_CANCELLATION_BLOCKED_STATUSES.contains(order.getStatus())) {
             throw new OrderItemCancellationNotAllowedException(orderId, itemId, order.getStatus());
@@ -467,6 +550,121 @@ public class OrderService {
         item.cancel(actor.getId(), actor.getName(), reason, description);
 
         return orderItemRepository.save(item);
+    }
+
+    /**
+     * Resolves an {@link OrderItem} that belongs to {@code orderId} —
+     * {@link #cancelItem}'s original fetch logic (FARELO-200/201),
+     * extracted here (FARELO-317) so other domains needing "the item {@code
+     * itemId}, but only if it's really part of order {@code orderId}"
+     * (e.g. {@code com.farelo.api.discount.DiscountService}, for an
+     * item-level discount) reuse the same ownership check instead of each
+     * repeating it.
+     *
+     * @throws OrderItemNotFoundException {@code itemId} doesn't exist, or
+     *     exists but belongs to a different order.
+     */
+    public OrderItem getItem(UUID orderId, UUID itemId) {
+        return orderItemRepository.findByIdWithProduct(itemId)
+                .filter(candidate -> candidate.getOrder().getId().equals(orderId))
+                .orElseThrow(() -> new OrderItemNotFoundException(orderId, itemId));
+    }
+
+    /**
+     * "Duplicar item" (FARELO-318, docs/gaps-sischef-pdv.md item 8): adds a
+     * new line to {@code orderId} for the same product/quantity as {@code
+     * itemId} — a fresh {@link OrderItem}, not a copy of the existing row
+     * (it gets its own id, its own {@code createdAt}, and its own price
+     * snapshot re-captured from {@link Product#getPrice()} right now, same
+     * as every other order-item creation path in this codebase — never a
+     * copy of the original's possibly-stale {@code unitPrice}).
+     *
+     * <p><b>Known, deliberate gap: does NOT consume inventory for the
+     * duplicated quantity.</b> {@link InventoryMovementService#consumeForOrder}'s
+     * idempotency key is {@code (ORDER_CONSUMPTION, orderId, ingredientId)}
+     * — per-order, per-ingredient, not per-item (see that method's own
+     * javadoc, "FARELO-097 — idempotency"). Calling it again for this same
+     * {@code orderId} would find the original item's consumption of any
+     * shared ingredient already recorded and silently skip writing a new
+     * row for it — under-deducting stock for the duplicate, not over-
+     * deducting, which is the more dangerous direction to get wrong
+     * silently. Fixing this properly means widening that idempotency key's
+     * granularity (a change to {@code InventoryMovementService}/{@code
+     * InventoryMovementRepository}'s unique index, well outside this
+     * ticket's single-objective scope), so this method leaves it as a
+     * known, intentional gap rather than papering over it with an unsafe
+     * second call — same posture {@link #cancelItem}'s own javadoc already
+     * takes for its own deferred inventory-reversal gap (FARELO-203).
+     *
+     * @throws OrderNotFoundException {@code orderId} doesn't exist.
+     * @throws OrderItemNotFoundException {@code itemId} doesn't exist, or
+     *     belongs to a different order.
+     * @throws OrderNotModifiableException the order is {@code DELIVERED}
+     *     or {@code CANCELLED} (see {@link #ITEM_CANCELLATION_BLOCKED_STATUSES}).
+     * @throws ProductNotAvailableException the original item's product is
+     *     no longer active.
+     */
+    @Transactional
+    public OrderItem duplicateItem(UUID orderId, UUID itemId) {
+        Order order = getById(orderId);
+        if (ITEM_CANCELLATION_BLOCKED_STATUSES.contains(order.getStatus())) {
+            throw new OrderNotModifiableException(orderId, order.getStatus());
+        }
+
+        OrderItem original = getItem(orderId, itemId);
+        Product product = original.getProduct();
+        if (!product.isActive()) {
+            throw new ProductNotAvailableException(product.getId());
+        }
+
+        OrderItem duplicate = new OrderItem(order, product, original.getQuantity(), product.getPrice());
+        return orderItemRepository.save(duplicate);
+    }
+
+    /**
+     * Assigns (or reassigns) the waiter/attendant responsible for {@code
+     * orderId} (FARELO-314, "Garçom responsável pelo pedido"). No status
+     * precondition — unlike the transitions above, this isn't itself an
+     * {@code Order} lifecycle step, and there's no operational reason to
+     * forbid correcting who's serving a table after the fact (e.g. even a
+     * {@code DELIVERED} order's record of who served it is still
+     * meaningful for reporting).
+     *
+     * @throws OrderNotFoundException {@code orderId} doesn't exist.
+     * @throws com.farelo.api.security.UserNotFoundException {@code userId}
+     *     doesn't resolve to a real {@link User}.
+     */
+    @Transactional
+    public OrderWithItems assignWaiter(UUID orderId, UUID userId) {
+        Order order = getById(orderId);
+        User waiter = userService.getById(userId);
+        order.assignWaiter(waiter.getId(), waiter.getName());
+        return withItems(orderRepository.save(order));
+    }
+
+    /**
+     * Clears the waiter assignment (FARELO-314, "removível"). Separate
+     * method from {@link #assignWaiter(UUID, UUID)} rather than accepting a
+     * nullable {@code userId} there — a {@code PATCH .../waiter} with no
+     * body/a null field reads more clearly as its own action ({@code
+     * DELETE}-shaped intent) than an "assign to nobody" edge case of the
+     * assign method; see {@code OrderController} for how the two map onto
+     * one endpoint.
+     */
+    @Transactional
+    public OrderWithItems unassignWaiter(UUID orderId) {
+        Order order = getById(orderId);
+        order.unassignWaiter();
+        return withItems(orderRepository.save(order));
+    }
+
+    // Shared by assignWaiter/unassignWaiter above: wraps an already-saved
+    // Order back into an OrderWithItems for the controller to build a full
+    // OrderResponse from, same shape every other mutation in this class
+    // returns. A fresh fetch (not reused from the caller) since neither
+    // caller already holds the items list.
+    private OrderWithItems withItems(Order order) {
+        return new OrderWithItems(order, orderItemRepository.findByOrder(order));
     }
 
     // Single-origin convenience overload, used by markAsPreparing/

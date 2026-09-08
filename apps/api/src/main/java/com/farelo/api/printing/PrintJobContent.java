@@ -61,7 +61,7 @@ import java.util.List;
  * Agent territory), never a missing key.
  */
 public record PrintJobContent(
-        int commandNumber,
+        Integer commandNumber,
         ProductionStation productionStation,
         List<Item> items,
         String customerName,
@@ -71,13 +71,22 @@ public record PrintJobContent(
     public record Item(String productName, int quantity) {
     }
 
+    // FARELO-312: commandNumber is nullable — null for a BALCAO order (see
+    // Order's javadoc, "Design decision — BALCAO"), which has no Command
+    // to print a number for. Whoever formats the physical ticket (Edge
+    // Agent territory) is expected to print a "BALCÃO" header instead of a
+    // comanda number in that case, the same "explicit signal, not a
+    // silently missing key" posture this record's own javadoc already
+    // documents for a null productionStation.
     public static PrintJobContent from(Order order, ProductionStation productionStation, List<OrderItem> items) {
         List<Item> printItems = items.stream()
                 .map(item -> new Item(item.getProduct().getName(), item.getQuantity()))
                 .toList();
 
+        Integer commandNumber = order.getCommand() != null ? order.getCommand().getNumber() : null;
+
         return new PrintJobContent(
-                order.getCommand().getNumber(),
+                commandNumber,
                 productionStation,
                 printItems,
                 order.getCustomerName(),

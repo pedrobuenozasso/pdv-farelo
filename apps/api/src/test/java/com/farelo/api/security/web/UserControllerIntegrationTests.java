@@ -520,10 +520,13 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.correlationId").exists());
     }
 
+    // FARELO-314: CASHIER/ATTENDANT were added to this endpoint's allowed
+    // roles (see UserController#list's javadoc) — KITCHEN is the role that
+    // still demonstrates the "not allowed" case now.
     @Test
     void rejectsListWhenCallerRoleIsNotAllowed() throws Exception {
         mockMvc.perform(get("/api/v1/users")
-                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"))
                 .andExpect(jsonPath("$.correlationId").exists());
@@ -533,6 +536,22 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
     void allowsListAsManager() throws Exception {
         mockMvc.perform(get("/api/v1/users")
                         .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
+                .andExpect(status().isOk());
+    }
+
+    // FARELO-314: CASHIER/ATTENDANT now allowed too — see
+    // UserController#list's javadoc (the PDV waiter-assignment picker).
+    @Test
+    void allowsListAsCashier() throws Exception {
+        mockMvc.perform(get("/api/v1/users")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void allowsListAsAttendant() throws Exception {
+        mockMvc.perform(get("/api/v1/users")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT)))
                 .andExpect(status().isOk());
     }
 

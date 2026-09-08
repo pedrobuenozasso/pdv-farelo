@@ -45,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -1375,6 +1376,383 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
 
         assertThat(orderItemRepository.sumOwedByCommand(command, OrderStatus.CANCELLED))
                 .isEqualByComparingTo(owedBeforeOrder);
+    }
+
+    // FARELO-312: BALCAO — a walk-up counter sale with no comanda. See
+    // Order's javadoc, "Design decision — BALCAO".
+    @Test
+    void createsBalcaoOrderWithNoCommand() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "items": [{"productId": "%s", "quantity": 2}],
+                  "customerName": "Cliente Balcão"
+                }
+                """.formatted(espresso.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders/balcao")
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.type").value("BALCAO"))
+                .andExpect(jsonPath("$.commandNumber").value(nullValue()))
+                .andExpect(jsonPath("$.status").value("CREATED"))
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.customerName").value("Cliente Balcão"))
+                .andReturn();
+
+        OrderResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), OrderResponse.class);
+
+        Order persisted = orderRepository.findById(response.id()).orElseThrow();
+        assertThat(persisted.getCommand()).isNull();
+        assertThat(persisted.getType().name()).isEqualTo("BALCAO");
+
+        // Same inventory-consumption/outbox-publish shape as a COMANDA
+        // order — proven the same way createsOrderWithItemsAndTransitionsAvailableCommandToOpen
+        // proves a price snapshot: reads the already-persisted OrderItem
+        // back, unaffected by a later product price change.
+        Product updatedEspresso = productRepository.findById(espresso.getId()).orElseThrow();
+        updatedEspresso.setPrice(new BigDecimal("99.99"));
+        productRepository.save(updatedEspresso);
+        OrderItem persistedItem = orderItemRepository.findByOrder(persisted).get(0);
+        assertThat(persistedItem.getUnitPrice()).isEqualByComparingTo(new BigDecimal("7.50"));
+    }
+
+    @Test
+    void balcaoOrderAppearsInKitchenQueue() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "items": [{"productId": "%s", "quantity": 1}]
+                }
+                """.formatted(espresso.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders/balcao")
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        OrderResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), OrderResponse.class);
+
+        // GET /api/v1/orders (kitchen queue, FARELO-059) — must not silently
+        // drop a BALCAO order via an inner JOIN on its (null) command, see
+        // OrderRepository#findByStatusInOrderByCreatedAtAsc's comment.
+        mockMvc.perform(get("/api/v1/orders")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == '" + response.id() + "')]").exists());
+    }
+
+    @Test
+    void rejectsBalcaoOrderWithNoAuthorizationHeader() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "items": [{"productId": "%s", "quantity": 1}]
+                }
+                """.formatted(espresso.getId());
+
+        mockMvc.perform(post("/api/v1/orders/balcao")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rejectsBalcaoOrderWhenCallerRoleIsNotAllowed() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "items": [{"productId": "%s", "quantity": 1}]
+                }
+                """.formatted(espresso.getId());
+
+        mockMvc.perform(post("/api/v1/orders/balcao")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isForbidden());
+    }
+
+    // FARELO-314: assign/reassign/clear the waiter responsible for an
+    // order. See Order's javadoc, "Design decision — assigned waiter".
+    @Test
+    void assignsAndReassignsAndClearsWaiter() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+
+        User waiterCarla = userRepository.save(new User(
+                "Carla", "carla-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD), UserRole.ATTENDANT));
+        User waiterBruno = userRepository.save(new User(
+                "Bruno", "bruno-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode(PASSWORD), UserRole.ATTENDANT));
+
+        // Assign Carla.
+        mockMvc.perform(patch("/api/v1/orders/{id}/waiter", orderId)
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\": \"%s\"}".formatted(waiterCarla.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignedUserId").value(waiterCarla.getId().toString()))
+                .andExpect(jsonPath("$.assignedUserName").value("Carla"));
+
+        Order afterAssign = orderRepository.findById(orderId).orElseThrow();
+        assertThat(afterAssign.getAssignedUserId()).isEqualTo(waiterCarla.getId());
+        assertThat(afterAssign.getAssignedUserName()).isEqualTo("Carla");
+
+        // Reassign to Bruno — "trocável".
+        mockMvc.perform(patch("/api/v1/orders/{id}/waiter", orderId)
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\": \"%s\"}".formatted(waiterBruno.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignedUserName").value("Bruno"));
+
+        // Clear — "removível".
+        mockMvc.perform(patch("/api/v1/orders/{id}/waiter", orderId)
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignedUserId").value(nullValue()))
+                .andExpect(jsonPath("$.assignedUserName").value(nullValue()));
+
+        Order afterClear = orderRepository.findById(orderId).orElseThrow();
+        assertThat(afterClear.getAssignedUserId()).isNull();
+        assertThat(afterClear.getAssignedUserName()).isNull();
+    }
+
+    @Test
+    void returnsNotFoundWhenAssigningUnknownUser() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+
+        mockMvc.perform(patch("/api/v1/orders/{id}/waiter", orderId)
+                        .header("Authorization", "Bearer " + cashierToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\": \"%s\"}".formatted(UUID.randomUUID())))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"));
+    }
+
+    @Test
+    void rejectsAssignWaiterWithNoAuthorizationHeader() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+
+        mockMvc.perform(patch("/api/v1/orders/{id}/waiter", orderId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rejectsAssignWaiterWhenCallerRoleIsNotAllowed() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+
+        mockMvc.perform(patch("/api/v1/orders/{id}/waiter", orderId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden());
+    }
+
+    // FARELO-316: "Observação geral do pedido" — free text at the order
+    // level. See Order's javadoc, "Design decision — note".
+    @Test
+    void createsOrderWithNote() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}],
+                  "note": "Sem açúcar, cliente é diabético"
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.note").value("Sem açúcar, cliente é diabético"))
+                .andReturn();
+
+        OrderResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), OrderResponse.class);
+        Order persisted = orderRepository.findById(response.id()).orElseThrow();
+        assertThat(persisted.getNote()).isEqualTo("Sem açúcar, cliente é diabético");
+    }
+
+    @Test
+    void createsOrderWithNullNoteWhenNotProvided() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}]
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId());
+
+        mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.note").value(nullValue()));
+    }
+
+    @Test
+    void rejectsNoteLongerThan500Characters() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        String tooLong = "a".repeat(501);
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}],
+                  "note": "%s"
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId(), tooLong);
+
+        mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    // FARELO-318: "Duplicar item" — adds a new line for the same product/
+    // quantity, with its own fresh price snapshot (never a copy of the
+    // original's possibly-stale unitPrice). See OrderService#duplicateItem's
+    // javadoc.
+    @Test
+    void duplicatesItemWithFreshPriceSnapshot() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+        UUID itemId = firstItemId(orderId);
+
+        // Price changes after the original item was created — the
+        // duplicate must snapshot this new price, not the original's 7.50.
+        Product updated = productRepository.findById(espresso.getId()).orElseThrow();
+        updated.setPrice(new BigDecimal("8.00"));
+        productRepository.save(updated);
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/duplicate", orderId, itemId)
+                        .header("Authorization", "Bearer " + cashierToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.productId").value(espresso.getId().toString()))
+                .andExpect(jsonPath("$.quantity").value(1))
+                .andExpect(jsonPath("$.unitPrice").value(8.00))
+                .andReturn();
+
+        OrderItemResponse duplicate = objectMapper.readValue(
+                result.getResponse().getContentAsString(), OrderItemResponse.class);
+        assertThat(duplicate.id()).isNotEqualTo(itemId);
+
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        assertThat(orderItemRepository.findByOrder(order)).hasSize(2);
+    }
+
+    @Test
+    void returnsConflictWhenDuplicatingItemOnDeliveredOrder() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+        UUID itemId = firstItemId(orderId);
+        setOrderStatus(orderId, OrderStatus.DELIVERED);
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/duplicate", orderId, itemId)
+                        .header("Authorization", "Bearer " + cashierToken()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ORDER_NOT_MODIFIABLE"));
+    }
+
+    @Test
+    void returnsNotFoundWhenDuplicatingUnknownItem() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/duplicate", orderId, UUID.randomUUID())
+                        .header("Authorization", "Bearer " + cashierToken()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ORDER_ITEM_NOT_FOUND"));
+    }
+
+    @Test
+    void rejectsDuplicateItemWithNoAuthorizationHeader() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+        UUID itemId = firstItemId(orderId);
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/duplicate", orderId, itemId))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rejectsDuplicateItemWhenCallerRoleIsNotAllowed() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+        UUID orderId = createOrder(espresso);
+        UUID itemId = firstItemId(orderId);
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/items/{itemId}/duplicate", orderId, itemId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
+                .andExpect(status().isForbidden());
+    }
+
+    // FARELO-319: "Imprimir ao confirmar" — defaults to true when omitted,
+    // and is honored/persisted when explicitly sent false.
+    @Test
+    void createsOrderWithPrintOnConfirmDefaultingToTrue() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}]
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId());
+
+        mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.printOnConfirm").value(true));
+    }
+
+    @Test
+    void createsOrderWithPrintOnConfirmExplicitlyFalse() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}],
+                  "printOnConfirm": false
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.printOnConfirm").value(false))
+                .andReturn();
+
+        OrderResponse response = objectMapper.readValue(
+                result.getResponse().getContentAsString(), OrderResponse.class);
+        Order persisted = orderRepository.findById(response.id()).orElseThrow();
+        assertThat(persisted.isPrintOnConfirm()).isFalse();
     }
 
 }

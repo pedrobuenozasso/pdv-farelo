@@ -260,7 +260,10 @@ public class OutboxWorker {
     // else to dispatch to yet.
     private void dispatch(OutboxEvent event) {
         if (ORDER_CREATED_EVENT_TYPE.equals(event.getEventType())) {
-            printJobService.createForOrder(event.getAggregateId());
+            // FARELO-319: honors Order#isPrintOnConfirm — see
+            // PrintJobService#createForOrderIfEnabled's javadoc for why the
+            // check lives there and not inside createForOrder itself.
+            printJobService.createForOrderIfEnabled(event.getAggregateId());
         } else if (ORDER_READY_EVENT_TYPE.equals(event.getEventType())) {
             orderReadyNotificationService.createForOrder(event.getAggregateId());
         } else if (STOCK_LOW_EVENT_TYPE.equals(event.getEventType())) {

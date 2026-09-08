@@ -23,7 +23,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
@@ -43,17 +43,27 @@ import {
   type CommandStatus,
 } from "@/lib/api/commands";
 import {
+  assignOrderWaiter,
   cancelOrderItem,
+  createBalcaoOrder,
   createOrder,
+  duplicateOrderItem,
   listCommandOrders,
   markOrderCancelled,
   markOrderDelivered,
+  resendOrderItemToProduction,
+  resendOrderToProduction,
   type Order,
   type OrderItem,
   type OrderItemCancelReason,
   type OrderStatus,
 } from "@/lib/api/orders";
-import { applyDiscount } from "@/lib/api/discounts";
+import { listUsers } from "@/lib/api/users";
+import {
+  applyDiscount,
+  applyItemDiscount,
+  type DiscountType,
+} from "@/lib/api/discounts";
 import {
   getPaymentBalance,
   recordPayment,
@@ -138,15 +148,28 @@ const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
 
 export default function PdvCommandsPage() {
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
+  const [balcaoOpen, setBalcaoOpen] = useState(false);
 
   return (
     <AuthGuard allow={["ADMIN", "MANAGER", "CASHIER", "ATTENDANT"]}>
       <InternalNav />
       <main className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
-        <div>
-          <p className="text-ink-soft text-sm">PDV</p>
-          <h1 className="font-serif text-2xl font-semibold">Comandas</h1>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-ink-soft text-sm">PDV</p>
+            <h1 className="font-serif text-2xl font-semibold">Comandas</h1>
+          </div>
+          <Button
+            variant={balcaoOpen ? "outline" : "dark"}
+            onClick={() => setBalcaoOpen((open) => !open)}
+          >
+            {balcaoOpen ? "Fechar venda balcão" : "+ Venda balcão"}
+          </Button>
         </div>
+
+        {balcaoOpen ? (
+          <BalcaoPanel onClose={() => setBalcaoOpen(false)} />
+        ) : null}
 
         <div className="grid grid-cols-5 gap-2.5 sm:grid-cols-10">
           {COMMAND_NUMBERS.map((number) => (
@@ -187,6 +210,16 @@ function CommandDetail({
 }) {
   const queryClient = useQueryClient();
   const [addItemOpen, setAddItemOpen] = useState(false);
+  // FARELO-320: "Confirmar e Receber" — a PDV-only UI shortcut (Farelo has
+  // no real backend "Confirmar" transition to formalize — an order is
+  // already CREATED/"confirmed" the instant it's placed, see
+  // OrderStatus's own javadoc on the unused CONFIRMED value) that both
+  // creates the order (AddItemPanel's existing "Adicionar" mutation) and
+  // opens PaymentPanel's payment form in the same click. Plain counter
+  // bumped by AddItemPanel, compared against its previous value inside
+  // PaymentPanel on render — see that component's own comment for why a
+  // token instead of a boolean, and why that comparison isn't a useEffect.
+  const [paymentPromptToken, setPaymentPromptToken] = useState(0);
 
   const commandQuery = useQuery({
     queryKey: ["pdv", "command", number],
@@ -334,6 +367,9 @@ function CommandDetail({
                   queryKey: ["pdv", "command", number],
                 })
               }
+              onConfirmAndReceive={() =>
+                setPaymentPromptToken((token) => token + 1)
+              }
             />
           ) : null}
 
@@ -360,6 +396,7 @@ function CommandDetail({
             totalDiscount={totalDiscount}
             totalPaid={totalPaid}
             remaining={remaining}
+            openSignal={paymentPromptToken}
           />
         ) : null}
       </div>
@@ -376,15 +413,32 @@ function CommandDetail({
 function AddItemPanel({
   commandNumber,
   onAdded,
+  onConfirmAndReceive,
 }: {
   commandNumber: number;
   onAdded: () => void;
+  // FARELO-320: called (in addition to onAdded) when the order was
+  // created via "Confirmar e Receber" rather than plain "Adicionar" — see
+  // CommandDetail's own comment on paymentPromptToken for the full flow.
+  onConfirmAndReceive: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [selectedProductId, setSelectedProductId] = useState<string | null>(
     null,
   );
   const [quantity, setQuantity] = useState(1);
+  // FARELO-316: "Observação geral do pedido" — applies to this order (the
+  // one this "Adicionar" click creates), not to the comanda as a whole.
+  const [note, setNote] = useState("");
+  // FARELO-319: "Imprimir ao confirmar" — defaults checked (backend
+  // default is also true when the field is omitted), so unchecking is the
+  // explicit opt-out action.
+  const [printOnConfirm, setPrintOnConfirm] = useState(true);
+  // FARELO-320: which button triggered the in-flight mutation — read once
+  // in onSuccess, then reset. A ref (not state) since it's write-then-
+  // read-once bookkeeping for the mutation callback, not something that
+  // should trigger a re-render on its own.
+  const receiveAfterRef = useRef(false);
 
   const productsQuery = useQuery({
     queryKey: ["pdv", "products"],
@@ -400,11 +454,19 @@ function AddItemPanel({
       createOrder({
         commandNumber,
         items: [{ productId: product.id, quantity }],
+        note: note.trim() || undefined,
+        printOnConfirm,
       }),
     onSuccess: () => {
       setSelectedProductId(null);
       setQuantity(1);
+      setNote("");
+      setPrintOnConfirm(true);
       onAdded();
+      if (receiveAfterRef.current) {
+        receiveAfterRef.current = false;
+        onConfirmAndReceive();
+      }
     },
   });
 
@@ -486,42 +548,269 @@ function AddItemPanel({
       </div>
 
       {selectedProduct ? (
-        <div className="border-line flex items-center gap-3 border-t pt-3">
-          <span className="flex-1 text-sm font-semibold">
-            {selectedProduct.name}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setQuantity((qty) => Math.max(1, qty - 1))}
-              className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
-              aria-label="Diminuir quantidade"
-            >
-              −
-            </button>
-            <span className="w-6 text-center text-sm font-bold">
-              {quantity}
+        <div className="border-line flex flex-col gap-2 border-t pt-3">
+          <div className="flex items-center gap-3">
+            <span className="flex-1 text-sm font-semibold">
+              {selectedProduct.name}
             </span>
-            <button
-              type="button"
-              onClick={() => setQuantity((qty) => qty + 1)}
-              className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
-              aria-label="Aumentar quantidade"
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setQuantity((qty) => Math.max(1, qty - 1))}
+                className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+                aria-label="Diminuir quantidade"
+              >
+                −
+              </button>
+              <span className="w-6 text-center text-sm font-bold">
+                {quantity}
+              </span>
+              <button
+                type="button"
+                onClick={() => setQuantity((qty) => qty + 1)}
+                className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+                aria-label="Aumentar quantidade"
+              >
+                +
+              </button>
+            </div>
+            <Button
+              variant="outline"
+              disabled={addItemMutation.isPending}
+              onClick={() => addItemMutation.mutate(selectedProduct)}
+              className="px-4 py-2 text-[13px]"
             >
-              +
-            </button>
+              {addItemMutation.isPending ? "Adicionando..." : "Adicionar"}
+            </Button>
+            <Button
+              disabled={addItemMutation.isPending}
+              onClick={() => {
+                receiveAfterRef.current = true;
+                addItemMutation.mutate(selectedProduct);
+              }}
+              className="px-4 py-2 text-[13px]"
+            >
+              {addItemMutation.isPending
+                ? "Confirmando..."
+                : "Confirmar e Receber"}
+            </Button>
           </div>
-          <Button
-            disabled={addItemMutation.isPending}
-            onClick={() => addItemMutation.mutate(selectedProduct)}
-            className="px-4 py-2 text-[13px]"
-          >
-            {addItemMutation.isPending ? "Adicionando..." : "Adicionar"}
-          </Button>
+          <input
+            type="text"
+            placeholder="Observação do pedido (opcional)"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            maxLength={500}
+            className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-[13px] outline-none"
+          />
+          <label className="text-ink-soft flex items-center gap-1.5 text-[12px]">
+            <input
+              type="checkbox"
+              checked={printOnConfirm}
+              onChange={(event) => setPrintOnConfirm(event.target.checked)}
+            />
+            Imprimir ao confirmar
+          </label>
         </div>
       ) : null}
       {errorMessage ? <p className="text-red text-sm">{errorMessage}</p> : null}
     </div>
+  );
+}
+
+// FARELO-312 — walk-up counter sale (BALCAO), no comanda at all. Same
+// product-search/quantity-stepper shape as AddItemPanel above (a small,
+// deliberate duplication rather than a deeper shared-component refactor —
+// AddItemPanel is tightly coupled to `commandNumber`/createOrder, and this
+// panel has no comanda to key off of), but calls createBalcaoOrder instead
+// of createOrder, and shows a plain success confirmation instead of
+// closing into a comanda detail panel — there is no PDV screen for a
+// BALCAO order to land on yet (see the backend's Order javadoc, "Design
+// decision — BALCAO", for the known payment-flow follow-up this doesn't
+// solve).
+function BalcaoPanel({ onClose }: { onClose: () => void }) {
+  const [search, setSearch] = useState("");
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(
+    null,
+  );
+  const [quantity, setQuantity] = useState(1);
+  const [note, setNote] = useState("");
+  const [printOnConfirm, setPrintOnConfirm] = useState(true);
+  const [lastCreated, setLastCreated] = useState<Order | null>(null);
+
+  const productsQuery = useQuery({
+    queryKey: ["pdv", "products"],
+    queryFn: listProducts,
+  });
+  const categoriesQuery = useQuery({
+    queryKey: ["pdv", "categories"],
+    queryFn: listCategories,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (product: Product) =>
+      createBalcaoOrder({
+        items: [{ productId: product.id, quantity }],
+        note: note.trim() || undefined,
+        printOnConfirm,
+      }),
+    onSuccess: (order) => {
+      setSelectedProductId(null);
+      setQuantity(1);
+      setNote("");
+      setPrintOnConfirm(true);
+      setLastCreated(order);
+    },
+  });
+
+  const errorMessage = apiErrorMessage(
+    createMutation.error,
+    "Não foi possível criar a venda balcão.",
+  );
+
+  const availableProducts = (productsQuery.data ?? []).filter(
+    (product) =>
+      product.active &&
+      product.availableOnPos &&
+      product.name.toLowerCase().includes(search.toLowerCase()),
+  );
+  const categoryNameById = new Map(
+    (categoriesQuery.data ?? []).map((category: Category) => [
+      category.id,
+      category.name,
+    ]),
+  );
+  const sections = new Map<string, Product[]>();
+  for (const product of availableProducts) {
+    const categoryName = categoryNameById.get(product.categoryId) ?? "Outros";
+    sections.set(categoryName, [
+      ...(sections.get(categoryName) ?? []),
+      product,
+    ]);
+  }
+
+  const selectedProduct = availableProducts.find(
+    (product) => product.id === selectedProductId,
+  );
+
+  return (
+    <Card className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <h2 className="font-serif text-xl font-semibold">Venda balcão</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-ink-soft hover:text-ink text-sm"
+        >
+          Fechar
+        </button>
+      </div>
+      <p className="text-ink-soft text-sm">
+        Cliente leva/recebe na hora — sem vincular a nenhuma comanda.
+      </p>
+
+      <input
+        type="text"
+        placeholder="Buscar produto..."
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+      />
+
+      <div className="flex max-h-56 flex-col gap-3 overflow-y-auto">
+        {productsQuery.isLoading ? (
+          <p className="text-ink-faint text-sm">Carregando...</p>
+        ) : null}
+        {availableProducts.length === 0 && !productsQuery.isLoading ? (
+          <p className="text-ink-faint text-sm">Nenhum produto encontrado.</p>
+        ) : null}
+        {Array.from(sections.entries()).map(([categoryName, products]) => (
+          <div key={categoryName} className="flex flex-col gap-1">
+            <div className="text-ink-faint text-[11px] font-bold tracking-wide uppercase">
+              {categoryName}
+            </div>
+            {products.map((product) => (
+              <button
+                key={product.id}
+                type="button"
+                onClick={() => setSelectedProductId(product.id)}
+                className={cn(
+                  "flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
+                  selectedProductId === product.id
+                    ? "bg-primary-soft text-primary-dark font-semibold"
+                    : "hover:bg-bg-alt",
+                )}
+              >
+                <span>{product.name}</span>
+                <span className="font-semibold">
+                  {currencyFormatter.format(product.price)}
+                </span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {selectedProduct ? (
+        <div className="border-line flex flex-col gap-2 border-t pt-3">
+          <div className="flex items-center gap-3">
+            <span className="flex-1 text-sm font-semibold">
+              {selectedProduct.name}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setQuantity((qty) => Math.max(1, qty - 1))}
+                className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+                aria-label="Diminuir quantidade"
+              >
+                −
+              </button>
+              <span className="w-6 text-center text-sm font-bold">
+                {quantity}
+              </span>
+              <button
+                type="button"
+                onClick={() => setQuantity((qty) => qty + 1)}
+                className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+                aria-label="Aumentar quantidade"
+              >
+                +
+              </button>
+            </div>
+            <Button
+              disabled={createMutation.isPending}
+              onClick={() => createMutation.mutate(selectedProduct)}
+              className="px-4 py-2 text-[13px]"
+            >
+              {createMutation.isPending ? "Criando..." : "Criar venda"}
+            </Button>
+          </div>
+          <input
+            type="text"
+            placeholder="Observação do pedido (opcional)"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            maxLength={500}
+            className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-[13px] outline-none"
+          />
+          <label className="text-ink-soft flex items-center gap-1.5 text-[12px]">
+            <input
+              type="checkbox"
+              checked={printOnConfirm}
+              onChange={(event) => setPrintOnConfirm(event.target.checked)}
+            />
+            Imprimir ao confirmar
+          </label>
+        </div>
+      ) : null}
+      {errorMessage ? <p className="text-red text-sm">{errorMessage}</p> : null}
+      {lastCreated ? (
+        <p className="text-primary-dark bg-primary-soft rounded-lg px-3 py-2 text-sm font-semibold">
+          Venda balcão criada — pedido enviado para a cozinha/bar.
+        </p>
+      ) : null}
+    </Card>
   );
 }
 
@@ -681,12 +970,22 @@ function PaymentPanel({
   totalDiscount,
   totalPaid,
   remaining,
+  openSignal,
 }: {
   commandNumber: number;
   totalOwed: number;
   totalDiscount: number;
   totalPaid: number;
   remaining: number;
+  // FARELO-320: "Confirmar e Receber" — any change to this number (from
+  // CommandDetail's paymentPromptToken) opens the payment form, same as
+  // clicking "Registrar pagamento" below. A counter, not a boolean: a
+  // boolean flipped true->true (two "Confirmar e Receber" clicks in a
+  // row while the form is already open, e.g. after closing it manually
+  // and re-triggering) wouldn't produce a detectable change; a
+  // monotonically increasing counter always does — see the render-time
+  // comparison below for why this isn't a useEffect.
+  openSignal: number;
 }) {
   const queryClient = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
@@ -736,6 +1035,23 @@ function PaymentPanel({
       amountReceived: "",
     },
   });
+
+  // FARELO-320: "Confirmar e Receber" — "adjusting state when a prop
+  // changes" pattern (React docs), not a useEffect: calling setState
+  // inside an effect body here would trip this project's react-hooks/
+  // set-state-in-effect lint rule (cascading-render risk) — comparing
+  // against the previous value during render and updating state directly
+  // is the sanctioned alternative for "run this when a prop actually
+  // changes, not on every render". openSignal starts at 0 (no prompt
+  // yet) and only increments from CommandDetail, so the first render
+  // never matches this branch.
+  const [seenOpenSignal, setSeenOpenSignal] = useState(openSignal);
+  if (openSignal !== seenOpenSignal) {
+    setSeenOpenSignal(openSignal);
+    reset({ amount: remaining > 0 ? String(remaining) : "", method: "PIX", amountReceived: "" });
+    setLastChangeGiven(null);
+    setFormOpen(true);
+  }
 
   // useWatch, not the form's own watch() — the latter returns a function
   // React Compiler can't safely memoize (see react-hooks/incompatible-
@@ -1126,6 +1442,65 @@ function PrintConferenceButton({ commandNumber }: { commandNumber: number }) {
   );
 }
 
+// FARELO-314 — "Garçom/atendente responsável pelo pedido", removível e
+// trocável (docs/gaps-sischef-pdv.md item 4). A plain <select> populated
+// from GET /api/v1/users (now also readable by CASHIER/ATTENDANT, see the
+// backend's UserController#list javadoc) — the empty option unassigns.
+function WaiterPicker({
+  order,
+  ordersQueryKey,
+}: {
+  order: Order;
+  ordersQueryKey: (string | number)[];
+}) {
+  const queryClient = useQueryClient();
+
+  const usersQuery = useQuery({
+    queryKey: ["pdv", "users"],
+    queryFn: listUsers,
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: (userId: string | null) => assignOrderWaiter(order.id, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ordersQueryKey });
+    },
+  });
+
+  const errorMessage = apiErrorMessage(
+    assignMutation.error,
+    "Não foi possível atribuir o atendente.",
+  );
+
+  const activeUsers = (usersQuery.data ?? []).filter((user) => user.active);
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <span className="text-ink-faint text-[11px] font-bold tracking-wide uppercase">
+        Atendente
+      </span>
+      <select
+        value={order.assignedUserId ?? ""}
+        onChange={(event) =>
+          assignMutation.mutate(event.target.value || null)
+        }
+        disabled={assignMutation.isPending}
+        className="border-line bg-surface rounded-md border px-2 py-1 text-[13px] outline-none"
+      >
+        <option value="">Sem atendente</option>
+        {activeUsers.map((user) => (
+          <option key={user.id} value={user.id}>
+            {user.name}
+          </option>
+        ))}
+      </select>
+      {errorMessage ? (
+        <span className="text-red text-[12px]">{errorMessage}</span>
+      ) : null}
+    </div>
+  );
+}
+
 function OrderCard({
   order,
   commandNumber,
@@ -1183,6 +1558,33 @@ function OrderCard({
     .filter((item) => !item.cancelled)
     .reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
 
+  // FARELO-319: "Copiar resumo do pedido" — pure client-side formatting,
+  // no backend endpoint (the data is already all here in `order`). "Enviar
+  // novamente os itens para produção" — the whole-order counterpart to
+  // OrderItemRow's per-item "Renotificar".
+  const [summaryCopied, setSummaryCopied] = useState(false);
+  const copySummary = () => {
+    const lines = order.items
+      .filter((item) => !item.cancelled)
+      .map((item) => `${item.quantity}x ${item.productName} — ${currencyFormatter.format(item.unitPrice * item.quantity)}`);
+    const header = order.commandNumber != null
+      ? `Comanda ${order.commandNumber}`
+      : "Venda balcão";
+    const summary = [header, ...lines, `Subtotal: ${currencyFormatter.format(subtotal)}`].join("\n");
+    navigator.clipboard.writeText(summary).then(() => {
+      setSummaryCopied(true);
+      setTimeout(() => setSummaryCopied(false), 2000);
+    });
+  };
+
+  const resendAllMutation = useMutation({
+    mutationFn: () => resendOrderToProduction(order.id),
+  });
+  const resendAllErrorMessage = apiErrorMessage(
+    resendAllMutation.error,
+    "Não foi possível reenviar o pedido para produção.",
+  );
+
   return (
     <div className="border-line bg-surface rounded-2xl border p-4">
       <div className="flex items-center justify-between">
@@ -1193,6 +1595,43 @@ function OrderCard({
           {ORDER_STATUS_LABEL[order.status]}
         </Badge>
       </div>
+
+      <div className="mt-1 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={copySummary}
+          className="text-ink-soft text-[12px] font-semibold hover:opacity-80"
+        >
+          {summaryCopied ? "Copiado!" : "Copiar resumo"}
+        </button>
+        {canCancel ? (
+          <button
+            type="button"
+            disabled={resendAllMutation.isPending}
+            onClick={() => resendAllMutation.mutate()}
+            className="text-ink-soft text-[12px] font-semibold hover:opacity-80"
+          >
+            {resendAllMutation.isPending
+              ? "Reenviando..."
+              : "Reenviar p/ produção"}
+          </button>
+        ) : null}
+        {resendAllMutation.isSuccess ? (
+          <span className="text-ink-faint text-[12px]">Reenviado.</span>
+        ) : null}
+      </div>
+      {resendAllErrorMessage ? (
+        <p className="text-red mt-1 text-[12px]">{resendAllErrorMessage}</p>
+      ) : null}
+
+      <WaiterPicker order={order} ordersQueryKey={ordersQueryKey} />
+
+      {order.note ? (
+        <p className="text-ink-soft bg-bg-alt mt-2 rounded-lg px-3 py-2 text-[13px] italic">
+          &ldquo;{order.note}&rdquo;
+        </p>
+      ) : null}
+
       <ul className="border-line mt-2 flex flex-col gap-1 border-t pt-2">
         {order.items.map((item) => (
           <OrderItemRow
@@ -1295,6 +1734,15 @@ function OrderItemRow({
   const [reason, setReason] = useState<OrderItemCancelReason | "">("");
   const [description, setDescription] = useState("");
 
+  // FARELO-317: desconto por item — same inline toggle-and-mini-form shape
+  // as the cancellation flow above, kept as its own independent piece of
+  // state (a row can't be cancelling and discounting at once in this UI,
+  // but nothing enforces that beyond not opening both toggles together).
+  const [discounting, setDiscounting] = useState(false);
+  const [discountType, setDiscountType] = useState<DiscountType>("FIXED_AMOUNT");
+  const [discountValue, setDiscountValue] = useState("");
+  const [discountReason, setDiscountReason] = useState("");
+
   const cancelItemMutation = useMutation({
     mutationFn: () => {
       if (!reason) {
@@ -1315,6 +1763,65 @@ function OrderItemRow({
   const cancelErrorMessage = apiErrorMessage(
     cancelItemMutation.error,
     "Não foi possível cancelar o item.",
+  );
+
+  const applyItemDiscountMutation = useMutation({
+    mutationFn: () => {
+      const value = Number(discountValue);
+      const input =
+        discountType === "PERCENTAGE"
+          ? { type: "PERCENTAGE" as const, percentage: value, reason: discountReason || undefined }
+          : { type: "FIXED_AMOUNT" as const, amount: value, reason: discountReason || undefined };
+      return applyItemDiscount(orderId, item.id, input);
+    },
+    onSuccess: () => {
+      setDiscounting(false);
+      setDiscountValue("");
+      setDiscountReason("");
+      queryClient.invalidateQueries({
+        queryKey: ["pdv", "command", commandNumber, "orders"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["pdv", "command", commandNumber, "paymentBalance"],
+      });
+    },
+  });
+
+  const discountErrorMessage = apiErrorMessage(
+    applyItemDiscountMutation.error,
+    "Não foi possível aplicar o desconto.",
+  );
+  const discountValueNumber = Number(discountValue);
+  const canConfirmDiscount =
+    discountValue.trim() !== "" &&
+    !Number.isNaN(discountValueNumber) &&
+    discountValueNumber > 0 &&
+    (discountType !== "PERCENTAGE" || discountValueNumber <= 100);
+
+  // FARELO-318: "Duplicar item" (adds a new line for this same product/
+  // quantity) and "Renotificar item" (queues one more kitchen ticket for
+  // just this line) — two independent one-click actions, no confirmation
+  // step (unlike cancel above): both are low-risk, easily-undone-by-just-
+  // cancelling-the-extra-line actions, not destructive ones.
+  const duplicateItemMutation = useMutation({
+    mutationFn: () => duplicateOrderItem(orderId, item.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["pdv", "command", commandNumber, "orders"],
+      });
+    },
+  });
+  const resendItemMutation = useMutation({
+    mutationFn: () => resendOrderItemToProduction(orderId, item.id),
+  });
+
+  const duplicateErrorMessage = apiErrorMessage(
+    duplicateItemMutation.error,
+    "Não foi possível duplicar o item.",
+  );
+  const resendErrorMessage = apiErrorMessage(
+    resendItemMutation.error,
+    "Não foi possível reenviar o item para produção.",
   );
 
   // description is required only when reason is OTHER (mirrors
@@ -1358,6 +1865,35 @@ function OrderItemRow({
           {canCancel ? (
             <button
               type="button"
+              disabled={duplicateItemMutation.isPending}
+              onClick={() => duplicateItemMutation.mutate()}
+              className="text-ink-soft text-[12px] font-semibold hover:opacity-80"
+            >
+              {duplicateItemMutation.isPending ? "Duplicando..." : "Duplicar"}
+            </button>
+          ) : null}
+          {canCancel ? (
+            <button
+              type="button"
+              disabled={resendItemMutation.isPending}
+              onClick={() => resendItemMutation.mutate()}
+              className="text-ink-soft text-[12px] font-semibold hover:opacity-80"
+            >
+              {resendItemMutation.isPending ? "Reenviando..." : "Renotificar"}
+            </button>
+          ) : null}
+          {canCancel ? (
+            <button
+              type="button"
+              onClick={() => setDiscounting((current) => !current)}
+              className="text-primary text-[12px] font-semibold hover:opacity-80"
+            >
+              {discounting ? "Fechar" : "Desconto"}
+            </button>
+          ) : null}
+          {canCancel ? (
+            <button
+              type="button"
               onClick={() => setCancelling((current) => !current)}
               className="text-red text-[12px] font-semibold hover:opacity-80"
             >
@@ -1366,6 +1902,56 @@ function OrderItemRow({
           ) : null}
         </div>
       </div>
+
+      {discounting ? (
+        <div className="bg-bg-alt flex flex-col gap-2 rounded-lg p-2">
+          <div className="flex gap-2">
+            <select
+              value={discountType}
+              onChange={(event) => setDiscountType(event.target.value as DiscountType)}
+              className="border-line rounded-md border bg-transparent px-2 py-1.5 text-[13px]"
+            >
+              <option value="FIXED_AMOUNT">Valor fixo (R$)</option>
+              <option value="PERCENTAGE">Percentual (%)</option>
+            </select>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={discountValue}
+              onChange={(event) => setDiscountValue(event.target.value)}
+              placeholder={discountType === "PERCENTAGE" ? "%" : "R$"}
+              className="border-line w-20 rounded-md border bg-transparent px-2 py-1.5 text-[13px]"
+            />
+          </div>
+          <input
+            type="text"
+            value={discountReason}
+            onChange={(event) => setDiscountReason(event.target.value)}
+            placeholder="Motivo (opcional)"
+            className="border-line rounded-md border bg-transparent px-2 py-1.5 text-[13px]"
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              disabled={!canConfirmDiscount || applyItemDiscountMutation.isPending}
+              onClick={() => applyItemDiscountMutation.mutate()}
+              className="px-3 py-1.5 text-[12px]"
+            >
+              {applyItemDiscountMutation.isPending ? "Aplicando..." : "Confirmar"}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={applyItemDiscountMutation.isPending}
+              onClick={() => setDiscounting(false)}
+              className="px-3 py-1.5 text-[12px]"
+            >
+              Voltar
+            </Button>
+          </div>
+          {discountErrorMessage ? (
+            <p className="text-red text-[12px]">{discountErrorMessage}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {cancelling ? (
         <div className="bg-bg-alt flex flex-col gap-2 rounded-lg p-2">
@@ -1414,6 +2000,18 @@ function OrderItemRow({
             <p className="text-red text-[12px]">{cancelErrorMessage}</p>
           ) : null}
         </div>
+      ) : null}
+
+      {duplicateErrorMessage ? (
+        <p className="text-red text-[12px]">{duplicateErrorMessage}</p>
+      ) : null}
+      {resendErrorMessage ? (
+        <p className="text-red text-[12px]">{resendErrorMessage}</p>
+      ) : null}
+      {resendItemMutation.isSuccess ? (
+        <p className="text-ink-faint text-[12px]">
+          Reenviado para produção.
+        </p>
       ) : null}
     </li>
   );

@@ -16,6 +16,7 @@ import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
 import com.farelo.api.command.CommandNotFullyPaidException;
+import com.farelo.api.discount.ItemDiscountNotSupportedException;
 import com.farelo.api.fiscal.CompanyFiscalConfigurationNotFoundException;
 import com.farelo.api.fiscal.FiscalDocumentInvalidTransitionException;
 import com.farelo.api.fiscal.FiscalDocumentNotFoundException;
@@ -31,6 +32,7 @@ import com.farelo.api.ordering.OrderItemAlreadyCancelledException;
 import com.farelo.api.ordering.OrderItemCancellationNotAllowedException;
 import com.farelo.api.ordering.OrderItemNotFoundException;
 import com.farelo.api.ordering.OrderNotFoundException;
+import com.farelo.api.ordering.OrderNotModifiableException;
 import com.farelo.api.printing.PrintJobInvalidTransitionException;
 import com.farelo.api.printing.PrintJobNotFoundException;
 import com.farelo.api.printing.PrintJobRetryLimitExceededException;
@@ -186,6 +188,24 @@ public class ApiExceptionHandler {
     public ErrorResponse handleOrderItemCancellationNotAllowed(OrderItemCancellationNotAllowedException ex) {
         return new ErrorResponse(
                 "ORDER_ITEM_CANCELLATION_NOT_ALLOWED", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: an item-level discount (FARELO-317) was requested
+    // against an OrderItem whose order has no comanda (a BALCAO order,
+    // FARELO-312) — see ItemDiscountNotSupportedException's javadoc.
+    @ExceptionHandler(ItemDiscountNotSupportedException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleItemDiscountNotSupported(ItemDiscountNotSupportedException ex) {
+        return new ErrorResponse("ITEM_DISCOUNT_NOT_SUPPORTED", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: FARELO-318 ("Duplicar item") targets an order that's
+    // DELIVERED or CANCELLED — see OrderNotModifiableException's javadoc
+    // for why this is a distinct code from ORDER_ITEM_CANCELLATION_NOT_ALLOWED.
+    @ExceptionHandler(OrderNotModifiableException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleOrderNotModifiable(OrderNotModifiableException ex) {
+        return new ErrorResponse("ORDER_NOT_MODIFIABLE", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     @ExceptionHandler(PrintJobNotFoundException.class)

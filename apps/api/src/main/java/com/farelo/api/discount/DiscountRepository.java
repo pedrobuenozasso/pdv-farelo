@@ -18,7 +18,12 @@ public interface DiscountRepository extends JpaRepository<Discount, UUID> {
     // method's own (short) transaction has already closed (open-in-view is
     // false) — a plain findByCommand(...) would leave `command` as an
     // uninitialized lazy proxy and throw LazyInitializationException.
-    @Query("SELECT d FROM Discount d JOIN FETCH d.command WHERE d.command = :command ORDER BY d.createdAt ASC")
+    // LEFT JOIN FETCH orderItem (FARELO-317): nullable — only populated for
+    // an item-scoped discount — so the join must be outer, not inner, or a
+    // comanda-level discount (orderItem IS NULL) would be silently dropped
+    // from the result entirely.
+    @Query("SELECT d FROM Discount d JOIN FETCH d.command LEFT JOIN FETCH d.orderItem "
+            + "WHERE d.command = :command ORDER BY d.createdAt ASC")
     List<Discount> findByCommandOrderByCreatedAtAsc(@Param("command") Command command);
 
     // Backs DiscountService#getTotalDiscount / PaymentService#getBalance
