@@ -17,7 +17,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class CommandServiceTests {
 
-    private final CommandService commandService = new CommandService(null);
+    // FARELO-315: CommandService now also takes a DiningTableService — null
+    // here too, same reasoning as the CommandRepository null above: none
+    // of the pure-logic methods this class tests touch it.
+    private final CommandService commandService = new CommandService(null, null);
 
     @Test
     void normalizePhoneStripsPunctuationAndPrependsCountryCode() {

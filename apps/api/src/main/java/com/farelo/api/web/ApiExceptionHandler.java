@@ -32,6 +32,8 @@ import com.farelo.api.security.UserEmailAlreadyExistsException;
 import com.farelo.api.security.UserNotFoundException;
 import com.farelo.api.security.auth.InvalidTokenException;
 import com.farelo.api.security.rbac.InsufficientRoleException;
+import com.farelo.api.table.DiningTableNotFoundException;
+import com.farelo.api.table.DiningTableNumberAlreadyExistsException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -332,6 +334,24 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public ErrorResponse handleInsufficientRole(InsufficientRoleException ex) {
         return new ErrorResponse("FORBIDDEN", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // FARELO-315: number given to PATCH /api/v1/commands/{number}/table or
+    // POST /api/v1/tables doesn't resolve to an existing DiningTable — same
+    // "not found" shape as every other *NotFoundException handler above.
+    @ExceptionHandler(DiningTableNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleDiningTableNotFound(DiningTableNotFoundException ex) {
+        return new ErrorResponse("TABLE_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    // 409 Conflict: POST /api/v1/tables with a number that already belongs
+    // to another table — same shape as UserEmailAlreadyExistsException/
+    // RecipeAlreadyExistsException above.
+    @ExceptionHandler(DiningTableNumberAlreadyExistsException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleDiningTableNumberAlreadyExists(DiningTableNumberAlreadyExistsException ex) {
+        return new ErrorResponse("TABLE_NUMBER_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     private static String describe(FieldError fieldError) {

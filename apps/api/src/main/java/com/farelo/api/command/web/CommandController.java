@@ -106,4 +106,17 @@ public class CommandController {
         return CommandResponse.from(command);
     }
 
+    // FARELO-315 — same role list as open()/updateCustomer() above: a
+    // front-of-house action (seating a comanda at a table, or clearing
+    // that when it leaves), no money implication. PATCH, same reasoning
+    // as updateCustomer() (a partial update of the comanda's table
+    // association, not a state transition).
+    @PatchMapping("/{number}/table")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
+    public CommandResponse updateTable(
+            @PathVariable int number, @Valid @RequestBody CommandTableUpdateRequest request) {
+        Command command = commandService.updateTable(number, request.tableNumber());
+        return CommandResponse.from(command);
+    }
+
 }

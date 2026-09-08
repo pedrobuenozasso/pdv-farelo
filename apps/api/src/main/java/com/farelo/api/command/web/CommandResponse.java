@@ -16,9 +16,14 @@ public record CommandResponse(
         CommandStatus status,
         String customerName,
         String customerPhone,
+        Integer tableNumber,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
+    // FARELO-315: tableNumber is the DiningTable's own business number
+    // (null when no table is linked), not its technical UUID id — same
+    // "never expose the internal id as a business identifier" convention
+    // as Command.number itself.
     public static CommandResponse from(Command command) {
         return new CommandResponse(
                 command.getId(),
@@ -26,6 +31,7 @@ public record CommandResponse(
                 command.getStatus(),
                 command.getCustomerName(),
                 command.getCustomerPhone(),
+                command.getTable() == null ? null : command.getTable().getNumber(),
                 command.getCreatedAt(),
                 command.getUpdatedAt());
     }
