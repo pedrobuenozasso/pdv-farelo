@@ -4,6 +4,8 @@ import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.catalog.ProductRepository;
 import com.farelo.api.fiscal.FiscalProfile;
 import com.farelo.api.fiscal.FiscalProfileRepository;
+import com.farelo.api.inventory.RecipeItemRepository;
+import com.farelo.api.inventory.RecipeRepository;
 import com.farelo.api.ordering.OrderItemRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,13 +85,23 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     private OrderItemRepository orderItemRepository;
 
     @Autowired
+    private RecipeRepository recipeRepository;
+
+    @Autowired
+    private RecipeItemRepository recipeItemRepository;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void cleanFiscalProfileTable() {
-        // order_item first — it FKs into product, which FKs into
-        // fiscal_profile as of FARELO-151. See this class's javadoc.
+        // order_item and recipe_item/recipe first — both eventually FK into
+        // product (recipe.product_id, order_item.product_id), which FKs
+        // into fiscal_profile as of FARELO-151. recipe_item before recipe
+        // (recipe_item.recipe_id). See this class's javadoc.
         orderItemRepository.deleteAll();
+        recipeItemRepository.deleteAll();
+        recipeRepository.deleteAll();
         productRepository.deleteAll();
         fiscalProfileRepository.deleteAll();
     }
