@@ -30,7 +30,10 @@
  * não consulta preço, não interpreta o pedido.
  */
 
-import type { CommandCheckContent, PrintJobContent } from "./printJobsClient.js";
+import type {
+  CommandCheckContent,
+  PrintJobContent,
+} from "./printJobsClient.js";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -198,7 +201,9 @@ function formatCurrency(value: number): string {
  * Função pura — mesma garantia de `buildEscPosTicket` (sem I/O). Testável
  * só com asserções sobre os bytes retornados (ver `escpos.test.ts`).
  */
-export function buildCommandCheckEscPosTicket(content: CommandCheckContent): Buffer {
+export function buildCommandCheckEscPosTicket(
+  content: CommandCheckContent,
+): Buffer {
   const parts: Buffer[] = [
     INIT,
     SELECT_CODEPAGE_WPC1252,

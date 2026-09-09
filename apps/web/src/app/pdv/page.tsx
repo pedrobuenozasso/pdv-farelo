@@ -1048,7 +1048,11 @@ function PaymentPanel({
   const [seenOpenSignal, setSeenOpenSignal] = useState(openSignal);
   if (openSignal !== seenOpenSignal) {
     setSeenOpenSignal(openSignal);
-    reset({ amount: remaining > 0 ? String(remaining) : "", method: "PIX", amountReceived: "" });
+    reset({
+      amount: remaining > 0 ? String(remaining) : "",
+      method: "PIX",
+      amountReceived: "",
+    });
     setLastChangeGiven(null);
     setFormOpen(true);
   }
@@ -1234,7 +1238,11 @@ function PaymentPanel({
               // this component mounts before `remaining` settles (both
               // queries still loading), so re-seed the field here with
               // the real value at the moment the form actually opens.
-              reset({ amount: String(remaining), method: "PIX", amountReceived: "" });
+              reset({
+                amount: String(remaining),
+                method: "PIX",
+                amountReceived: "",
+              });
               setLastChangeGiven(null);
               setFormOpen(true);
             }}
@@ -1277,10 +1285,10 @@ function DiscountButton({
         .refine((value) => Number(value) > 0, "Valor deve ser maior que zero"),
       reason: z.string().trim().optional(),
     })
-    .refine(
-      (data) => data.type !== "PERCENTAGE" || Number(data.value) <= 100,
-      { message: "Percentual não pode passar de 100", path: ["value"] },
-    );
+    .refine((data) => data.type !== "PERCENTAGE" || Number(data.value) <= 100, {
+      message: "Percentual não pode passar de 100",
+      path: ["value"],
+    });
   type DiscountFormValues = z.infer<typeof discountFormSchema>;
 
   const {
@@ -1372,7 +1380,10 @@ function DiscountButton({
         ) : null}
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-ink text-sm font-medium" htmlFor="discountReason">
+        <label
+          className="text-ink text-sm font-medium"
+          htmlFor="discountReason"
+        >
           Motivo · opcional
         </label>
         <input
@@ -1481,9 +1492,7 @@ function WaiterPicker({
       </span>
       <select
         value={order.assignedUserId ?? ""}
-        onChange={(event) =>
-          assignMutation.mutate(event.target.value || null)
-        }
+        onChange={(event) => assignMutation.mutate(event.target.value || null)}
         disabled={assignMutation.isPending}
         className="border-line bg-surface rounded-md border px-2 py-1 text-[13px] outline-none"
       >
@@ -1566,11 +1575,19 @@ function OrderCard({
   const copySummary = () => {
     const lines = order.items
       .filter((item) => !item.cancelled)
-      .map((item) => `${item.quantity}x ${item.productName} — ${currencyFormatter.format(item.unitPrice * item.quantity)}`);
-    const header = order.commandNumber != null
-      ? `Comanda ${order.commandNumber}`
-      : "Venda balcão";
-    const summary = [header, ...lines, `Subtotal: ${currencyFormatter.format(subtotal)}`].join("\n");
+      .map(
+        (item) =>
+          `${item.quantity}x ${item.productName} — ${currencyFormatter.format(item.unitPrice * item.quantity)}`,
+      );
+    const header =
+      order.commandNumber != null
+        ? `Comanda ${order.commandNumber}`
+        : "Venda balcão";
+    const summary = [
+      header,
+      ...lines,
+      `Subtotal: ${currencyFormatter.format(subtotal)}`,
+    ].join("\n");
     navigator.clipboard.writeText(summary).then(() => {
       setSummaryCopied(true);
       setTimeout(() => setSummaryCopied(false), 2000);
@@ -1739,7 +1756,8 @@ function OrderItemRow({
   // state (a row can't be cancelling and discounting at once in this UI,
   // but nothing enforces that beyond not opening both toggles together).
   const [discounting, setDiscounting] = useState(false);
-  const [discountType, setDiscountType] = useState<DiscountType>("FIXED_AMOUNT");
+  const [discountType, setDiscountType] =
+    useState<DiscountType>("FIXED_AMOUNT");
   const [discountValue, setDiscountValue] = useState("");
   const [discountReason, setDiscountReason] = useState("");
 
@@ -1748,7 +1766,12 @@ function OrderItemRow({
       if (!reason) {
         throw new Error("Selecione um motivo.");
       }
-      return cancelOrderItem(orderId, item.id, reason, description || undefined);
+      return cancelOrderItem(
+        orderId,
+        item.id,
+        reason,
+        description || undefined,
+      );
     },
     onSuccess: () => {
       setCancelling(false);
@@ -1770,8 +1793,16 @@ function OrderItemRow({
       const value = Number(discountValue);
       const input =
         discountType === "PERCENTAGE"
-          ? { type: "PERCENTAGE" as const, percentage: value, reason: discountReason || undefined }
-          : { type: "FIXED_AMOUNT" as const, amount: value, reason: discountReason || undefined };
+          ? {
+              type: "PERCENTAGE" as const,
+              percentage: value,
+              reason: discountReason || undefined,
+            }
+          : {
+              type: "FIXED_AMOUNT" as const,
+              amount: value,
+              reason: discountReason || undefined,
+            };
       return applyItemDiscount(orderId, item.id, input);
     },
     onSuccess: () => {
@@ -1827,7 +1858,8 @@ function OrderItemRow({
   // description is required only when reason is OTHER (mirrors
   // OrderItemCancelRequest's @AssertTrue on the backend).
   const descriptionRequired = reason === "OTHER";
-  const canConfirm = reason !== "" && (!descriptionRequired || description.trim() !== "");
+  const canConfirm =
+    reason !== "" && (!descriptionRequired || description.trim() !== "");
 
   if (item.cancelled) {
     return (
@@ -1908,7 +1940,9 @@ function OrderItemRow({
           <div className="flex gap-2">
             <select
               value={discountType}
-              onChange={(event) => setDiscountType(event.target.value as DiscountType)}
+              onChange={(event) =>
+                setDiscountType(event.target.value as DiscountType)
+              }
               className="border-line rounded-md border bg-transparent px-2 py-1.5 text-[13px]"
             >
               <option value="FIXED_AMOUNT">Valor fixo (R$)</option>
@@ -1932,11 +1966,15 @@ function OrderItemRow({
           />
           <div className="flex items-center gap-2">
             <Button
-              disabled={!canConfirmDiscount || applyItemDiscountMutation.isPending}
+              disabled={
+                !canConfirmDiscount || applyItemDiscountMutation.isPending
+              }
               onClick={() => applyItemDiscountMutation.mutate()}
               className="px-3 py-1.5 text-[12px]"
             >
-              {applyItemDiscountMutation.isPending ? "Aplicando..." : "Confirmar"}
+              {applyItemDiscountMutation.isPending
+                ? "Aplicando..."
+                : "Confirmar"}
             </Button>
             <Button
               variant="outline"
@@ -2009,9 +2047,7 @@ function OrderItemRow({
         <p className="text-red text-[12px]">{resendErrorMessage}</p>
       ) : null}
       {resendItemMutation.isSuccess ? (
-        <p className="text-ink-faint text-[12px]">
-          Reenviado para produção.
-        </p>
+        <p className="text-ink-faint text-[12px]">Reenviado para produção.</p>
       ) : null}
     </li>
   );

@@ -12,11 +12,17 @@ import { buildRasterImageCommand } from "./ticketImage.js";
 
 // Um pixel RGBA branco (255,255,255,255) ou preto (0,0,0,255) — luminância
 // exatamente nos dois extremos, sem ambiguidade de threshold.
-function pixel(r: number, g: number, b: number): [number, number, number, number] {
+function pixel(
+  r: number,
+  g: number,
+  b: number,
+): [number, number, number, number] {
   return [r, g, b, 255];
 }
 
-function makePixels(rows: [number, number, number, number][][]): Uint8ClampedArray {
+function makePixels(
+  rows: [number, number, number, number][][],
+): Uint8ClampedArray {
   const flat: number[] = [];
   for (const row of rows) {
     for (const p of row) {
@@ -111,13 +117,30 @@ describe("buildRasterImageCommand", () => {
   it("largura de 16 dots vira 2 bytes por linha", () => {
     const pixels = makePixels([
       [
-        BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
-        WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE,
+        BLACK,
+        BLACK,
+        BLACK,
+        BLACK,
+        BLACK,
+        BLACK,
+        BLACK,
+        BLACK,
+        WHITE,
+        WHITE,
+        WHITE,
+        WHITE,
+        WHITE,
+        WHITE,
+        WHITE,
+        WHITE,
       ],
     ]);
 
     const command = buildRasterImageCommand(pixels, 16, 1);
-    assert.deepEqual(command.subarray(0, 8), Buffer.from([0x1d, 0x76, 0x30, 0x00, 0x02, 0x00, 0x01, 0x00]));
+    assert.deepEqual(
+      command.subarray(0, 8),
+      Buffer.from([0x1d, 0x76, 0x30, 0x00, 0x02, 0x00, 0x01, 0x00]),
+    );
     assert.deepEqual(command.subarray(8), Buffer.from([0xff, 0x00]));
   });
 

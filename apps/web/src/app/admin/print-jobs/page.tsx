@@ -31,8 +31,18 @@ const EXAMPLE_KITCHEN_CONTENT = {
 const EXAMPLE_COMMAND_CHECK_CONTENT = {
   commandNumber: 37,
   items: [
-    { productName: "Pão na Chapa com Ovos Mexidos e Bacon", quantity: 1, unitPrice: 28, lineTotal: 28 },
-    { productName: "Café com Leite (Pingado)", quantity: 1, unitPrice: 16, lineTotal: 16 },
+    {
+      productName: "Pão na Chapa com Ovos Mexidos e Bacon",
+      quantity: 1,
+      unitPrice: 28,
+      lineTotal: 28,
+    },
+    {
+      productName: "Café com Leite (Pingado)",
+      quantity: 1,
+      unitPrice: 16,
+      lineTotal: 16,
+    },
   ],
   total: 44,
 };
@@ -79,12 +89,14 @@ export default function PrintJobsAdminPage() {
             </h2>
             <p className="text-ink-soft mt-0.5 text-sm">
               Como as comandas saem na impressora hoje — cupom de pedido
-              (cozinha/bar) e cupom de conferência (caixa). Dados fictícios,
-              só para referência de layout.
+              (cozinha/bar) e cupom de conferência (caixa). Dados fictícios, só
+              para referência de layout.
             </p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <KitchenTicketPreview content={EXAMPLE_KITCHEN_CONTENT} />
-              <CommandCheckTicketPreview content={EXAMPLE_COMMAND_CHECK_CONTENT} />
+              <CommandCheckTicketPreview
+                content={EXAMPLE_COMMAND_CHECK_CONTENT}
+              />
             </div>
           </div>
 

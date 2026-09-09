@@ -155,7 +155,7 @@ export default function CommandQrCodesAdminPage() {
               (number) => (
                 <div
                   key={number}
-                  className="flex flex-col items-center gap-2 border border-dashed border-black p-4 break-inside-avoid"
+                  className="flex break-inside-avoid flex-col items-center gap-2 border border-dashed border-black p-4"
                 >
                   <div className="flex items-center gap-1.5">
                     <LogoBadge size={20} />
@@ -216,12 +216,7 @@ function QrCodeCard({
       <QRCodeSVG ref={svgRef} value={url} size={96} />
       {/* Hidden — only used to produce a PNG on demand (canvas pixels
           render regardless of CSS visibility). */}
-      <QRCodeCanvas
-        ref={canvasRef}
-        value={url}
-        size={256}
-        className="hidden"
-      />
+      <QRCodeCanvas ref={canvasRef} value={url} size={256} className="hidden" />
       <div className="flex gap-1.5">
         <button
           type="button"

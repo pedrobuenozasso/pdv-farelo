@@ -154,13 +154,21 @@ describe("parsePrintJobs", () => {
     assert.throws(() => parsePrintJobs({ not: "an array" }), /não é um array/);
   });
 
-  it("lança um erro quando um PrintJob não tem \"type\" válido", () => {
+  it('lança um erro quando um PrintJob não tem "type" válido', () => {
     assert.throws(() => parsePrintJobs([{ id: "only-id" }]), /"type"/);
   });
 
   it("lança um erro quando um KITCHEN_TICKET não tem os campos esperados", () => {
     assert.throws(
-      () => parsePrintJobs([{ id: "only-id", type: "KITCHEN_TICKET", status: "PENDING", createdAt: "2026-01-01T12:00:00Z" }]),
+      () =>
+        parsePrintJobs([
+          {
+            id: "only-id",
+            type: "KITCHEN_TICKET",
+            status: "PENDING",
+            createdAt: "2026-01-01T12:00:00Z",
+          },
+        ]),
       /orderId/,
     );
   });
@@ -188,12 +196,17 @@ describe("parsePrintJobs", () => {
     assert.equal(jobs[0]?.content, null);
     assert.equal(jobs[0]?.commandNumber, 37);
     assert.equal(jobs[0]?.commandCheckContent?.total, 16);
-    assert.equal(jobs[0]?.commandCheckContent?.items[0]?.productName, "Cappuccino");
+    assert.equal(
+      jobs[0]?.commandCheckContent?.items[0]?.productName,
+      "Cappuccino",
+    );
     assert.equal(jobs[0]?.commandCheckContent?.items[0]?.lineTotal, 16);
   });
 
   it("lança um erro quando um COMMAND_CHECK não tem commandCheckContent", () => {
-    const malformed = [{ ...commandCheckResponseFixture[0], commandCheckContent: null }];
+    const malformed = [
+      { ...commandCheckResponseFixture[0], commandCheckContent: null },
+    ];
     assert.throws(() => parsePrintJobs(malformed), /commandCheckContent/);
   });
 });

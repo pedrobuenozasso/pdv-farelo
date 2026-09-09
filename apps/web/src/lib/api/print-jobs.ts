@@ -62,7 +62,9 @@ export async function listPendingPrintJobs(): Promise<PrintJob[]> {
 // POST /api/v1/commands/{number}/print-conference (FARELO-211/212) —
 // queues a COMMAND_CHECK job for the comanda; the actual printing happens
 // asynchronously via the Edge Agent, same as every other PrintJob.
-export async function printConference(commandNumber: number): Promise<PrintJob> {
+export async function printConference(
+  commandNumber: number,
+): Promise<PrintJob> {
   const response = await fetch(
     `/api/v1/commands/${commandNumber}/print-conference`,
     { method: "POST", headers: authHeaders() },

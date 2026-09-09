@@ -27,7 +27,9 @@ export type ApplyDiscountInput =
   | { type: "FIXED_AMOUNT"; amount: number; reason?: string }
   | { type: "PERCENTAGE"; percentage: number; reason?: string };
 
-export async function listDiscounts(commandNumber: number): Promise<Discount[]> {
+export async function listDiscounts(
+  commandNumber: number,
+): Promise<Discount[]> {
   const response = await fetch(`/api/v1/commands/${commandNumber}/discounts`, {
     cache: "no-store",
     headers: authHeaders(),

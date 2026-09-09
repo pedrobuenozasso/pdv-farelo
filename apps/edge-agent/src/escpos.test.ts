@@ -13,7 +13,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildEscPosTicket, buildCommandCheckEscPosTicket } from "./escpos.js";
-import type { CommandCheckContent, PrintJobContent } from "./printJobsClient.js";
+import type {
+  CommandCheckContent,
+  PrintJobContent,
+} from "./printJobsClient.js";
 
 const baseContent: PrintJobContent = {
   commandNumber: 37,

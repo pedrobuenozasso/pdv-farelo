@@ -108,7 +108,16 @@ function parsePrintJob(raw: unknown, index: number): PrintJob {
     throw new Error(`PrintJob no índice ${index} não é um objeto`);
   }
 
-  const { id, type, orderId, commandNumber, content, commandCheckContent, status, createdAt } = raw;
+  const {
+    id,
+    type,
+    orderId,
+    commandNumber,
+    content,
+    commandCheckContent,
+    status,
+    createdAt,
+  } = raw;
 
   if (typeof id !== "string") {
     throw new Error(`PrintJob no índice ${index} não tem "id" (string)`);
@@ -127,7 +136,9 @@ function parsePrintJob(raw: unknown, index: number): PrintJob {
 
   if (type === "KITCHEN_TICKET") {
     if (typeof orderId !== "string") {
-      throw new Error(`PrintJob "${id}" (KITCHEN_TICKET) não tem "orderId" (string)`);
+      throw new Error(
+        `PrintJob "${id}" (KITCHEN_TICKET) não tem "orderId" (string)`,
+      );
     }
     return {
       id,
@@ -142,7 +153,9 @@ function parsePrintJob(raw: unknown, index: number): PrintJob {
   }
 
   if (typeof commandNumber !== "number") {
-    throw new Error(`PrintJob "${id}" (COMMAND_CHECK) não tem "commandNumber" (number)`);
+    throw new Error(
+      `PrintJob "${id}" (COMMAND_CHECK) não tem "commandNumber" (number)`,
+    );
   }
   return {
     id,
@@ -164,7 +177,14 @@ function parsePrintJobContent(
     throw new Error(`PrintJob "${printJobId}" não tem "content" (objeto)`);
   }
 
-  const { commandNumber, productionStation, items, customerName, customerPhone, orderCreatedAt } = raw;
+  const {
+    commandNumber,
+    productionStation,
+    items,
+    customerName,
+    customerPhone,
+    orderCreatedAt,
+  } = raw;
 
   if (typeof commandNumber !== "number") {
     throw new Error(
@@ -245,7 +265,9 @@ function parseCommandCheckContent(
   printJobId: string,
 ): CommandCheckContent {
   if (!isRecord(raw)) {
-    throw new Error(`PrintJob "${printJobId}" não tem "commandCheckContent" (objeto)`);
+    throw new Error(
+      `PrintJob "${printJobId}" não tem "commandCheckContent" (objeto)`,
+    );
   }
 
   const { commandNumber, items, total } = raw;
@@ -256,15 +278,21 @@ function parseCommandCheckContent(
     );
   }
   if (!Array.isArray(items)) {
-    throw new Error(`PrintJob "${printJobId}".commandCheckContent não tem "items" (array)`);
+    throw new Error(
+      `PrintJob "${printJobId}".commandCheckContent não tem "items" (array)`,
+    );
   }
   if (typeof total !== "number") {
-    throw new Error(`PrintJob "${printJobId}".commandCheckContent não tem "total" (number)`);
+    throw new Error(
+      `PrintJob "${printJobId}".commandCheckContent não tem "total" (number)`,
+    );
   }
 
   return {
     commandNumber,
-    items: items.map((item, index) => parseCommandCheckItem(item, printJobId, index)),
+    items: items.map((item, index) =>
+      parseCommandCheckItem(item, printJobId, index),
+    ),
     total,
   };
 }

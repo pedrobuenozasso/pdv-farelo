@@ -27,7 +27,11 @@ export type OrderType = "COMANDA" | "BALCAO";
 // OrderItemCancelReason on the backend exactly (same string values, sent
 // as-is in cancelOrderItem's request body).
 export type OrderItemCancelReason =
-  "CUSTOMER_REQUEST" | "ENTRY_ERROR" | "OUT_OF_STOCK" | "QUALITY_ISSUE" | "OTHER";
+  | "CUSTOMER_REQUEST"
+  | "ENTRY_ERROR"
+  | "OUT_OF_STOCK"
+  | "QUALITY_ISSUE"
+  | "OTHER";
 
 export type OrderItem = {
   id: string;

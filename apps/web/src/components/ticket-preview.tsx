@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
 
-import type { CommandCheckContent, PrintJobContent } from "@/lib/api/print-jobs";
+import type {
+  CommandCheckContent,
+  PrintJobContent,
+} from "@/lib/api/print-jobs";
 
 // Pré-visualização HTML do que a impressora térmica realmente produz —
 // espelha fielmente `apps/edge-agent/src/ticketImage.ts` (modo gráfico,
@@ -18,7 +21,9 @@ const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
 });
 
 function stationLabel(productionStation: string | null): string {
-  return productionStation ? `Estação: ${productionStation}` : "Estação: (sem estação)";
+  return productionStation
+    ? `Estação: ${productionStation}`
+    : "Estação: (sem estação)";
 }
 
 function money(value: number): string {
@@ -49,7 +54,9 @@ function LeftLabel({ children }: { children: ReactNode }) {
 }
 
 function Line({ children }: { children: ReactNode }) {
-  return <div className="mt-1 text-base leading-snug font-bold">{children}</div>;
+  return (
+    <div className="mt-1 text-base leading-snug font-bold">{children}</div>
+  );
 }
 
 function Section({ children }: { children: ReactNode }) {
@@ -61,11 +68,17 @@ function Section({ children }: { children: ReactNode }) {
  * preços), impresso na estação de produção (cozinha/bar) quando um pedido é
  * criado.
  */
-export function KitchenTicketPreview({ content }: { content: PrintJobContent }) {
+export function KitchenTicketPreview({
+  content,
+}: {
+  content: PrintJobContent;
+}) {
   return (
     <TicketPaper>
       <Header>Farelo de Bolo</Header>
-      <div className="text-center text-base font-bold">Comanda {content.commandNumber}</div>
+      <div className="text-center text-base font-bold">
+        Comanda {content.commandNumber}
+      </div>
       <LeftLabel>{stationLabel(content.productionStation)}</LeftLabel>
 
       <Section>
@@ -87,7 +100,9 @@ export function KitchenTicketPreview({ content }: { content: PrintJobContent }) 
       </Section>
 
       <Section>
-        <Line>Pedido às {timeFormatter.format(new Date(content.orderCreatedAt))}</Line>
+        <Line>
+          Pedido às {timeFormatter.format(new Date(content.orderCreatedAt))}
+        </Line>
         <Line>Cliente: {content.customerName ?? NOT_INFORMED}</Line>
       </Section>
 
@@ -104,18 +119,27 @@ export function KitchenTicketPreview({ content }: { content: PrintJobContent }) 
  * "conferência" (com preços e total), impressa no caixa na hora de
  * fechar/conferir a comanda.
  */
-export function CommandCheckTicketPreview({ content }: { content: CommandCheckContent }) {
+export function CommandCheckTicketPreview({
+  content,
+}: {
+  content: CommandCheckContent;
+}) {
   return (
     <TicketPaper>
       <Header>Conferência</Header>
-      <div className="text-center text-base font-bold">Comanda {content.commandNumber}</div>
+      <div className="text-center text-base font-bold">
+        Comanda {content.commandNumber}
+      </div>
 
       <Section>
         {content.items.length === 0 ? (
           <Line>(sem itens)</Line>
         ) : (
           content.items.map((item, index) => (
-            <div key={index} className="mt-1 flex justify-between gap-3 text-base leading-snug">
+            <div
+              key={index}
+              className="mt-1 flex justify-between gap-3 text-base leading-snug"
+            >
               <span>
                 {item.quantity}x {item.productName}
               </span>
@@ -125,7 +149,9 @@ export function CommandCheckTicketPreview({ content }: { content: CommandCheckCo
         )}
       </Section>
 
-      <div className="mt-4 text-center text-lg font-bold">TOTAL: R$ {money(content.total)}</div>
+      <div className="mt-4 text-center text-lg font-bold">
+        TOTAL: R$ {money(content.total)}
+      </div>
     </TicketPaper>
   );
 }

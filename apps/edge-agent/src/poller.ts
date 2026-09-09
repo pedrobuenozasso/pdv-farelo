@@ -109,7 +109,9 @@ async function printJob(
     // que está populado (content vs. commandCheckContent), mesmo princípio
     // documentado em printJobsClient.ts.
     const station =
-      job.type === "COMMAND_CHECK" ? CONFERENCE_STATION_KEY : job.content!.productionStation;
+      job.type === "COMMAND_CHECK"
+        ? CONFERENCE_STATION_KEY
+        : job.content!.productionStation;
     const address = deps.resolvePrinterAddress(station);
     if (!address) {
       throw new Error(

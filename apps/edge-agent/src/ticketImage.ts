@@ -26,7 +26,10 @@
 
 import { createCanvas, type SKRSContext2D } from "@napi-rs/canvas";
 
-import type { CommandCheckContent, PrintJobContent } from "./printJobsClient.js";
+import type {
+  CommandCheckContent,
+  PrintJobContent,
+} from "./printJobsClient.js";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -87,7 +90,12 @@ type PreparedLine = {
 };
 
 /** Quebra `text` em linhas que cabem em `maxWidth`, sem cortar palavra ao meio. */
-function wrapText(ctx: SKRSContext2D, text: string, font: string, maxWidth: number): string[] {
+function wrapText(
+  ctx: SKRSContext2D,
+  text: string,
+  font: string,
+  maxWidth: number,
+): string[] {
   ctx.font = font;
   const words = text.split(" ");
   const lines: string[] = [];
@@ -107,7 +115,9 @@ function wrapText(ctx: SKRSContext2D, text: string, font: string, maxWidth: numb
 }
 
 function stationLabel(productionStation: string | null): string {
-  return productionStation ? `Estação: ${productionStation}` : "Estação: (sem estação)";
+  return productionStation
+    ? `Estação: ${productionStation}`
+    : "Estação: (sem estação)";
 }
 
 function formatOrderTime(orderCreatedAt: string): string {
@@ -127,11 +137,19 @@ function money(value: number): string {
  * texto. `ctx` aqui e so usado pra medir texto (`measureText`), nunca pra
  * desenhar — desenhar acontece depois, em `drawTicket`.
  */
-function layoutKitchenTicket(ctx: SKRSContext2D, content: PrintJobContent): PreparedLine[] {
+function layoutKitchenTicket(
+  ctx: SKRSContext2D,
+  content: PrintJobContent,
+): PreparedLine[] {
   const lines: PreparedLine[] = [];
   let y = TOP_MARGIN;
 
-  function push(text: string, font: string, align: Align, lineHeight: number): void {
+  function push(
+    text: string,
+    font: string,
+    align: Align,
+    lineHeight: number,
+  ): void {
     y += lineHeight;
     lines.push({ text, y, font, align });
   }
@@ -140,13 +158,33 @@ function layoutKitchenTicket(ctx: SKRSContext2D, content: PrintJobContent): Prep
   // abaixo, como identificador secundário (pedido do Pedro: o nome do
   // café é o maior destaque, não o número da comanda).
   push("Farelo de Bolo", FONT_HEADER, "center", LINE_HEIGHT_HEADER);
-  push(`Comanda ${content.commandNumber}`, FONT_LABEL, "center", LINE_HEIGHT_LABEL);
+  push(
+    `Comanda ${content.commandNumber}`,
+    FONT_LABEL,
+    "center",
+    LINE_HEIGHT_LABEL,
+  );
   y += SECTION_GAP / 2;
-  push(stationLabel(content.productionStation), FONT_LABEL, "left", LINE_HEIGHT_LABEL);
+  push(
+    stationLabel(content.productionStation),
+    FONT_LABEL,
+    "left",
+    LINE_HEIGHT_LABEL,
+  );
   y += SECTION_GAP;
 
-  push(`Cliente: ${content.customerName ?? NOT_INFORMED}`, FONT_BODY, "left", LINE_HEIGHT_BODY);
-  push(`Fone: ${content.customerPhone ?? NOT_INFORMED}`, FONT_BODY, "left", LINE_HEIGHT_BODY);
+  push(
+    `Cliente: ${content.customerName ?? NOT_INFORMED}`,
+    FONT_BODY,
+    "left",
+    LINE_HEIGHT_BODY,
+  );
+  push(
+    `Fone: ${content.customerPhone ?? NOT_INFORMED}`,
+    FONT_BODY,
+    "left",
+    LINE_HEIGHT_BODY,
+  );
   y += SECTION_GAP;
 
   push("ITENS", FONT_LABEL, "center", LINE_HEIGHT_LABEL);
@@ -167,8 +205,18 @@ function layoutKitchenTicket(ctx: SKRSContext2D, content: PrintJobContent): Prep
   }
   y += SECTION_GAP;
 
-  push(`Pedido às ${formatOrderTime(content.orderCreatedAt)}`, FONT_BODY, "left", LINE_HEIGHT_BODY);
-  push(`Cliente: ${content.customerName ?? NOT_INFORMED}`, FONT_BODY, "left", LINE_HEIGHT_BODY);
+  push(
+    `Pedido às ${formatOrderTime(content.orderCreatedAt)}`,
+    FONT_BODY,
+    "left",
+    LINE_HEIGHT_BODY,
+  );
+  push(
+    `Cliente: ${content.customerName ?? NOT_INFORMED}`,
+    FONT_BODY,
+    "left",
+    LINE_HEIGHT_BODY,
+  );
   y += SECTION_GAP;
 
   // Rodapé centralizado, mesmo destaque visual do "ITENS"/header — pedido
@@ -209,7 +257,12 @@ function layoutCommandCheckTicket(
   }
 
   push("Conferência", FONT_HEADER, "center", LINE_HEIGHT_HEADER);
-  push(`Comanda ${content.commandNumber}`, FONT_LABEL, "center", LINE_HEIGHT_LABEL);
+  push(
+    `Comanda ${content.commandNumber}`,
+    FONT_LABEL,
+    "center",
+    LINE_HEIGHT_LABEL,
+  );
   y += SECTION_GAP;
 
   if (content.items.length === 0) {
@@ -243,7 +296,12 @@ function layoutCommandCheckTicket(
   }
 
   y += SECTION_GAP;
-  push(`TOTAL: R$ ${money(content.total)}`, FONT_TOTAL, "center", LINE_HEIGHT_TOTAL);
+  push(
+    `TOTAL: R$ ${money(content.total)}`,
+    FONT_TOTAL,
+    "center",
+    LINE_HEIGHT_TOTAL,
+  );
 
   return lines;
 }
@@ -354,17 +412,27 @@ export function buildEscPosImageTicket(content: PrintJobContent): Buffer {
   const measureCtx = measuringContext();
   const lines = layoutKitchenTicket(measureCtx, content);
   const imageData = drawTicket(lines, finalHeight(lines));
-  const raster = buildRasterImageCommand(imageData.data, WIDTH_DOTS, imageData.height);
+  const raster = buildRasterImageCommand(
+    imageData.data,
+    WIDTH_DOTS,
+    imageData.height,
+  );
 
   return Buffer.concat([INIT, raster, Buffer.from([LF, LF, LF, LF]), CUT]);
 }
 
 /** Conferencia (com precos e total) em modo grafico — substitui `escpos.ts#buildCommandCheckEscPosTicket` em `poller.ts`. */
-export function buildCommandCheckEscPosImageTicket(content: CommandCheckContent): Buffer {
+export function buildCommandCheckEscPosImageTicket(
+  content: CommandCheckContent,
+): Buffer {
   const measureCtx = measuringContext();
   const lines = layoutCommandCheckTicket(measureCtx, content);
   const imageData = drawTicket(lines, finalHeight(lines));
-  const raster = buildRasterImageCommand(imageData.data, WIDTH_DOTS, imageData.height);
+  const raster = buildRasterImageCommand(
+    imageData.data,
+    WIDTH_DOTS,
+    imageData.height,
+  );
 
   return Buffer.concat([INIT, raster, Buffer.from([LF, LF, LF, LF]), CUT]);
 }

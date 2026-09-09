@@ -48,7 +48,9 @@ function makeCommandCheckJob(overrides: Partial<PrintJob> = {}): PrintJob {
     content: null,
     commandCheckContent: {
       commandNumber: 37,
-      items: [{ productName: "Cappuccino", quantity: 2, unitPrice: 8, lineTotal: 16 }],
+      items: [
+        { productName: "Cappuccino", quantity: 2, unitPrice: 8, lineTotal: 16 },
+      ],
       total: 16,
     },
     status: "PENDING",
@@ -81,7 +83,9 @@ describe("pollOnce", () => {
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterAddress: () => ({ host: "192.168.0.10", port: 9100 }),
       buildEscPosTicket: () => Buffer.from("ticket-bytes"),
-      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
+      buildCommandCheckEscPosTicket: neverCalled(
+        "buildCommandCheckEscPosTicket",
+      ),
       printOverTcp: async (host, port, ticket) => {
         printOverTcpCalls.push({ host, port, ticket });
       },
@@ -108,7 +112,9 @@ describe("pollOnce", () => {
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterAddress: () => null,
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
-      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
+      buildCommandCheckEscPosTicket: neverCalled(
+        "buildCommandCheckEscPosTicket",
+      ),
       printOverTcp: neverCalled("printOverTcp"),
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
       reportPrintJobFailed: async (_apiBaseUrl, jobId) => {
@@ -129,7 +135,9 @@ describe("pollOnce", () => {
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterAddress: () => ({ host: "192.168.0.10", port: 9100 }),
       buildEscPosTicket: () => Buffer.from("ticket-bytes"),
-      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
+      buildCommandCheckEscPosTicket: neverCalled(
+        "buildCommandCheckEscPosTicket",
+      ),
       printOverTcp: async () => {
         throw new Error("ECONNREFUSED (impressora offline, simulado)");
       },
@@ -151,7 +159,9 @@ describe("pollOnce", () => {
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterAddress: () => null,
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
-      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
+      buildCommandCheckEscPosTicket: neverCalled(
+        "buildCommandCheckEscPosTicket",
+      ),
       printOverTcp: neverCalled("printOverTcp"),
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
       reportPrintJobFailed: async () => {
@@ -170,7 +180,9 @@ describe("pollOnce", () => {
       },
       resolvePrinterAddress: neverCalled("resolvePrinterAddress"),
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
-      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
+      buildCommandCheckEscPosTicket: neverCalled(
+        "buildCommandCheckEscPosTicket",
+      ),
       printOverTcp: neverCalled("printOverTcp"),
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
       reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
@@ -211,7 +223,9 @@ describe("pollOnce", () => {
       resolvePrinterAddress: (station) =>
         station === "BAR" ? { host: "192.168.0.10", port: 9100 } : null,
       buildEscPosTicket: () => Buffer.from("ticket-bytes"),
-      buildCommandCheckEscPosTicket: neverCalled("buildCommandCheckEscPosTicket"),
+      buildCommandCheckEscPosTicket: neverCalled(
+        "buildCommandCheckEscPosTicket",
+      ),
       printOverTcp: async () => {},
       reportPrintJobPrinted: async (_apiBaseUrl, jobId) => {
         printedCalls.push(jobId);
@@ -235,7 +249,8 @@ describe("pollOnce", () => {
     const job = makeCommandCheckJob();
     const printedCalls: string[] = [];
     const resolveCalls: (string | null)[] = [];
-    const printOverTcpCalls: { host: string; port: number; ticket: Buffer }[] = [];
+    const printOverTcpCalls: { host: string; port: number; ticket: Buffer }[] =
+      [];
 
     const deps: PollerDeps = {
       fetchPendingPrintJobs: async () => [job],
@@ -244,7 +259,8 @@ describe("pollOnce", () => {
         return { host: "192.168.0.20", port: 9100 };
       },
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
-      buildCommandCheckEscPosTicket: () => Buffer.from("conference-ticket-bytes"),
+      buildCommandCheckEscPosTicket: () =>
+        Buffer.from("conference-ticket-bytes"),
       printOverTcp: async (host, port, ticket) => {
         printOverTcpCalls.push({ host, port, ticket });
       },
