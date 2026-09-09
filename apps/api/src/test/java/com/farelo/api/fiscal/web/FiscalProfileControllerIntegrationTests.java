@@ -4,6 +4,7 @@ import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.catalog.ProductRepository;
 import com.farelo.api.fiscal.FiscalProfile;
 import com.farelo.api.fiscal.FiscalProfileRepository;
+import com.farelo.api.ordering.OrderItemRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,6 +50,21 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * with {@code category}: {@code productRepository.deleteAll()} runs first,
  * in this class's own {@code @BeforeEach}, rather than relying on every
  * other class to clean up after itself.
+ *
+ * <p><b>{@code order_item.product_id}</b>: same reasoning one level deeper.
+ * {@code OrderControllerIntegrationTests}' {@code createActiveProduct}/
+ * {@code createOrder} helpers create real {@code Product}/{@code Order}/
+ * {@code OrderItem} rows against the same shared Testcontainers Postgres
+ * and never delete them (only {@code Command} status is reset in that
+ * class's own {@code @AfterEach}) — a longstanding pattern, not something
+ * this ticket introduced. It only surfaces here because Surefire's default
+ * {@code runOrder} is filesystem-dependent (confirmed: passes locally on
+ * macOS, failed in CI on Linux — same class list, different order), so
+ * whether a leftover {@code OrderItem} exists when this class's
+ * {@code @BeforeEach} runs is a matter of luck, not something to rely on.
+ * {@code orderItemRepository.deleteAll()} runs before
+ * {@code productRepository.deleteAll()} for the same reason the paragraph
+ * above already gives for {@code fiscal_profile}.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -64,12 +80,16 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     private ProductRepository productRepository;
 
     @Autowired
+    private OrderItemRepository orderItemRepository;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void cleanFiscalProfileTable() {
-        // product first — it FKs into fiscal_profile as of FARELO-151. See
-        // this class's javadoc.
+        // order_item first — it FKs into product, which FKs into
+        // fiscal_profile as of FARELO-151. See this class's javadoc.
+        orderItemRepository.deleteAll();
         productRepository.deleteAll();
         fiscalProfileRepository.deleteAll();
     }

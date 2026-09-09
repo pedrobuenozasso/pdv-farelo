@@ -10,6 +10,7 @@ import com.farelo.api.catalog.ProductRepository;
 import com.farelo.api.catalog.ProductionStation;
 import com.farelo.api.fiscal.FiscalProfile;
 import com.farelo.api.fiscal.FiscalProfileRepository;
+import com.farelo.api.ordering.OrderItemRepository;
 import com.farelo.api.security.User;
 import com.farelo.api.security.UserRepository;
 import com.farelo.api.security.UserRole;
@@ -98,9 +99,19 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private AuditLogRepository auditLogRepository;
 
+    @Autowired
+    private OrderItemRepository orderItemRepository;
+
     @BeforeEach
     void cleanCatalogTables() {
-        // product first — it FKs into both category and fiscal_profile.
+        // order_item first — it FKs into product, which FKs into both
+        // category and fiscal_profile. Same leftover-OrderItem reasoning
+        // documented on FiscalProfileControllerIntegrationTests' javadoc
+        // (OrderControllerIntegrationTests' test helpers never clean up the
+        // Order/OrderItem/Product rows they create against this same shared
+        // Testcontainers Postgres, and Surefire's run order is filesystem-
+        // dependent, not alphabetical).
+        orderItemRepository.deleteAll();
         productRepository.deleteAll();
         categoryRepository.deleteAll();
         fiscalProfileRepository.deleteAll();

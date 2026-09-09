@@ -68,6 +68,26 @@ import static org.assertj.core.api.Assertions.assertThat;
  * phone) / 43 (other-transition case) — distinct from every number already
  * spoken for elsewhere (1-20, 30-34, 40, 101, 999 — see {@code
  * OrderReadyNotificationServiceIntegrationTests}' javadoc for 40).
+ *
+ * <p><b>Phone numbers {@code 5511966666660}/{@code 5511955555550}</b>:
+ * deliberately not {@code 5511999999999}/{@code 5511977777777} (this class's
+ * values until this fix) — those two are also hardcoded fixtures in half a
+ * dozen other test classes ({@code OrderReadyNotificationServiceIntegrationTests},
+ * {@code NotificationRepositoryIntegrationTests}, {@code
+ * NotificationSenderIntegrationTests}, {@code NotificationSendControllerIntegrationTests},
+ * {@code NotificationControllerIntegrationTests}, {@code
+ * WhatsAppCloudApiClientTests}). Surefire's run order is filesystem-
+ * dependent (see the class javadoc above) — on an order where one of those
+ * classes runs first and leaves a {@code Notification} row with the same
+ * recipient behind, this class's own {@code notificationRepository.findAll()
+ * .filter(recipient equals ...)} assertions above pick up someone else's
+ * leftover row instead of (or alongside) the one this test just created,
+ * intermittently asserting the wrong status. Confirmed via CI (Linux) vs.
+ * local (macOS) producing different results against the identical commit —
+ * exactly that kind of ordering-dependent collision, not a real regression.
+ * Picking numbers unique to this file sidesteps the collision without
+ * auditing/fixing cleanup in every other class that already uses the shared
+ * ones.
  */
 @SpringBootTest
 class OutboxWorkerOrderReadyIntegrationTests extends AbstractIntegrationTest {
@@ -194,7 +214,7 @@ class OutboxWorkerOrderReadyIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void orderReadyWithPhoneEventuallyResultsInASentNotification() {
-        OrderWithItems created = createOrder(COMMAND_WITH_PHONE, "Maria", "5511999999999");
+        OrderWithItems created = createOrder(COMMAND_WITH_PHONE, "Maria", "5511966666660");
         UUID orderId = created.order().getId();
 
         // OrderCreated event published by create() above.
@@ -211,7 +231,7 @@ class OutboxWorkerOrderReadyIntegrationTests extends AbstractIntegrationTest {
 
         List<Notification> allNotifications = notificationRepository.findAll();
         Optional<Notification> maybeNotification = allNotifications.stream()
-                .filter(n -> n.getRecipient().equals("5511999999999"))
+                .filter(n -> n.getRecipient().equals("5511966666660"))
                 .findFirst();
         assertThat(maybeNotification).isPresent();
 
@@ -260,7 +280,7 @@ class OutboxWorkerOrderReadyIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void transitioningToPreparingOnlyDoesNotPublishOrderReadyOrCreateANotification() {
-        OrderWithItems created = createOrder(COMMAND_OTHER_TRANSITION, "Ana", "5511977777777");
+        OrderWithItems created = createOrder(COMMAND_OTHER_TRANSITION, "Ana", "5511955555550");
         UUID orderId = created.order().getId();
 
         outboxWorker.processPendingEvents();
@@ -273,7 +293,7 @@ class OutboxWorkerOrderReadyIntegrationTests extends AbstractIntegrationTest {
         assertThat(processed).isEmpty();
 
         boolean anyNotificationForThisRecipient = notificationRepository.findAll().stream()
-                .anyMatch(n -> n.getRecipient().equals("5511977777777"));
+                .anyMatch(n -> n.getRecipient().equals("5511955555550"));
         assertThat(anyNotificationForThisRecipient).isFalse();
     }
 
