@@ -37,9 +37,18 @@ public class UserService {
      */
     @Transactional
     public User create(String name, String email, String rawPassword, UserRole role) {
+        return create(name, email, null, rawPassword, role);
+    }
+
+    @Transactional
+    public User create(String name, String email, String username, String rawPassword, UserRole role) {
+        email = emptyToNull(email);
+        username = emptyToNull(username);
         requireEmailNotTaken(email, null);
+        requireUsernameNotTaken(username, null);
 
         User user = new User(name, email, passwordEncoder.encode(rawPassword), role);
+        user.setUsername(username);
         return userRepository.save(user);
     }
 
@@ -63,11 +72,20 @@ public class UserService {
      */
     @Transactional
     public User update(UUID id, String name, String email, UserRole role, boolean active) {
+        return update(id, name, email, null, role, active);
+    }
+
+    @Transactional
+    public User update(UUID id, String name, String email, String username, UserRole role, boolean active) {
         User user = getById(id);
+        email = emptyToNull(email);
+        username = emptyToNull(username);
         requireEmailNotTaken(email, id);
+        requireUsernameNotTaken(username, id);
 
         user.setName(name);
         user.setEmail(email);
+        user.setUsername(username);
         user.setRole(role);
         user.setActive(active);
 
@@ -102,11 +120,24 @@ public class UserService {
     }
 
     private void requireEmailNotTaken(String email, UUID exceptUserId) {
+        if (email == null) return;
         userRepository.findByEmail(email)
                 .filter(existing -> !existing.getId().equals(exceptUserId))
                 .ifPresent(existing -> {
                     throw new UserEmailAlreadyExistsException(email);
                 });
+    }
+
+    private void requireUsernameNotTaken(String username, UUID exceptUserId) {
+        if (username == null) return;
+        final String checkedUsername = username;
+        userRepository.findByUsernameIgnoreCase(username)
+                .filter(existing -> !existing.getId().equals(exceptUserId))
+                .ifPresent(existing -> { throw new UserUsernameAlreadyExistsException(checkedUsername); });
+    }
+
+    private static String emptyToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
 }

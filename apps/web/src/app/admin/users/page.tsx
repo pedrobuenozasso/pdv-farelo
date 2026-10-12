@@ -37,23 +37,31 @@ const inputClass =
 
 const userFormSchema = z.object({
   name: z.string().trim().min(1, "Nome é obrigatório"),
-  email: z
-    .string()
-    .trim()
-    .min(1, "Email é obrigatório")
-    .email("Email inválido"),
+  email: z.union([z.literal(""), z.email("Email inválido")]),
+  username: z.union([
+    z.literal(""),
+    z.string().regex(/^[A-Za-z][A-Za-z0-9._-]{2,63}$/, "Use 3 a 64 caracteres: letras, números, ponto, hífen ou _"),
+  ]),
   role: z.enum(["ADMIN", "MANAGER", "CASHIER", "KITCHEN", "ATTENDANT"]),
 });
+
+const requireIdentifier = <T extends { email: string; username: string }>(values: T, ctx: z.RefinementCtx) => {
+  if (!values.email && !values.username) {
+    ctx.addIssue({ code: "custom", path: ["username"], message: "Informe nome de usuário ou e-mail" });
+  }
+};
 
 const createUserFormSchema = userFormSchema.extend({
   password: z
     .string()
     .min(8, "Mínimo 8 caracteres")
     .max(72, "Máximo 72 caracteres"),
-});
+}).superRefine(requireIdentifier);
+
+const editUserFormSchema = userFormSchema.extend({ active: z.boolean() }).superRefine(requireIdentifier);
 
 type CreateUserFormValues = z.infer<typeof createUserFormSchema>;
-type EditUserFormValues = z.infer<typeof userFormSchema> & { active: boolean };
+type EditUserFormValues = z.infer<typeof editUserFormSchema>;
 
 export default function UsersAdminPage() {
   const queryClient = useQueryClient();
@@ -73,7 +81,7 @@ export default function UsersAdminPage() {
     formState: { errors, isSubmitting },
   } = useForm<CreateUserFormValues>({
     resolver: zodResolver(createUserFormSchema),
-    defaultValues: { name: "", email: "", password: "", role: "ATTENDANT" },
+    defaultValues: { name: "", email: "", username: "", password: "", role: "ATTENDANT" },
   });
 
   const createMutation = useMutation({
@@ -123,7 +131,14 @@ export default function UsersAdminPage() {
                   ) : null}
                 </div>
                 <div className="flex min-w-[200px] flex-1 flex-col gap-1">
-                  <label className="text-sm font-medium">Email</label>
+                  <label className="text-sm font-medium">Nome de usuário</label>
+                  <input className={inputClass} {...register("username")} />
+                  {errors.username ? (
+                    <p className="text-red text-sm">{errors.username.message}</p>
+                  ) : null}
+                </div>
+                <div className="flex min-w-[200px] flex-1 flex-col gap-1">
+                  <label className="text-sm font-medium">E-mail (opcional)</label>
                   <input
                     type="email"
                     className={inputClass}
@@ -227,7 +242,10 @@ function UserRow({
       <div className="flex items-center gap-4 px-5 py-3.5">
         <div className="flex-1">
           <div className="text-sm font-semibold">{user.name}</div>
-          <div className="text-ink-faint text-xs">{user.email}</div>
+          {user.username ? (
+            <div className="text-ink-faint text-xs">@{user.username}</div>
+          ) : null}
+          {user.email ? <div className="text-ink-faint text-xs">{user.email}</div> : null}
         </div>
         <span className="text-ink-soft w-24 text-sm">
           {ROLE_LABEL[user.role]}
@@ -295,10 +313,11 @@ function UserEditForm({ user, onSaved }: { user: User; onSaved: () => void }) {
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<EditUserFormValues>({
-    resolver: zodResolver(userFormSchema.extend({ active: z.boolean() })),
+    resolver: zodResolver(editUserFormSchema),
     defaultValues: {
       name: user.name,
-      email: user.email,
+      email: user.email ?? "",
+      username: user.username ?? "",
       role: user.role,
       active: user.active,
     },
@@ -330,7 +349,13 @@ function UserEditForm({ user, onSaved }: { user: User; onSaved: () => void }) {
         ) : null}
       </div>
       <div className="flex min-w-[200px] flex-1 flex-col gap-1">
-        <input type="email" className={inputClass} {...register("email")} />
+        <input aria-label="Nome de usuário" className={inputClass} {...register("username")} />
+        {errors.username ? (
+          <p className="text-red text-xs">{errors.username.message}</p>
+        ) : null}
+      </div>
+      <div className="flex min-w-[200px] flex-1 flex-col gap-1">
+        <input aria-label="E-mail opcional" type="email" className={inputClass} {...register("email")} />
         {errors.email ? (
           <p className="text-red text-xs">{errors.email.message}</p>
         ) : null}

@@ -13,7 +13,7 @@ import { LogoBadge } from "@/components/logo-badge";
 import { Button } from "@/components/ui/button";
 
 const loginFormSchema = z.object({
-  email: z.string().trim().min(1, "Email é obrigatório"),
+  email: z.string().trim().min(1, "Usuário ou e-mail é obrigatório"),
   password: z.string().min(1, "Senha é obrigatória"),
 });
 
@@ -77,12 +77,12 @@ function LoginForm() {
         >
           <div className="flex flex-col gap-1.5">
             <label htmlFor="email" className="text-ink text-sm font-medium">
-              Email
+              Usuário ou e-mail
             </label>
             <input
               id="email"
-              type="email"
-              placeholder="voce@farelo.dev"
+              type="text"
+              placeholder="adm.farelodebolo"
               autoComplete="username"
               className="border-line bg-surface text-ink focus:border-primary rounded-lg border px-3.5 py-2.5 text-sm outline-none"
               {...register("email")}

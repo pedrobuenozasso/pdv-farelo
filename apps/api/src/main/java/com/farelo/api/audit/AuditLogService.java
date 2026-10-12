@@ -52,7 +52,8 @@ public class AuditLogService {
     public AuditLog record(
             User actor, String action, String entityType, UUID entityId, String previousValue, String newValue) {
         AuditLog auditLog = new AuditLog(
-                actor.getId(), actor.getName(), actor.getEmail(),
+                actor.getId(), actor.getName(),
+                actor.getEmail() != null ? actor.getEmail() : actor.getUsername(),
                 action, entityType, entityId, previousValue, newValue);
         return auditLogRepository.save(auditLog);
     }

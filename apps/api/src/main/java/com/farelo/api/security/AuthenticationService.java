@@ -11,8 +11,7 @@ import org.springframework.stereotype.Service;
  * (the {@code security.auth} sub-package) owns the token itself; this class
  * only decides <i>whether</i> a token gets issued at all.
  *
- * <p>Reuses {@link UserRepository#findByEmail} (already exposed for exactly
- * this purpose, see its javadoc) and the {@link PasswordEncoder} bean
+ * <p>Looks up either email or username and uses the {@link PasswordEncoder} bean
  * {@link PasswordEncoderConfig} already provides — no new hashing
  * dependency, per that class's javadoc ("FARELO-121 reaproveita o mesmo
  * bean").
@@ -56,8 +55,10 @@ public class AuthenticationService {
      * {@link InvalidCredentialsException}'s javadoc for why these three
      * distinct causes are never distinguishable from the response.
      */
-    public IssuedToken login(String email, String rawPassword) {
-        User user = userRepository.findByEmail(email).orElse(null);
+    public IssuedToken login(String identifier, String rawPassword) {
+        User user = (identifier.contains("@")
+                ? userRepository.findByEmail(identifier)
+                : userRepository.findByUsernameIgnoreCase(identifier)).orElse(null);
 
         String hashToVerifyAgainst = (user != null) ? user.getPasswordHash() : dummyPasswordHash;
         boolean passwordMatches = passwordEncoder.matches(rawPassword, hashToVerifyAgainst);

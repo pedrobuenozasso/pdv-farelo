@@ -99,7 +99,7 @@ public class UserController {
     public ResponseEntity<UserResponse> create(
             @Valid @RequestBody UserCreateRequest request,
             UriComponentsBuilder uriComponentsBuilder) {
-        User user = userService.create(request.name(), request.email(), request.password(), request.role());
+        User user = userService.create(request.name(), request.email(), request.username(), request.password(), request.role());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/users/{id}")
@@ -136,7 +136,7 @@ public class UserController {
 
     @PutMapping("/{id}")
     public UserResponse update(@PathVariable UUID id, @Valid @RequestBody UserUpdateRequest request) {
-        User user = userService.update(id, request.name(), request.email(), request.role(), request.active());
+        User user = userService.update(id, request.name(), request.email(), request.username(), request.role(), request.active());
         return UserResponse.from(user);
     }
 

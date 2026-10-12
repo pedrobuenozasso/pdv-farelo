@@ -36,10 +36,8 @@ import java.util.UUID;
  * — enforced at the DTO boundary, since the entity is never serialized
  * directly (AGENTS.md).
  *
- * <p><b>{@code email}</b>: required and unique (backed by {@code
- * uk_app_user_email} in {@code V20__create_user_table.sql}) — it will be the
- * login identifier once FARELO-121 exists, even though the login mechanism
- * itself doesn't exist yet.
+ * <p><b>Login identifier</b>: email or username is required. Email remains
+ * unique when present; username is case-insensitively unique (V50).
  *
  * <p><b>{@code role}</b>: see {@link UserRole}'s javadoc for why this field
  * is included now as schema preparation, despite RBAC (FARELO-122) not
@@ -73,8 +71,11 @@ public class User {
     @Column(name = "name", nullable = false)
     private String name;
 
-    @Column(name = "email", nullable = false, unique = true)
+    @Column(name = "email", unique = true)
     private String email;
+
+    @Column(name = "username", length = 64)
+    private String username;
 
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
@@ -133,6 +134,14 @@ public class User {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
     }
 
     public String getPasswordHash() {

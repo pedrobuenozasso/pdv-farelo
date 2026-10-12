@@ -112,6 +112,44 @@ class UserControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void createsAndUpdatesUsernameOnlyAccount() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Administrador","username":"adm.farelodebolo","password":"senha-forte-123","role":"ADMIN"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.username").value("adm.farelodebolo"))
+                .andExpect(jsonPath("$.email").isEmpty())
+                .andReturn();
+
+        UUID id = UUID.fromString(objectMapper.readTree(result.getResponse().getContentAsString()).get("id").asText());
+        assertThat(userRepository.findById(id).orElseThrow().getEmail()).isNull();
+
+        mockMvc.perform(put("/api/v1/users/{id}", id)
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Administrador Farelo","username":"adm.farelodebolo","email":"","role":"ADMIN","active":true}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("adm.farelodebolo"))
+                .andExpect(jsonPath("$.email").isEmpty());
+    }
+
+    @Test
+    void rejectsAccountWithoutEmailOrUsername() throws Exception {
+        mockMvc.perform(post("/api/v1/users")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Sem identificador","password":"senha-forte-123","role":"ADMIN"}
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void createsUserAndPersistsIt() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/users")
                         .header("Authorization", "Bearer " + adminToken())

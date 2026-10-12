@@ -19,6 +19,7 @@ import java.util.UUID;
 public record UserResponse(
         UUID id,
         String name,
+        String username,
         String email,
         UserRole role,
         boolean active,
@@ -29,6 +30,7 @@ public record UserResponse(
         return new UserResponse(
                 user.getId(),
                 user.getName(),
+                user.getUsername(),
                 user.getEmail(),
                 user.getRole(),
                 user.isActive(),

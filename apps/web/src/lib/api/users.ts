@@ -9,7 +9,8 @@ export type UserRole =
 export type User = {
   id: string;
   name: string;
-  email: string;
+  username: string | null;
+  email: string | null;
   role: UserRole;
   active: boolean;
   createdAt: string;
@@ -19,6 +20,7 @@ export type User = {
 export type CreateUserInput = {
   name: string;
   email: string;
+  username: string;
   password: string;
   role: UserRole;
 };
@@ -26,6 +28,7 @@ export type CreateUserInput = {
 export type UpdateUserInput = {
   name: string;
   email: string;
+  username: string;
   role: UserRole;
   active: boolean;
 };

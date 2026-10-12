@@ -60,6 +60,19 @@ class AuditLogServiceIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void recordUsesUsernameWhenActorHasNoEmail() {
+        User actor = new User("Administrador", null, "bcrypt-hash", UserRole.ADMIN);
+        actor.setUsername("adm." + UUID.randomUUID());
+        userRepository.saveAndFlush(actor);
+
+        AuditLog recorded = auditLogService.record(
+                actor, "PRICE_CHANGED", "Product", UUID.randomUUID(), null, "{\"price\":12}");
+
+        assertThat(auditLogRepository.findById(recorded.getId()).orElseThrow().getUserEmail())
+                .isEqualTo(actor.getUsername());
+    }
+
+    @Test
     void recordKeepsTheActorsSnapshotEvenIfTheUserRowLaterChanges() {
         User actor = userRepository.saveAndFlush(
                 new User("Bruno Alves", "bruno+" + UUID.randomUUID() + "@farelo.dev", "bcrypt-hash", UserRole.MANAGER));

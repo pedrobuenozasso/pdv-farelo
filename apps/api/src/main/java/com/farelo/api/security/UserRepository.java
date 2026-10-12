@@ -14,4 +14,6 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     // by FARELO-121 to look a user up by the credential they log in with.
     Optional<User> findByEmail(String email);
 
+    Optional<User> findByUsernameIgnoreCase(String username);
+
 }

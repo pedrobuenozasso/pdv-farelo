@@ -66,6 +66,31 @@ class UserRepositoryIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void findsUsernameIgnoringCase() {
+        String username = "adm-" + UUID.randomUUID();
+        User user = new User("Admin", null, "bcrypt-hash", UserRole.ADMIN);
+        user.setUsername(username);
+        userRepository.saveAndFlush(user);
+
+        assertThat(userRepository.findByUsernameIgnoreCase(username.toUpperCase()))
+                .contains(user);
+    }
+
+    @Test
+    void rejectsDuplicateUsernameRegardlessOfCase() {
+        String username = "adm-" + UUID.randomUUID();
+        User first = new User("Primeiro", "first+" + UUID.randomUUID() + "@farelo.dev", "bcrypt-hash", UserRole.ADMIN);
+        first.setUsername(username);
+        userRepository.saveAndFlush(first);
+
+        User second = new User("Segundo", "second+" + UUID.randomUUID() + "@farelo.dev", "bcrypt-hash", UserRole.ADMIN);
+        second.setUsername(username.toUpperCase());
+
+        assertThatThrownBy(() -> userRepository.saveAndFlush(second))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
     void rejectsDuplicateEmailAtTheDatabaseLevel() {
         String email = "duplicate+" + UUID.randomUUID() + "@farelo.dev";
         userRepository.saveAndFlush(new User("Primeiro", email, "bcrypt-hash", UserRole.ATTENDANT));

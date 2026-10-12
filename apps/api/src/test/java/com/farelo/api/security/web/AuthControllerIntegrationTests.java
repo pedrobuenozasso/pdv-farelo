@@ -83,6 +83,21 @@ class AuthControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void issuesTokenForCorrectUsernameAndPassword() throws Exception {
+        User user = new User("Admin", null, passwordEncoder.encode(PASSWORD), UserRole.ADMIN);
+        user.setUsername("adm.farelodebolo");
+        userRepository.save(user);
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email": "ADM.FARELODEBOLO", "password": "senha-forte-123"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isNotEmpty());
+    }
+
+    @Test
     void issuedTokenParsesBackToTheLoggedInUser() throws Exception {
         User user = userRepository.save(
                 new User("Bia Rocha", "bia@farelo.dev", passwordEncoder.encode(PASSWORD), UserRole.ATTENDANT));

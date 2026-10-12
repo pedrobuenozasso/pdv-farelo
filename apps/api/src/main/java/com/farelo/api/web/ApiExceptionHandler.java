@@ -38,6 +38,7 @@ import com.farelo.api.printing.PrintJobNotFoundException;
 import com.farelo.api.printing.PrintJobRetryLimitExceededException;
 import com.farelo.api.security.InvalidCredentialsException;
 import com.farelo.api.security.UserEmailAlreadyExistsException;
+import com.farelo.api.security.UserUsernameAlreadyExistsException;
 import com.farelo.api.security.UserNotFoundException;
 import com.farelo.api.security.auth.InvalidTokenException;
 import com.farelo.api.security.rbac.InsufficientRoleException;
@@ -316,6 +317,12 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleUserEmailAlreadyExists(UserEmailAlreadyExistsException ex) {
         return new ErrorResponse("USER_EMAIL_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(UserUsernameAlreadyExistsException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleUserUsernameAlreadyExists(UserUsernameAlreadyExistsException ex) {
+        return new ErrorResponse("USER_USERNAME_ALREADY_EXISTS", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     // FARELO-111: id given to POST /api/v1/notifications/{id}/send doesn't

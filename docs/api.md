@@ -1681,7 +1681,8 @@ no corpo — um usuário novo sempre começa `true`, mesmo padrão de
 | Campo | Tipo | Obrigatório | Observações |
 |---|---|---|---|
 | `name` | string | sim | Não pode ser vazio/branco (`@NotBlank`) |
-| `email` | string | sim | Formato de email válido (`@Email`), único no sistema |
+| `email` | string | não | E-mail válido e único, quando informado; é necessário informar `email` ou `username` |
+| `username` | string | não | Nome de usuário único sem diferenciar maiúsculas/minúsculas; 3–64 caracteres, começando por letra |
 | `password` | string | sim | 8 a 72 caracteres — teto casado com o limite de entrada do BCrypt |
 | `role` | string | sim | Um de `ADMIN`/`MANAGER`/`CASHIER`/`KITCHEN`/`ATTENDANT` |
 
@@ -1841,7 +1842,7 @@ um chamador autenticado.
 
 ### `POST /api/v1/auth/login`
 
-Autentica um usuário por email+senha e emite um token (JWT) para uso nas
+Autentica um usuário por e-mail ou nome de usuário, mais senha, e emite um token (JWT) para uso nas
 próximas requisições. (FARELO-121)
 
 Primeiro e único endpoint do login em si — nenhum endpoint (nem os já
@@ -1861,7 +1862,7 @@ configurável, sem revogação) e da checagem de credenciais.
 
 | Campo | Tipo | Obrigatório | Observações |
 |---|---|---|---|
-| `email` | string | sim | Apenas não-vazio (`@NotBlank`) — sem `@Email`, deliberado (ver `docs/domain-model.md`) |
+| `email` | string | sim | E-mail ou nome de usuário neste campo por compatibilidade; apenas não-vazio (`@NotBlank`) |
 | `password` | string | sim | Apenas não-vazio (`@NotBlank`) — sem checagem de tamanho aqui |
 
 **Response — `200 OK`**

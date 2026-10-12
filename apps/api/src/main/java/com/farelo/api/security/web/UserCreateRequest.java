@@ -5,6 +5,8 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Pattern;
 
 /**
  * Request body for {@code POST /api/v1/users}. Never expose the JPA entity
@@ -32,7 +34,12 @@ import jakarta.validation.constraints.Size;
  */
 public record UserCreateRequest(
         @NotBlank String name,
-        @NotBlank @Email String email,
+        @Email String email,
+        @Pattern(regexp = "^$|^[A-Za-z][A-Za-z0-9._-]{2,63}$") String username,
         @NotBlank @Size(min = 8, max = 72) String password,
         @NotNull UserRole role) {
+    @AssertTrue(message = "Informe nome de usuário ou e-mail")
+    public boolean isIdentifierPresent() {
+        return (email != null && !email.isBlank()) || (username != null && !username.isBlank());
+    }
 }
