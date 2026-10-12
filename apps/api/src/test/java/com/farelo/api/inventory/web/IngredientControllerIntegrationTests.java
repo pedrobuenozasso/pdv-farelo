@@ -5,6 +5,7 @@ import com.farelo.api.inventory.Ingredient;
 import com.farelo.api.inventory.IngredientRepository;
 import com.farelo.api.inventory.IngredientUnit;
 import com.farelo.api.inventory.InventoryMovementRepository;
+import com.farelo.api.inventory.RecipeItemRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -68,11 +69,20 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     private InventoryMovementRepository inventoryMovementRepository;
 
     @Autowired
+    private RecipeItemRepository recipeItemRepository;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void cleanInventoryTables() {
+        // recipe_item also FKs into ingredient (recipe_item.ingredient_id),
+        // same landmine as inventory_movement above — see this class's
+        // javadoc. Classes that create RecipeItem rows without cleaning up
+        // (e.g. RecipeRepositoryIntegrationTests) can leave them behind for
+        // whichever class the shared Testcontainers Postgres runs next.
         inventoryMovementRepository.deleteAll();
+        recipeItemRepository.deleteAll();
         ingredientRepository.deleteAll();
     }
 

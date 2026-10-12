@@ -6,6 +6,7 @@ import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductRepository;
 import com.farelo.api.inventory.Recipe;
+import com.farelo.api.inventory.RecipeItemRepository;
 import com.farelo.api.inventory.RecipeRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,6 +58,9 @@ class RecipeControllerIntegrationTests extends AbstractIntegrationTest {
     private CategoryRepository categoryRepository;
 
     @Autowired
+    private RecipeItemRepository recipeItemRepository;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     // See RecipeRepositoryIntegrationTests#cleanTables for why this only
@@ -64,9 +68,11 @@ class RecipeControllerIntegrationTests extends AbstractIntegrationTest {
     // isn't safe under the full suite (other classes, e.g.
     // OrderControllerIntegrationTests, create Products/Orders and never
     // clean them up), and none of this class's assertions depend on the
-    // product/category tables being empty.
+    // product/category tables being empty. recipe_item before recipe
+    // (recipe_item.recipe_id) — same reasoning, see that class's javadoc.
     @BeforeEach
     void cleanTables() {
+        recipeItemRepository.deleteAll();
         recipeRepository.deleteAll();
     }
 

@@ -35,6 +35,9 @@ class RecipeRepositoryIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private CategoryRepository categoryRepository;
 
+    @Autowired
+    private RecipeItemRepository recipeItemRepository;
+
     // Only this class's own table is wiped between tests. Deleting all
     // products/categories here (as CategoryControllerIntegrationTests/
     // ProductControllerIntegrationTests do) is NOT safe in this class: under
@@ -46,8 +49,15 @@ class RecipeRepositoryIntegrationTests extends AbstractIntegrationTest {
     // this class's assertions depend on the product/category tables being
     // empty (each test creates its own uniquely-named product), so simply
     // not touching those shared tables sidesteps the problem entirely.
+    //
+    // recipe_item is the exception: it FKs into recipe
+    // (recipe_item.recipe_id), so leftover rows from classes that create
+    // RecipeItems without cleaning up (e.g. RecipeItemControllerIntegrationTests)
+    // can block this class's own recipeRepository.deleteAll() — delete it
+    // first.
     @BeforeEach
     void cleanTables() {
+        recipeItemRepository.deleteAll();
         recipeRepository.deleteAll();
     }
 
