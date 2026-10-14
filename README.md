@@ -24,7 +24,7 @@ e [`docs/decisions/`](docs/decisions/) para detalhes e decisões registradas.
 - **Backend**: Java 21, Spring Boot 3, Spring Security, Spring Data JPA, Hibernate, Flyway,
   PostgreSQL, Redis, Maven, JUnit 5, Testcontainers.
 - **Frontend**: Next.js, React, TypeScript, Tailwind CSS, shadcn/ui.
-- **Infra**: Docker, Docker Compose, Ubuntu LTS, Hostinger VPS, Cloudflare, Caddy, GitHub Actions.
+- **Infra**: Docker, Docker Compose, Ubuntu LTS, Contabo VPS (informada; ainda não auditada), Caddy, GitHub Actions.
 
 ## Desenvolvimento
 
@@ -44,5 +44,5 @@ Sobe Postgres + backend (`:8080`) + frontend (`:3000`) num único comando —
 `docker-compose.yml` sozinho sobe só o Postgres (uso mínimo, ex: rodar o
 backend nativamente fora de container). Ver [`infra/README.md`](infra/README.md)
 para detalhes (rebuild após mudança no backend, hot-reload do frontend, etc).
-Isso é ambiente de **desenvolvimento** — não é o compose de produção (sem
-ticket de deploy no roadmap atual, ver `docs/architecture.md`).
+Isso é ambiente de **desenvolvimento**. A configuração de produção está
+preparada, mas ainda não implantada; veja os gates em [`infra/README.md`](infra/README.md).

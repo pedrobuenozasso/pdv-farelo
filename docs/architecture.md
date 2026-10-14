@@ -44,15 +44,17 @@ Detalhado em [`domain-model.md`](domain-model.md) conforme cada domínio é impl
 
 ## Infraestrutura
 
-Docker + Docker Compose, Ubuntu LTS, Hostinger VPS (KVM2 — 2 vCPU / 8 GB RAM / 100 GB NVMe),
-Cloudflare, Caddy, GitHub Actions.
+Docker + Docker Compose, Ubuntu LTS, VPS Contabo informada pelo proprietário
+(Cloud VPS 4, 4 vCPU / 8 GB RAM / ~100 GB SSD; capacidade real ainda precisa
+ser auditada), DNS a definir, Caddy, GitHub Actions.
 
 **Ambiente de desenvolvimento**: `infra/docker-compose.yml` (Postgres) +
 `infra/docker-compose.dev.yml` (backend + frontend, complementar — ver
 `infra/README.md`) sobem a stack completa localmente com um único comando.
-São Dockerfiles/compose de **desenvolvimento**, não de produção — nenhum
-ticket do roadmap atual cobre o deploy real (VPS/Caddy/Cloudflare listados
-acima permanecem não implementados). `apps/edge-agent` não faz parte desse
+O preparo de produção está em `infra/compose.production.yml`,
+`infra/Caddyfile.production` e `infra/README.md`. Ele não foi implantado;
+domínio/DNS, backup externo, auditoria da VPS e bloqueios de produto/segurança
+continuam pendentes. `apps/edge-agent` não faz parte desse
 compose: roda como processo separado (fisicamente num mini PC dedicado em
 produção), sem lógica real de rede ainda para justificar orquestração local
 junto do resto da stack (ver `apps/edge-agent/README.md`).
@@ -64,7 +66,7 @@ junto do resto da stack (ver `apps/edge-agent/README.md`).
    também fechado: transições `DELIVERED`/`CANCELLED` (não numeradas no roadmap original,
    follow-up justificado — ver docs/domain-model.md). Sem fiscal, estoque avançado ou
    WhatsApp. Falta ainda, fora do escopo deste marco: deploy real em produção
-   (VPS/Caddy/Cloudflare — infra-agent não tem ticket para isso no roadmap dado). Epic 5
+   (VPS/Caddy/Cloudflare — configuração preparada, não implantada). Epic 5
    (Transactional Outbox — fundação, retenção, observabilidade) também já concluído,
    adiantado em relação a este marco, como base para os epics de impressão/notificação
    futuros.

@@ -1,0 +1,18 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$FARELO_DOMAIN} {
+	encode zstd gzip
+
+	@actuator path /actuator /actuator/*
+	respond @actuator 404
+
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}
