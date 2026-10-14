@@ -34,9 +34,20 @@ export type Command = {
   // Order type) — that one stays per-order and immutable.
   customerName: string | null;
   customerPhone: string | null;
+  tableNumber: number | null;
   createdAt: string;
   updatedAt: string;
 };
+
+export type CommandSummary = Pick<Command, "number" | "status" | "tableNumber">;
+
+export async function listCommands(): Promise<CommandSummary[]> {
+  const response = await fetch(COMMANDS_URL, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  return parseResponse<CommandSummary[]>(response);
+}
 
 export type UpdateCommandCustomerInput = {
   customerName?: string;
@@ -78,6 +89,18 @@ export async function updateCommandCustomer(
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(input),
+  });
+  return parseResponse<Command>(response);
+}
+
+export async function updateCommandTable(
+  number: number,
+  tableNumber: number | null,
+): Promise<Command> {
+  const response = await fetch(`${COMMANDS_URL}/${number}/table`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ tableNumber }),
   });
   return parseResponse<Command>(response);
 }

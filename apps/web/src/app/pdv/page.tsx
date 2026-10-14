@@ -7,14 +7,7 @@
 // app/providers.tsx) handles the fetching, same pattern as
 // /admin/categories and /admin/products.
 //
-// Comandas are always numbered 1-100 (fixed, from the seed) — there's no
-// GET /api/v1/commands (list-all) endpoint, so the grid is generated here
-// instead of inventing one on the backend just for this, and it can't
-// show which numbers are actually open/occupied at a glance (that would
-// need bulk status data the backend doesn't expose yet) — every cell
-// renders identically until picked. If the grid ever needs to show every
-// command's status at once (color-coded, say), a listing endpoint
-// becomes the natural next step.
+// The staff-only list endpoint provides live status for the comanda grid.
 //
 // UX choice: selecting a number shows its detail inline below the grid
 // (not a modal, not a separate /pdv/{number} route) — simplest for this
@@ -37,8 +30,10 @@ import { apiErrorMessage } from "@/lib/api/client";
 import {
   closeCommand,
   getCommand,
+  listCommands,
   openCommand,
   updateCommandCustomer,
+  updateCommandTable,
   type Command,
   type CommandStatus,
 } from "@/lib/api/commands";
@@ -71,9 +66,8 @@ import {
 } from "@/lib/api/payments";
 import { printConference } from "@/lib/api/print-jobs";
 import { listProducts, type Product } from "@/lib/api/products";
+import { getTableOccupancy, listTables } from "@/lib/api/tables";
 import { cn } from "@/lib/cn";
-
-const COMMAND_NUMBERS = Array.from({ length: 100 }, (_, i) => i + 1);
 
 // Tom de atendente, diferente do texto amigável ao cliente em
 // app/c/[commandNumber]/page.tsx — aqui é densidade de informação, não
@@ -157,7 +151,9 @@ export default function PdvCommandsPage() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-ink-soft text-sm">PDV</p>
-            <h1 className="font-serif text-2xl font-semibold">Comandas</h1>
+            <h1 className="font-serif text-2xl font-semibold">
+              Comanda / mesa
+            </h1>
           </div>
           <Button
             variant={balcaoOpen ? "outline" : "dark"}
@@ -167,27 +163,16 @@ export default function PdvCommandsPage() {
           </Button>
         </div>
 
+        <TableOccupancySummary />
+
         {balcaoOpen ? (
           <BalcaoPanel onClose={() => setBalcaoOpen(false)} />
         ) : null}
 
-        <div className="grid grid-cols-5 gap-2.5 sm:grid-cols-10">
-          {COMMAND_NUMBERS.map((number) => (
-            <button
-              key={number}
-              type="button"
-              onClick={() => setSelectedNumber(number)}
-              className={cn(
-                "aspect-square rounded-xl border text-sm font-bold",
-                number === selectedNumber
-                  ? "bg-primary text-primary-ink border-transparent"
-                  : "border-line bg-surface text-ink-soft hover:border-primary/40",
-              )}
-            >
-              {number}
-            </button>
-          ))}
-        </div>
+        <CommandGrid
+          selectedNumber={selectedNumber}
+          onSelect={setSelectedNumber}
+        />
 
         {selectedNumber !== null ? (
           <CommandDetail
@@ -198,6 +183,118 @@ export default function PdvCommandsPage() {
         ) : null}
       </main>
     </AuthGuard>
+  );
+}
+
+function CommandGrid({
+  selectedNumber,
+  onSelect,
+}: {
+  selectedNumber: number | null;
+  onSelect: (number: number) => void;
+}) {
+  const [numberFilter, setNumberFilter] = useState("");
+  const commands = useQuery({
+    queryKey: ["pdv", "commands"],
+    queryFn: listCommands,
+    refetchInterval: 10000,
+  });
+
+  if (commands.isPending) {
+    return <p className="text-ink-soft text-sm">Carregando comandas...</p>;
+  }
+  if (commands.isError) {
+    return (
+      <p role="alert" className="text-red text-sm">
+        Não foi possível carregar as comandas. Confira sua conexão e tente
+        novamente.
+      </p>
+    );
+  }
+
+  const openCount = commands.data.filter(
+    ({ status }) => status === "OPEN" || status === "PAYMENT_REQUESTED",
+  ).length;
+  const visibleCommands = commands.data.filter(({ number }) =>
+    String(number).includes(numberFilter.trim()),
+  );
+
+  return (
+    <section aria-label="Comandas">
+      <p className="text-ink-soft mb-3 text-sm">
+        {openCount} em uso · {commands.data.length} cadastradas
+      </p>
+      <p className="text-ink-faint mb-3 text-xs">
+        Verde: aberta · amarelo: pagamento · cinza: fechada · vermelho:
+        bloqueada
+      </p>
+      <label className="text-ink-soft mb-3 flex max-w-xs flex-col gap-1 text-xs font-semibold">
+        Nº da comanda
+        <input
+          type="search"
+          inputMode="numeric"
+          value={numberFilter}
+          onChange={(event) =>
+            setNumberFilter(event.target.value.replace(/\D/g, ""))
+          }
+          placeholder="Buscar número"
+          className="border-line bg-surface text-ink focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+        />
+      </label>
+      <div className="grid grid-cols-5 gap-2.5 sm:grid-cols-10">
+        {visibleCommands.map(({ number, status, tableNumber }) => (
+          <button
+            key={number}
+            type="button"
+            onClick={() => onSelect(number)}
+            aria-label={`Comanda ${number}, ${STATUS_LABEL[status]}${tableNumber === null ? "" : `, mesa ${tableNumber}`}`}
+            aria-pressed={number === selectedNumber}
+            className={cn(
+              "aspect-square rounded-xl border text-sm font-bold",
+              number === selectedNumber
+                ? "bg-primary text-primary-ink border-transparent"
+                : status === "OPEN"
+                  ? "border-green bg-green-soft text-green-ink"
+                  : status === "PAYMENT_REQUESTED"
+                    ? "border-amber bg-amber-soft text-amber-ink"
+                    : status === "BLOCKED"
+                      ? "border-red bg-red-soft text-red-ink"
+                      : status === "CLOSED"
+                        ? "border-line bg-bg-alt text-ink-faint"
+                        : "border-line bg-surface text-ink-soft hover:border-primary/40",
+            )}
+          >
+            {number}
+          </button>
+        ))}
+      </div>
+      {visibleCommands.length === 0 ? (
+        <p className="text-ink-faint mt-3 text-sm">
+          Nenhuma comanda encontrada.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function TableOccupancySummary() {
+  const occupancy = useQuery({
+    queryKey: ["pdv", "table-occupancy"],
+    queryFn: getTableOccupancy,
+  });
+  if (!occupancy.data?.totalTables) return null;
+  return (
+    <div className="border-line bg-surface flex flex-wrap gap-5 rounded-xl border px-4 py-3 text-sm">
+      <span>
+        <strong>{occupancy.data.occupiedTables}</strong> mesas ocupadas
+      </span>
+      <span>
+        <strong>{occupancy.data.totalTables}</strong> mesas cadastradas
+      </span>
+      <span>
+        <strong>{occupancy.data.occupancyPercentage}%</strong> de ocupação
+      </span>
+    </div>
   );
 }
 
@@ -214,7 +311,7 @@ function CommandDetail({
   // no real backend "Confirmar" transition to formalize — an order is
   // already CREATED/"confirmed" the instant it's placed, see
   // OrderStatus's own javadoc on the unused CONFIRMED value) that both
-  // creates the order (AddItemPanel's existing "Adicionar" mutation) and
+  // creates the order from AddItemPanel's draft and
   // opens PaymentPanel's payment form in the same click. Plain counter
   // bumped by AddItemPanel, compared against its previous value inside
   // PaymentPanel on render — see that component's own comment for why a
@@ -236,8 +333,10 @@ function CommandDetail({
     queryFn: () => getPaymentBalance(number),
   });
 
-  const invalidateCommand = () =>
+  const invalidateCommand = () => {
     queryClient.invalidateQueries({ queryKey: ["pdv", "command", number] });
+    queryClient.invalidateQueries({ queryKey: ["pdv", "commands"] });
+  };
 
   const openMutation = useMutation({
     mutationFn: () => openCommand(number),
@@ -335,6 +434,8 @@ function CommandDetail({
         <CustomerCard commandNumber={number} command={command} />
       ) : null}
 
+      {command ? <TableAssociation command={command} /> : null}
+
       <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-start">
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
@@ -356,7 +457,7 @@ function CommandDetail({
           {addItemOpen ? (
             <AddItemPanel
               commandNumber={number}
-              onAdded={() =>
+              onAdded={() => {
                 // Partial-match invalidation: also catches "orders" and
                 // "paymentBalance" (both nested under this same key prefix)
                 // in one call — and the command status itself, since
@@ -365,8 +466,11 @@ function CommandDetail({
                 // needs to reflect that.
                 queryClient.invalidateQueries({
                   queryKey: ["pdv", "command", number],
-                })
-              }
+                });
+                queryClient.invalidateQueries({
+                  queryKey: ["pdv", "commands"],
+                });
+              }}
               onConfirmAndReceive={() =>
                 setPaymentPromptToken((token) => token + 1)
               }
@@ -404,12 +508,69 @@ function CommandDetail({
   );
 }
 
-// FARELO-182/183 — lançamento manual de item pelo caixa, sem depender do
-// cardápio QR. Reaproveita POST /api/v1/orders (já público e genérico —
-// não exige customerName/customerPhone), o mesmo endpoint que o cardápio
-// já usa; cada clique em "Adicionar" gera um pedido próprio de um item só
-// (mais parecido com "bater no caixa" do que um carrinho), o suficiente
-// pro caso de uso do ticket ("Comanda 37 + 1x Água").
+function TableAssociation({ command }: { command: Command }) {
+  const queryClient = useQueryClient();
+  const [selection, setSelection] = useState<string | null>(null);
+  const tables = useQuery({ queryKey: ["pdv", "tables"], queryFn: listTables });
+  const selectedValue = selection ?? String(command.tableNumber ?? "");
+  const mutation = useMutation({
+    mutationFn: () =>
+      updateCommandTable(
+        command.number,
+        selectedValue ? Number(selectedValue) : null,
+      ),
+    onSuccess: async () => {
+      setSelection(null);
+      await queryClient.invalidateQueries({
+        queryKey: ["pdv", "command", command.number],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["pdv", "table-occupancy"],
+      });
+    },
+  });
+
+  if (!tables.data?.length) return null;
+  return (
+    <div className="border-line flex flex-wrap items-end gap-3 border-t pt-4">
+      <label className="text-ink-soft flex min-w-40 flex-col gap-1 text-sm">
+        Mesa vinculada
+        <select
+          value={selectedValue}
+          onChange={(event) => setSelection(event.target.value)}
+          className="border-line bg-surface text-ink rounded-lg border px-3 py-2"
+        >
+          <option value="">Sem mesa</option>
+          {tables.data.map((table) => (
+            <option key={table.id} value={table.number}>
+              Mesa {table.number} · {table.capacity} lugares
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={
+          mutation.isPending ||
+          selectedValue === String(command.tableNumber ?? "")
+        }
+        onClick={() => mutation.mutate()}
+      >
+        Salvar mesa
+      </Button>
+      {mutation.isError ? (
+        <p className="text-red text-sm">
+          {apiErrorMessage(mutation.error, "Não foi possível vincular a mesa.")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// The comanda operator builds one multi-item order locally before sending it
+// to the existing POST /api/v1/orders endpoint. Selecting a product never
+// writes to the server; Confirmar and Receber are the commit points.
 function AddItemPanel({
   commandNumber,
   onAdded,
@@ -418,17 +579,23 @@ function AddItemPanel({
   commandNumber: number;
   onAdded: () => void;
   // FARELO-320: called (in addition to onAdded) when the order was
-  // created via "Confirmar e Receber" rather than plain "Adicionar" — see
+  // created via "Confirmar e receber" rather than plain confirmation — see
   // CommandDetail's own comment on paymentPromptToken for the full flow.
   onConfirmAndReceive: () => void;
 }) {
   const [search, setSearch] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
+    null,
+  );
   const [selectedProductId, setSelectedProductId] = useState<string | null>(
     null,
   );
   const [quantity, setQuantity] = useState(1);
-  // FARELO-316: "Observação geral do pedido" — applies to this order (the
-  // one this "Adicionar" click creates), not to the comanda as a whole.
+  const [cart, setCart] = useState<{ productId: string; quantity: number }[]>(
+    [],
+  );
+  // FARELO-316: "Observação geral do pedido" applies to the draft order,
+  // not to the comanda as a whole.
   const [note, setNote] = useState("");
   // FARELO-319: "Imprimir ao confirmar" — defaults checked (backend
   // default is also true when the field is omitted), so unchecking is the
@@ -450,16 +617,17 @@ function AddItemPanel({
   });
 
   const addItemMutation = useMutation({
-    mutationFn: (product: Product) =>
+    mutationFn: () =>
       createOrder({
         commandNumber,
-        items: [{ productId: product.id, quantity }],
+        items: cart,
         note: note.trim() || undefined,
         printOnConfirm,
       }),
     onSuccess: () => {
       setSelectedProductId(null);
       setQuantity(1);
+      setCart([]);
       setNote("");
       setPrintOnConfirm(true);
       onAdded();
@@ -472,7 +640,7 @@ function AddItemPanel({
 
   const errorMessage = apiErrorMessage(
     addItemMutation.error,
-    "Não foi possível adicionar o item.",
+    "Não foi possível confirmar o pedido.",
   );
 
   // Só produtos ativos e habilitados pro caixa (availableOnPos) — mesmo
@@ -482,6 +650,8 @@ function AddItemPanel({
     (product) =>
       product.active &&
       product.availableOnPos &&
+      (selectedCategoryId === null ||
+        product.categoryId === selectedCategoryId) &&
       product.name.toLowerCase().includes(search.toLowerCase()),
   );
   const categoryNameById = new Map(
@@ -499,19 +669,87 @@ function AddItemPanel({
     ]);
   }
 
-  const selectedProduct = availableProducts.find(
+  const selectedProduct = (productsQuery.data ?? []).find(
     (product) => product.id === selectedProductId,
   );
+  const productById = new Map(
+    (productsQuery.data ?? []).map((product) => [product.id, product]),
+  );
+  const cartTotalCents = cart.reduce((total, item) => {
+    const price = productById.get(item.productId)?.price;
+    if (price === undefined) return total;
+    const [whole, decimals = ""] = String(price).split(".");
+    return (
+      total +
+      (Number(whole) * 100 + Number(decimals.padEnd(2, "0"))) * item.quantity
+    );
+  }, 0);
+
+  function addSelectedProduct() {
+    if (!selectedProduct || addItemMutation.isPending) return;
+    setCart((current) => {
+      const existing = current.find(
+        (item) => item.productId === selectedProduct.id,
+      );
+      return existing
+        ? current.map((item) =>
+            item.productId === selectedProduct.id
+              ? { ...item, quantity: item.quantity + quantity }
+              : item,
+          )
+        : [...current, { productId: selectedProduct.id, quantity }];
+    });
+    setSelectedProductId(null);
+    setQuantity(1);
+  }
 
   return (
     <div className="border-line bg-bg flex flex-col gap-3 rounded-2xl border p-4">
       <input
         type="text"
-        placeholder="Buscar produto..."
+        placeholder="Buscar produto pelo nome..."
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
       />
+
+      <div
+        className="flex gap-2 overflow-x-auto pb-1"
+        aria-label="Categorias de produtos"
+      >
+        <button
+          type="button"
+          onClick={() => setSelectedCategoryId(null)}
+          aria-pressed={selectedCategoryId === null}
+          className={cn(
+            "shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold",
+            selectedCategoryId === null
+              ? "bg-primary text-primary-ink"
+              : "bg-bg-alt text-ink-soft",
+          )}
+        >
+          Todos
+        </button>
+        {(categoriesQuery.data ?? [])
+          .filter((category) => category.active)
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+          .map((category) => (
+            <button
+              key={category.id}
+              type="button"
+              onClick={() => setSelectedCategoryId(category.id)}
+              aria-pressed={selectedCategoryId === category.id}
+              className={cn(
+                "shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold",
+                selectedCategoryId === category.id
+                  ? "bg-primary text-primary-ink"
+                  : "bg-bg-alt text-ink-soft",
+              )}
+            >
+              {category.name}
+            </button>
+          ))}
+      </div>
 
       <div className="flex max-h-56 flex-col gap-3 overflow-y-auto">
         {productsQuery.isLoading ? (
@@ -577,24 +815,48 @@ function AddItemPanel({
             <Button
               variant="outline"
               disabled={addItemMutation.isPending}
-              onClick={() => addItemMutation.mutate(selectedProduct)}
+              onClick={addSelectedProduct}
               className="px-4 py-2 text-[13px]"
             >
-              {addItemMutation.isPending ? "Adicionando..." : "Adicionar"}
-            </Button>
-            <Button
-              disabled={addItemMutation.isPending}
-              onClick={() => {
-                receiveAfterRef.current = true;
-                addItemMutation.mutate(selectedProduct);
-              }}
-              className="px-4 py-2 text-[13px]"
-            >
-              {addItemMutation.isPending
-                ? "Confirmando..."
-                : "Confirmar e Receber"}
+              Adicionar ao pedido
             </Button>
           </div>
+        </div>
+      ) : null}
+      {cart.length > 0 ? (
+        <div className="border-line flex flex-col gap-3 border-t pt-3">
+          <h4 className="text-sm font-semibold">Pedido em preparação</h4>
+          {cart.map((item) => {
+            const product = productById.get(item.productId);
+            return (
+              <div
+                key={item.productId}
+                className="flex items-center justify-between gap-3 text-sm"
+              >
+                <span>
+                  {item.quantity} × {product?.name ?? "Produto indisponível"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCart((current) =>
+                      current.filter(
+                        (entry) => entry.productId !== item.productId,
+                      ),
+                    )
+                  }
+                  disabled={addItemMutation.isPending}
+                  className="text-red text-xs font-semibold hover:underline"
+                  aria-label={`Remover ${product?.name ?? "produto"} do pedido`}
+                >
+                  Remover
+                </button>
+              </div>
+            );
+          })}
+          <p className="text-right text-sm font-semibold">
+            Subtotal: {currencyFormatter.format(cartTotalCents / 100)}
+          </p>
           <input
             type="text"
             placeholder="Observação do pedido (opcional)"
@@ -611,6 +873,29 @@ function AddItemPanel({
             />
             Imprimir ao confirmar
           </label>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              disabled={addItemMutation.isPending}
+              onClick={() => {
+                receiveAfterRef.current = false;
+                addItemMutation.mutate();
+              }}
+            >
+              {addItemMutation.isPending
+                ? "Confirmando..."
+                : "Confirmar pedido"}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={addItemMutation.isPending}
+              onClick={() => {
+                receiveAfterRef.current = true;
+                addItemMutation.mutate();
+              }}
+            >
+              Confirmar e receber
+            </Button>
+          </div>
         </div>
       ) : null}
       {errorMessage ? <p className="text-red text-sm">{errorMessage}</p> : null}
