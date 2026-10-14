@@ -2,6 +2,8 @@ package com.farelo.api.fiscal.web;
 
 import com.farelo.api.fiscal.CompanyFiscalConfiguration;
 import com.farelo.api.fiscal.CompanyFiscalConfigurationService;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -68,17 +70,8 @@ import org.springframework.web.bind.annotation.RestController;
  * blast radius. If real operational discipline ever proves insufficient,
  * enforcing this at the DB level is a small, isolated follow-up.
  *
- * <p><b>No {@code @RequireRole} anywhere on this controller</b> — same
- * precedent as {@code FiscalProfileController}/{@code IngredientController}
- * (both still entirely unprotected as of their own first tickets):
- * applying RBAC to a brand-new domain/entity's first endpoints is
- * consistently deferred to a dedicated future ticket in this codebase (see
- * {@code docs/domain-model.md}'s {@code fiscal} section, FARELO-150
- * subsection, for the fuller precedent list) — never bundled into the
- * ticket that first creates the write surface, unless that ticket's own
- * text is itself about protecting something (it isn't, here). If/when
- * company fiscal configuration needs to be Admin-only, that's a follow-up
- * ticket to decide, not this one.
+ * <p>Changing the company's fiscal identity requires {@code ADMIN}; the
+ * read endpoint retains its existing access policy.
  */
 @RestController
 @RequestMapping("/api/v1/company-fiscal-configuration")
@@ -96,6 +89,7 @@ public class CompanyFiscalConfigurationController {
     }
 
     @PutMapping
+    @RequireRole(UserRole.ADMIN)
     public CompanyFiscalConfigurationResponse put(@Valid @RequestBody CompanyFiscalConfigurationRequest request) {
         CompanyFiscalConfiguration companyFiscalConfiguration = companyFiscalConfigurationService.save(
                 request.cnpj(), request.legalName(), request.tradeName(),

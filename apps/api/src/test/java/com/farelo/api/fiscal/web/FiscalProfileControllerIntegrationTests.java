@@ -7,6 +7,10 @@ import com.farelo.api.fiscal.FiscalProfileRepository;
 import com.farelo.api.inventory.RecipeItemRepository;
 import com.farelo.api.inventory.RecipeRepository;
 import com.farelo.api.ordering.OrderItemRepository;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -72,6 +77,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
 
+    private String adminToken;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -93,6 +100,15 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
     @BeforeEach
     void cleanFiscalProfileTable() {
         // order_item and recipe_item/recipe first — both eventually FK into
@@ -104,11 +120,21 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
         recipeRepository.deleteAll();
         productRepository.deleteAll();
         fiscalProfileRepository.deleteAll();
+        adminToken = tokenFor(UserRole.ADMIN);
+    }
+
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Fiscal Test User",
+                "fiscal-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode("test-password"), role));
+        return jwtTokenService.issue(user).token();
     }
 
     @Test
     void createsFiscalProfileAndPersistsIt() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento", "description": "Produtos sem incidência de ICMS"}
@@ -135,6 +161,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void createsFiscalProfileWithoutDescription() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Tributado padrão"}
@@ -155,6 +182,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void createsFiscalProfileWithValidNcm() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Tributado padrão", "ncm": "12345678"}
@@ -175,6 +203,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void createsFiscalProfileWithoutNcm() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento"}
@@ -195,6 +224,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsNcmWithWrongDigitCountWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento", "ncm": "1234567"}
@@ -209,6 +239,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsNonNumericNcmWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento", "ncm": "1234567A"}
@@ -223,6 +254,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void createsFiscalProfileWithValidCfop() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Tributado padrão", "cfop": "5102"}
@@ -243,6 +275,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void createsFiscalProfileWithoutCfop() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento"}
@@ -263,6 +296,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsCfopWithWrongDigitCountWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento", "cfop": "510"}
@@ -277,6 +311,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsNonNumericCfopWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento", "cfop": "510A"}
@@ -291,6 +326,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void createsFiscalProfileWithValidCstAlone() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Tributado padrão", "cst": "60"}
@@ -313,6 +349,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void createsFiscalProfileWithValidCsosnAlone() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Simples Nacional", "csosn": "102"}
@@ -335,6 +372,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void createsFiscalProfileWithoutCstOrCsosn() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento"}
@@ -359,6 +397,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsFiscalProfileWithBothCstAndCsosnSetWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Inválido", "cst": "60", "csosn": "102"}
@@ -373,6 +412,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsCstWithWrongDigitCountWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento", "cst": "6"}
@@ -387,6 +427,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsNonNumericCstWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento", "cst": "6A"}
@@ -401,6 +442,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsCsosnWithWrongDigitCountWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento", "csosn": "10"}
@@ -415,6 +457,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsNonNumericCsosnWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Isento", "csosn": "10A"}
@@ -428,6 +471,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsBlankNameWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": ""}
@@ -441,6 +485,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsMissingNameWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"description": "sem nome"}
@@ -512,6 +557,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -540,6 +586,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -564,6 +611,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -589,6 +637,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -613,6 +662,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -633,6 +683,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -658,6 +709,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -682,6 +734,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -702,6 +755,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -728,6 +782,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -755,6 +810,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -780,6 +836,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -806,6 +863,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -826,6 +884,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -846,6 +905,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -864,6 +924,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", missingId)
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isNotFound())
@@ -884,6 +945,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -901,10 +963,47 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
+    @Test
+    void rejectsAnonymousFiscalProfileWrites() throws Exception {
+        mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Isento\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Isento\",\"active\":true}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        assertThat(fiscalProfileRepository.count()).isZero();
+    }
+
+    @Test
+    void rejectsNonAdminFiscalProfileWrites() throws Exception {
+        for (UserRole role : List.of(UserRole.MANAGER, UserRole.CASHIER)) {
+            String token = tokenFor(role);
+            mockMvc.perform(post("/api/v1/fiscal-profiles")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Isento\"}"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+            mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", UUID.randomUUID())
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Isento\",\"active\":true}"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        }
+        assertThat(fiscalProfileRepository.count()).isZero();
+    }
 }

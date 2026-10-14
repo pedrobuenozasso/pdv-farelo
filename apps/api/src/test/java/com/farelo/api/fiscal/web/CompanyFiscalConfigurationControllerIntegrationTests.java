@@ -3,6 +3,10 @@ package com.farelo.api.fiscal.web;
 import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.fiscal.CompanyFiscalConfiguration;
 import com.farelo.api.fiscal.CompanyFiscalConfigurationRepository;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,10 +14,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
@@ -39,6 +46,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractIntegrationTest {
 
+    private String adminToken;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -48,9 +57,27 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
     @BeforeEach
     void cleanTable() {
         companyFiscalConfigurationRepository.deleteAll();
+        adminToken = tokenFor(UserRole.ADMIN);
+    }
+
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Fiscal Test User",
+                "fiscal-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode("test-password"), role));
+        return jwtTokenService.issue(user).token();
     }
 
     @Test
@@ -65,6 +92,7 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
     @Test
     void putCreatesConfigurationAndPersistsIt() throws Exception {
         MvcResult result = mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -100,6 +128,7 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
     @Test
     void putWithoutOptionalFieldsLeavesThemNull() throws Exception {
         mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -116,6 +145,7 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
     @Test
     void getReturnsThePreviouslySetConfiguration() throws Exception {
         mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -134,6 +164,7 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
     @Test
     void secondPutReplacesTheExistingRowInsteadOfCreatingASecondOne() throws Exception {
         mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -144,6 +175,7 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
                 .andExpect(status().isOk());
 
         mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -162,6 +194,7 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
     @Test
     void secondPutWithoutOptionalFieldClearsPreviouslySetValue() throws Exception {
         mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -173,6 +206,7 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
                 .andExpect(status().isOk());
 
         mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -187,6 +221,7 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
     @Test
     void rejectsBlankCnpjWithStandardErrorFormat() throws Exception {
         mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"cnpj": "", "legalName": "Farelo Comércio de Alimentos LTDA"}
@@ -200,6 +235,7 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
     @Test
     void rejectsMissingLegalNameWithStandardErrorFormat() throws Exception {
         mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"cnpj": "12.345.678/0001-90"}
@@ -210,4 +246,26 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
                 .andExpect(jsonPath("$.correlationId").exists());
     }
 
+    @Test
+    void rejectsAnonymousFiscalConfigurationWrite() throws Exception {
+        mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cnpj\":\"12.345.678/0001-90\",\"legalName\":\"Farelo\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        assertThat(companyFiscalConfigurationRepository.count()).isZero();
+    }
+
+    @Test
+    void rejectsNonAdminFiscalConfigurationWrite() throws Exception {
+        for (UserRole role : List.of(UserRole.MANAGER, UserRole.CASHIER)) {
+            mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                            .header("Authorization", "Bearer " + tokenFor(role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"cnpj\":\"12.345.678/0001-90\",\"legalName\":\"Farelo\"}"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        }
+        assertThat(companyFiscalConfigurationRepository.count()).isZero();
+    }
 }
