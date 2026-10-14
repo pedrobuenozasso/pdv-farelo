@@ -62,6 +62,8 @@ function CashierContent() {
   const supervisor = session?.role === "ADMIN" || session?.role === "MANAGER";
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [shiftId, setShiftId] = useState("");
+  const [openingAmount, setOpeningAmount] = useState("");
+  const [openingError, setOpeningError] = useState<string | null>(null);
   const [action, setAction] = useState<MovementAction>("withdrawals");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
@@ -71,15 +73,17 @@ function CashierContent() {
 
   const shifts = useQuery({ queryKey: ["shifts"], queryFn: listShifts });
   const sessions = useQuery({
-    queryKey: ["cash-sessions"],
+    queryKey: ["cash-sessions", userId],
     queryFn: listCashSessions,
+    enabled: Boolean(userId),
   });
   const activeShifts = shifts.data?.filter((shift) => shift.active) ?? [];
+  const ownOpenSession = sessions.data?.find(
+    (item) => item.openedByUserId === userId && item.status === "OPEN",
+  );
   const selected =
     sessions.data?.find((item) => item.id === selectedId) ??
-    sessions.data?.find(
-      (item) => item.openedByUserId === userId && item.status === "OPEN",
-    ) ??
+    ownOpenSession ??
     sessions.data?.[0];
   const movements = useQuery({
     queryKey: ["cash-movements", selected?.id],
@@ -95,9 +99,11 @@ function CashierContent() {
     await queryClient.invalidateQueries({ queryKey: ["cash-movements"] });
   };
   const openMutation = useMutation({
-    mutationFn: openCashSession,
+    mutationFn: (input: { shiftId: string; openingAmount: string }) =>
+      openCashSession(input.shiftId, input.openingAmount),
     onSuccess: async (opened) => {
       setSelectedId(opened.id);
+      setOpeningAmount("");
       await refresh();
     },
   });
@@ -137,15 +143,29 @@ function CashierContent() {
           <Card>
             <h2 className="font-serif text-xl font-semibold">Abrir caixa</h2>
             <p className="text-ink-soft mt-1 text-sm">
-              Escolha um turno ativo. Cada operador pode manter um caixa aberto
-              por vez.
+              Escolha um turno ativo e informe o dinheiro contado na abertura.
+              Cada operador pode manter um caixa aberto por vez.
             </p>
+            {ownOpenSession ? (
+              <p className="text-primary-dark mt-3 text-sm font-semibold">
+                Seu caixa de {ownOpenSession.shiftName} está aberto.
+              </p>
+            ) : null}
             <form
               className="mt-4 flex flex-wrap gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
+                if (!validMoney(openingAmount, true)) {
+                  setOpeningError(
+                    "Informe zero ou um valor positivo com até duas casas decimais.",
+                  );
+                  return;
+                }
                 const chosen = shiftId || activeShifts[0]?.id;
-                if (chosen) openMutation.mutate(chosen);
+                if (chosen) {
+                  setOpeningError(null);
+                  openMutation.mutate({ shiftId: chosen, openingAmount });
+                }
               }}
             >
               <select
@@ -163,13 +183,31 @@ function CashierContent() {
                   </option>
                 ))}
               </select>
+              <input
+                aria-label="Dinheiro contado na abertura"
+                type="text"
+                inputMode="decimal"
+                placeholder="Abertura em R$ (ex.: 100.00)"
+                value={openingAmount}
+                onChange={(event) =>
+                  setOpeningAmount(event.target.value.replace(",", "."))
+                }
+                className="border-line bg-surface min-w-48 flex-1 rounded-lg border px-3 py-2 text-sm"
+              />
               <Button
                 type="submit"
-                disabled={!activeShifts.length || openMutation.isPending}
+                disabled={
+                  !activeShifts.length ||
+                  Boolean(ownOpenSession) ||
+                  openMutation.isPending
+                }
               >
                 Abrir
               </Button>
             </form>
+            {openingError ? (
+              <p className="text-red mt-3 text-sm">{openingError}</p>
+            ) : null}
             {shifts.isError ? (
               <p className="text-red mt-3 text-sm">
                 {apiErrorMessage(shifts.error, "Falha ao buscar turnos.")}
@@ -238,6 +276,14 @@ function CashierContent() {
                 </span>
               </div>
               <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-ink-soft">Dinheiro na abertura</dt>
+                  <dd>
+                    {selected.openingAmount === null
+                      ? "Não registrado (caixa anterior)"
+                      : money.format(selected.openingAmount)}
+                  </dd>
+                </div>
                 <div>
                   <dt className="text-ink-soft">Aberto em</dt>
                   <dd>{date.format(new Date(selected.openedAt))}</dd>
@@ -449,10 +495,9 @@ function CashierContent() {
                   Conferência administrativa
                 </h2>
                 <p className="text-ink-soft mt-1 text-sm">
-                  Compara o valor contado com pagamentos em dinheiro registrados
-                  no período. Sangrias, suprimentos, despesas e receitas ainda
-                  não entram nesse cálculo; revise os movimentos antes de
-                  confirmar.
+                  Compara o dinheiro contado com a abertura, os pagamentos em
+                  dinheiro e os movimentos deste caixa (suprimentos e receitas
+                  somam; sangrias e despesas subtraem).
                 </p>
                 <Button
                   className="mt-4"

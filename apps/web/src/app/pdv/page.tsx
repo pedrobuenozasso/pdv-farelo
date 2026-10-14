@@ -16,6 +16,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
@@ -26,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { listCategories, type Category } from "@/lib/api/categories";
+import { listCashSessions } from "@/lib/api/cashier";
 import { apiErrorMessage } from "@/lib/api/client";
 import {
   closeCommand,
@@ -68,6 +70,8 @@ import { printConference } from "@/lib/api/print-jobs";
 import { listProducts, type Product } from "@/lib/api/products";
 import { getTableOccupancy, listTables } from "@/lib/api/tables";
 import { cn } from "@/lib/cn";
+import { decodeUserId } from "@/lib/auth";
+import { useSession } from "@/lib/use-session";
 
 // Tom de atendente, diferente do texto amigável ao cliente em
 // app/c/[commandNumber]/page.tsx — aqui é densidade de informação, não
@@ -1273,6 +1277,29 @@ function PaymentPanel({
   openSignal: number;
 }) {
   const queryClient = useQueryClient();
+  const session = useSession();
+  const userId = session ? decodeUserId(session.token) : null;
+  const canReceivePayment =
+    session?.role === "ADMIN" ||
+    session?.role === "MANAGER" ||
+    session?.role === "CASHIER";
+  const supervisor = session?.role === "ADMIN" || session?.role === "MANAGER";
+  const cashSessions = useQuery({
+    queryKey: ["cash-sessions", userId],
+    queryFn: listCashSessions,
+    enabled: canReceivePayment && Boolean(userId),
+  });
+  const [chosenCashSessionId, setChosenCashSessionId] = useState("");
+  const openCashSessions =
+    cashSessions.data?.filter((item) => item.status === "OPEN") ?? [];
+  const ownCashSession = openCashSessions.find(
+    (item) => item.openedByUserId === userId,
+  );
+  const selectedCashSession = cashSessions.isError
+    ? undefined
+    : chosenCashSessionId
+      ? openCashSessions.find((item) => item.id === chosenCashSessionId)
+      : ownCashSession;
   const [formOpen, setFormOpen] = useState(false);
   // FARELO-225: shown after a CASH payment with change is confirmed by the
   // backend — persists past the form closing/resetting, since that's the
@@ -1363,15 +1390,20 @@ function PaymentPanel({
       : null;
 
   const recordPaymentMutation = useMutation({
-    mutationFn: (values: PaymentFormValues) =>
-      recordPayment(commandNumber, {
+    mutationFn: (values: PaymentFormValues) => {
+      if (!selectedCashSession) {
+        throw new Error("Abra ou selecione um caixa antes de receber.");
+      }
+      return recordPayment(commandNumber, {
         amount: Number(values.amount),
         method: values.method,
+        cashSessionId: selectedCashSession.id,
         amountReceived:
           values.method === "CASH" && values.amountReceived
             ? Number(values.amountReceived)
             : undefined,
-      }),
+      });
+    },
     onSuccess: (result) => {
       reset();
       setFormOpen(false);
@@ -1431,12 +1463,76 @@ function PaymentPanel({
 
       {formOpen ? (
         <form
-          onSubmit={handleSubmit((values) =>
-            recordPaymentMutation.mutate(values),
-          )}
+          onSubmit={handleSubmit((values) => {
+            if (selectedCashSession) recordPaymentMutation.mutate(values);
+          })}
           noValidate
           className="border-line bg-bg flex flex-col gap-3 rounded-2xl border p-4"
         >
+          <div className="flex flex-col gap-2 text-sm">
+            <span className="text-ink font-medium">Caixa do pagamento</span>
+            {cashSessions.isPending && canReceivePayment ? (
+              <span className="text-ink-soft">Buscando caixa aberto...</span>
+            ) : null}
+            {cashSessions.isError ? (
+              <span className="text-red">
+                {apiErrorMessage(
+                  cashSessions.error,
+                  "Não foi possível consultar os caixas.",
+                )}
+              </span>
+            ) : null}
+            {selectedCashSession ? (
+              <span className="text-ink-soft">
+                {selectedCashSession.shiftName} ·{" "}
+                {selectedCashSession.openedByUserName}
+                {selectedCashSession.id === ownCashSession?.id
+                  ? " (seu caixa)"
+                  : ""}
+              </span>
+            ) : null}
+            {supervisor && openCashSessions.length > 0 ? (
+              <select
+                aria-label="Selecionar caixa aberto"
+                value={selectedCashSession?.id ?? ""}
+                onChange={(event) => setChosenCashSessionId(event.target.value)}
+                className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+              >
+                <option value="">
+                  {ownCashSession ? "Meu caixa" : "Selecione um caixa"}
+                </option>
+                {openCashSessions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.shiftName} · {item.openedByUserName}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            {!selectedCashSession && !cashSessions.isPending ? (
+              <span className="text-red">
+                {canReceivePayment
+                  ? "Nenhum caixa selecionado. Abra o seu caixa ou selecione um caixa aberto para registrar o pagamento."
+                  : "Seu perfil não pode registrar pagamentos."}
+              </span>
+            ) : null}
+            {canReceivePayment ? (
+              <span className="flex gap-3">
+                <Link
+                  href="/pdv/caixa"
+                  className="text-primary font-semibold hover:underline"
+                >
+                  Ir para o caixa
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => cashSessions.refetch()}
+                  className="text-primary font-semibold hover:underline"
+                >
+                  Atualizar caixas
+                </button>
+              </span>
+            ) : null}
+          </div>
           <div className="flex flex-col gap-1">
             <label className="text-ink text-sm font-medium" htmlFor="amount">
               Valor (R$)
@@ -1500,7 +1596,7 @@ function PaymentPanel({
           <div className="flex gap-2">
             <Button
               type="submit"
-              disabled={recordPaymentMutation.isPending}
+              disabled={recordPaymentMutation.isPending || !selectedCashSession}
               className="flex-1"
             >
               {recordPaymentMutation.isPending ? "Registrando..." : "Confirmar"}
@@ -1517,7 +1613,7 @@ function PaymentPanel({
       ) : (
         <div className="border-line bg-surface flex flex-col gap-2 rounded-2xl border p-4">
           <Button
-            disabled={remaining <= 0}
+            disabled={remaining <= 0 || !canReceivePayment}
             onClick={() => {
               // useForm's `defaultValues` are only read once, at mount —
               // this component mounts before `remaining` settles (both

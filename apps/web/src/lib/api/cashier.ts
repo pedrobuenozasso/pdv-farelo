@@ -16,6 +16,7 @@ export type CashSession = {
   openedByUserName: string;
   openedAt: string;
   status: "OPEN" | "CLOSED";
+  openingAmount: number | null;
   closingAmount: number | null;
   closedAt: string | null;
   reconciliationStatus: "PENDING" | "MATCHED" | "MISMATCHED";
@@ -68,8 +69,8 @@ export async function listCashMovements(id: string): Promise<CashMovement[]> {
   return parseResponse<CashMovement[]>(response);
 }
 
-export const openCashSession = (shiftId: string) =>
-  post<CashSession>("/api/v1/cash-sessions", { shiftId });
+export const openCashSession = (shiftId: string, openingAmount: string) =>
+  post<CashSession>("/api/v1/cash-sessions", { shiftId, openingAmount });
 
 export const closeCashSession = (id: string, closingAmount: string) =>
   post<CashSession>(`/api/v1/cash-sessions/${id}/close`, { closingAmount });

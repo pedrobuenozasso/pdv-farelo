@@ -13,6 +13,7 @@ export type Payment = {
   commandNumber: number;
   amount: number;
   method: PaymentMethod;
+  cashSessionId: string | null;
   createdAt: string;
 };
 
@@ -36,6 +37,7 @@ export type PaymentBalance = {
 export type RecordPaymentInput = {
   amount: number;
   method: PaymentMethod;
+  cashSessionId: string;
   // FARELO-225 ("Tratar troco em dinheiro") — only meaningful/allowed when
   // method is CASH, and must be >= amount (backend validates both). The
   // cash the customer physically handed over; amount stays "valor
