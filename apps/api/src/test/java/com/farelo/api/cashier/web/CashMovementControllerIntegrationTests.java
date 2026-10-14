@@ -305,6 +305,44 @@ class CashMovementControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
 
+    @Test
+    void cashierCannotReadOrMoveAnotherOperatorsCashButAdminCan() throws Exception {
+        String ownerToken = tokenFor(UserRole.CASHIER);
+        String otherToken = tokenFor(UserRole.CASHIER);
+        UUID ownerSessionId = openSession(ownerToken);
+        UUID otherSessionId = openSession(otherToken);
+
+        mockMvc.perform(get("/api/v1/cash-sessions/{id}/movements", otherSessionId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+        for (String action : List.of("withdrawals", "supplies", "expenses", "incomes")) {
+            mockMvc.perform(post("/api/v1/cash-sessions/{id}/{action}", otherSessionId, action)
+                            .header("Authorization", "Bearer " + ownerToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"amount\": 10}"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        }
+        assertThat(cashMovementRepository.count()).isZero();
+
+        String adminToken = tokenFor(UserRole.ADMIN);
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/withdrawals", otherSessionId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 10}"))
+                .andExpect(status().isCreated());
+        mockMvc.perform(get("/api/v1/cash-sessions/{id}/movements", otherSessionId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)));
+        mockMvc.perform(get("/api/v1/cash-sessions/{id}/movements", ownerSessionId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
     // FARELO-311 — POST .../expenses and .../incomes below. Same shape/
     // preconditions as withdrawals/supplies above, so coverage here is
     // deliberately lighter (success + audit trail + the OPEN precondition

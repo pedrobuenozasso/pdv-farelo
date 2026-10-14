@@ -31,8 +31,9 @@ import java.util.UUID;
  * #open} requires {@code ADMIN}/{@code MANAGER}/{@code CASHIER} — same
  * cash-handling role list {@code PaymentController#record}/{@code #close}
  * already use. {@link #list}/{@link #getById} allow the same three roles
- * (a read over the same operational data, no stricter need identified
- * yet). {@link #close} (FARELO-308) reuses that same role list — closing a
+ * (a read over the same operational data). Within that list, a CASHIER can
+ * access only sessions opened by that user; ADMIN/MANAGER supervise all.
+ * {@link #close} (FARELO-308) reuses that same role list — closing a
  * caixa is as much a cash-handling action as opening/recording a payment
  * against one.
  *
@@ -74,16 +75,17 @@ public class CashSessionController {
 
     @GetMapping
     @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
-    public List<CashSessionResponse> list() {
-        return cashSessionService.listAll().stream()
+    public List<CashSessionResponse> list(AuthenticatedPrincipal principal) {
+        return cashSessionService.listVisibleTo(principal.userId(), principal.role()).stream()
                 .map(CashSessionResponse::from)
                 .toList();
     }
 
     @GetMapping("/{id}")
     @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
-    public CashSessionResponse getById(@PathVariable UUID id) {
-        return CashSessionResponse.from(cashSessionService.getById(id));
+    public CashSessionResponse getById(@PathVariable UUID id, AuthenticatedPrincipal principal) {
+        return CashSessionResponse.from(cashSessionService.getAccessibleById(
+                id, principal.userId(), principal.role()));
     }
 
     // FARELO-308. Same cash-handling role list as open() above.
@@ -93,7 +95,8 @@ public class CashSessionController {
             @PathVariable UUID id,
             @Valid @RequestBody CashSessionCloseRequest request,
             AuthenticatedPrincipal principal) {
-        CashSession session = cashSessionService.close(id, request.closingAmount(), principal.userId());
+        CashSession session = cashSessionService.close(
+                id, request.closingAmount(), principal.userId(), principal.role());
         return CashSessionResponse.from(session);
     }
 

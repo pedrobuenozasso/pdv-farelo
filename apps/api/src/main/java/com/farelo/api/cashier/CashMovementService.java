@@ -2,6 +2,7 @@ package com.farelo.api.cashier;
 
 import com.farelo.api.audit.AuditLogService;
 import com.farelo.api.security.User;
+import com.farelo.api.security.UserRole;
 import com.farelo.api.security.UserService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -67,8 +68,9 @@ public class CashMovementService {
      * @throws CashSessionNotOpenException the session isn't {@code OPEN}.
      */
     @Transactional
-    public CashMovement recordWithdrawal(UUID cashSessionId, BigDecimal amount, String description, UUID actorId) {
-        return record(cashSessionId, CashMovementType.WITHDRAWAL, amount, description, actorId);
+    public CashMovement recordWithdrawal(
+            UUID cashSessionId, BigDecimal amount, String description, UUID actorId, UserRole role) {
+        return record(cashSessionId, CashMovementType.WITHDRAWAL, amount, description, actorId, role);
     }
 
     /**
@@ -80,8 +82,9 @@ public class CashMovementService {
      * @throws CashSessionNotOpenException the session isn't {@code OPEN}.
      */
     @Transactional
-    public CashMovement recordSupply(UUID cashSessionId, BigDecimal amount, String description, UUID actorId) {
-        return record(cashSessionId, CashMovementType.SUPPLY, amount, description, actorId);
+    public CashMovement recordSupply(
+            UUID cashSessionId, BigDecimal amount, String description, UUID actorId, UserRole role) {
+        return record(cashSessionId, CashMovementType.SUPPLY, amount, description, actorId, role);
     }
 
     /**
@@ -94,8 +97,9 @@ public class CashMovementService {
      * @throws CashSessionNotOpenException the session isn't {@code OPEN}.
      */
     @Transactional
-    public CashMovement recordExpense(UUID cashSessionId, BigDecimal amount, String description, UUID actorId) {
-        return record(cashSessionId, CashMovementType.EXPENSE, amount, description, actorId);
+    public CashMovement recordExpense(
+            UUID cashSessionId, BigDecimal amount, String description, UUID actorId, UserRole role) {
+        return record(cashSessionId, CashMovementType.EXPENSE, amount, description, actorId, role);
     }
 
     /**
@@ -108,13 +112,15 @@ public class CashMovementService {
      * @throws CashSessionNotOpenException the session isn't {@code OPEN}.
      */
     @Transactional
-    public CashMovement recordIncome(UUID cashSessionId, BigDecimal amount, String description, UUID actorId) {
-        return record(cashSessionId, CashMovementType.INCOME, amount, description, actorId);
+    public CashMovement recordIncome(
+            UUID cashSessionId, BigDecimal amount, String description, UUID actorId, UserRole role) {
+        return record(cashSessionId, CashMovementType.INCOME, amount, description, actorId, role);
     }
 
     private CashMovement record(
-            UUID cashSessionId, CashMovementType type, BigDecimal amount, String description, UUID actorId) {
-        CashSession session = cashSessionService.findOpen(cashSessionId);
+            UUID cashSessionId, CashMovementType type, BigDecimal amount, String description, UUID actorId,
+            UserRole role) {
+        CashSession session = cashSessionService.findOpenAccessible(cashSessionId, actorId, role);
         User actor = userService.getById(actorId);
 
         CashMovement movement = new CashMovement(session, type, amount, description, actor.getId(), actor.getName());
@@ -163,8 +169,8 @@ public class CashMovementService {
      *     exist.
      */
     @Transactional(readOnly = true)
-    public List<CashMovement> listByCashSession(UUID cashSessionId) {
-        CashSession session = cashSessionService.getById(cashSessionId);
+    public List<CashMovement> listByCashSession(UUID cashSessionId, UUID actorId, UserRole role) {
+        CashSession session = cashSessionService.getAccessibleById(cashSessionId, actorId, role);
         return cashMovementRepository.findByCashSessionOrderByCreatedAtAsc(session);
     }
 

@@ -352,10 +352,11 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void closesWithZeroClosingAmount() throws Exception {
         Shift shift = persistedShift();
-        UUID id = openSession(tokenFor(UserRole.CASHIER), shift);
+        String token = tokenFor(UserRole.CASHIER);
+        UUID id = openSession(token, shift);
 
         mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
-                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
+                        .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"closingAmount": 0}
@@ -443,6 +444,67 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
                         .content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void cashierListsAndReadsOnlyOwnSessionsWhileAdminSeesAll() throws Exception {
+        Shift shift = persistedShift();
+        String firstToken = tokenFor(UserRole.CASHIER);
+        String secondToken = tokenFor(UserRole.CASHIER);
+        UUID firstId = openSession(firstToken, shift);
+        UUID secondId = openSession(secondToken, shift);
+
+        mockMvc.perform(get("/api/v1/cash-sessions")
+                        .header("Authorization", "Bearer " + firstToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].id").value(firstId.toString()));
+        mockMvc.perform(get("/api/v1/cash-sessions/{id}", firstId)
+                        .header("Authorization", "Bearer " + firstToken))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/cash-sessions/{id}", secondId)
+                        .header("Authorization", "Bearer " + firstToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+        String adminToken = tokenFor(UserRole.ADMIN);
+        mockMvc.perform(get("/api/v1/cash-sessions")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)));
+        mockMvc.perform(get("/api/v1/cash-sessions/{id}", secondId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void cashierCannotCloseAnotherOperatorsSessionButAdminCan() throws Exception {
+        Shift shift = persistedShift();
+        String ownerToken = tokenFor(UserRole.CASHIER);
+        String otherToken = tokenFor(UserRole.CASHIER);
+        UUID id = openSession(ownerToken, shift);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + otherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 0}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        assertThat(cashSessionRepository.findById(id).orElseThrow().getStatus())
+                .isEqualTo(com.farelo.api.cashier.CashSessionStatus.OPEN);
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + otherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": 0}"))
+                .andExpect(status().isForbidden());
     }
 
     // FARELO-309 — POST .../reconcile below.

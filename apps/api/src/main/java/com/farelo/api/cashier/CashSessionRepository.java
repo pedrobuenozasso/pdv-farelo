@@ -31,4 +31,8 @@ public interface CashSessionRepository extends JpaRepository<CashSession, UUID> 
     @Query("SELECT cs FROM CashSession cs JOIN FETCH cs.shift ORDER BY cs.openedAt DESC")
     List<CashSession> findAllWithShiftByOrderByOpenedAtDesc();
 
+    @Query("SELECT cs FROM CashSession cs JOIN FETCH cs.shift "
+            + "WHERE cs.openedByUserId = :userId ORDER BY cs.openedAt DESC")
+    List<CashSession> findAllWithShiftByOpenedByUserIdOrderByOpenedAtDesc(@Param("userId") UUID userId);
+
 }

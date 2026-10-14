@@ -68,7 +68,7 @@ public class CashMovementController {
             AuthenticatedPrincipal principal,
             UriComponentsBuilder uriComponentsBuilder) {
         CashMovement movement = cashMovementService.recordWithdrawal(
-                id, request.amount(), request.description(), principal.userId());
+                id, request.amount(), request.description(), principal.userId(), principal.role());
         return created(movement, id, uriComponentsBuilder);
     }
 
@@ -80,7 +80,7 @@ public class CashMovementController {
             AuthenticatedPrincipal principal,
             UriComponentsBuilder uriComponentsBuilder) {
         CashMovement movement = cashMovementService.recordSupply(
-                id, request.amount(), request.description(), principal.userId());
+                id, request.amount(), request.description(), principal.userId(), principal.role());
         return created(movement, id, uriComponentsBuilder);
     }
 
@@ -94,7 +94,7 @@ public class CashMovementController {
             AuthenticatedPrincipal principal,
             UriComponentsBuilder uriComponentsBuilder) {
         CashMovement movement = cashMovementService.recordExpense(
-                id, request.amount(), request.description(), principal.userId());
+                id, request.amount(), request.description(), principal.userId(), principal.role());
         return created(movement, id, uriComponentsBuilder);
     }
 
@@ -108,7 +108,7 @@ public class CashMovementController {
             AuthenticatedPrincipal principal,
             UriComponentsBuilder uriComponentsBuilder) {
         CashMovement movement = cashMovementService.recordIncome(
-                id, request.amount(), request.description(), principal.userId());
+                id, request.amount(), request.description(), principal.userId(), principal.role());
         return created(movement, id, uriComponentsBuilder);
     }
 
@@ -128,8 +128,8 @@ public class CashMovementController {
 
     @GetMapping("/{id}/movements")
     @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
-    public List<CashMovementResponse> list(@PathVariable UUID id) {
-        return cashMovementService.listByCashSession(id).stream()
+    public List<CashMovementResponse> list(@PathVariable UUID id, AuthenticatedPrincipal principal) {
+        return cashMovementService.listByCashSession(id, principal.userId(), principal.role()).stream()
                 .map(CashMovementResponse::from)
                 .toList();
     }

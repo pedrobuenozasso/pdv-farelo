@@ -3,7 +3,9 @@ package com.farelo.api.cashier;
 import com.farelo.api.payment.PaymentMethod;
 import com.farelo.api.payment.PaymentRepository;
 import com.farelo.api.security.User;
+import com.farelo.api.security.UserRole;
 import com.farelo.api.security.UserService;
+import com.farelo.api.security.rbac.InsufficientRoleException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,7 +20,7 @@ import java.util.UUID;
  * UUID)} (backing {@code POST /api/v1/cash-sessions}) and {@link
  * #getById(UUID)}/{@link #listAll()} (backing {@code GET
  * /api/v1/cash-sessions}[/{id}]). FARELO-308 adds {@link #close(UUID,
- * java.math.BigDecimal, UUID)} (backing {@code POST
+ * java.math.BigDecimal, UUID, UserRole)} (backing {@code POST
  * /api/v1/cash-sessions/{id}/close}) and the {@link #findOpen(UUID)}
  * helper it shares with {@code CashMovementService} (FARELO-310/311).
  * FARELO-309 adds {@link #reconcile(UUID, UUID)} (backing {@code POST
@@ -124,6 +126,40 @@ public class CashSessionService {
         return cashSessionRepository.findAllWithShiftByOrderByOpenedAtDesc();
     }
 
+    @Transactional(readOnly = true)
+    public List<CashSession> listVisibleTo(UUID actorId, UserRole role) {
+        if (role == UserRole.ADMIN || role == UserRole.MANAGER) {
+            return listAll();
+        }
+        if (role == UserRole.CASHIER) {
+            return cashSessionRepository.findAllWithShiftByOpenedByUserIdOrderByOpenedAtDesc(actorId);
+        }
+        throw new InsufficientRoleException(role);
+    }
+
+    @Transactional(readOnly = true)
+    public CashSession getAccessibleById(UUID id, UUID actorId, UserRole role) {
+        CashSession session = getById(id);
+        requireAccess(session, actorId, role);
+        return session;
+    }
+
+    public CashSession findOpenAccessible(UUID id, UUID actorId, UserRole role) {
+        CashSession session = getAccessibleById(id, actorId, role);
+        if (session.getStatus() != CashSessionStatus.OPEN) {
+            throw new CashSessionNotOpenException(id, session.getStatus());
+        }
+        return session;
+    }
+
+    private void requireAccess(CashSession session, UUID actorId, UserRole role) {
+        if (role == UserRole.ADMIN || role == UserRole.MANAGER
+                || (role == UserRole.CASHIER && actorId.equals(session.getOpenedByUserId()))) {
+            return;
+        }
+        throw new InsufficientRoleException(role);
+    }
+
     /**
      * Resolves a {@link CashSession} that's ready to be closed (FARELO-308)
      * or to have a {@code CashMovement} recorded against it (FARELO-310/
@@ -165,8 +201,8 @@ public class CashSessionService {
      *     (already closed).
      */
     @Transactional
-    public CashSession close(UUID id, BigDecimal closingAmount, UUID actorId) {
-        CashSession session = findOpen(id);
+    public CashSession close(UUID id, BigDecimal closingAmount, UUID actorId, UserRole role) {
+        CashSession session = findOpenAccessible(id, actorId, role);
         User actor = userService.getById(actorId);
 
         session.setStatus(CashSessionStatus.CLOSED);
