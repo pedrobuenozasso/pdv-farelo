@@ -1172,6 +1172,12 @@ Pacote: `com.farelo.api.printing`.
 
 Pacote: `com.farelo.api.inventory`.
 
+**Política atual de gestão:** todas as rotas de `IngredientController`,
+`RecipeController` e `RecipeItemController`, inclusive consultas, exigem
+`ADMIN` ou `MANAGER`. O cardápio e o PDV não chamam essas rotas; a tela de
+estoque da retaguarda já envia o token. As rotas de movimentos/saldos têm
+controlador e política próprios.
+
 - **`Ingredient`** (FARELO-090): entidade JPA — `id` (UUID, mesma estratégia
   de `Category`/`Product`/`Printer`), `name` (ex: "Leite", "Café em grão",
   "Copo 300ml"), `unit` (enum `IngredientUnit` —
@@ -3371,6 +3377,12 @@ faz sentido lê-la em seguida.
 
 ## notification
 
+**Política atual de acesso:** `NotificationController` exige `ADMIN` ou
+`MANAGER` tanto para listar (`GET /api/v1/notifications`) quanto para
+acionar o envio manual (`POST /api/v1/notifications/{id}/send`). O worker
+programado chama `NotificationSender` diretamente, sem usar a rota HTTP.
+As notas históricas abaixo descrevem o escopo original dos tickets.
+
 Pacote: `com.farelo.api.notification`.
 
 - **`Notification`** (FARELO-110): entidade JPA — o registro durável de
@@ -4398,6 +4410,12 @@ funcional com o Sischef — deliberadamente isolado de `Order`/`OrderItem`/
 delas, e o único acoplamento cross-domain é uma leitura agregada via
 `PaymentRepository` (FARELO-309, conferência), nunca uma escrita.
 
+**Política atual de acesso ao caixa:** `CASHIER` vê e movimenta apenas as
+sessões que abriu; a listagem é filtrada no banco pelo seu `userId`, e acesso
+por id a caixa alheio retorna `403`. `ADMIN` e `MANAGER` podem supervisionar
+qualquer sessão. A autorização é conferida no serviço para consulta,
+fechamento e movimentos, além do RBAC de papel na borda HTTP.
+
 - **`Shift`** (FARELO-306, "Turno"): entidade JPA — um template nomeado e
   reutilizável para abrir um `CashSession` (ex. "TURNO 01"), com uma conta
   de abertura e uma conta de fechamento pré-configuradas (ex. "Caixa
@@ -4604,6 +4622,12 @@ delas, e o único acoplamento cross-domain é uma leitura agregada via
 ## fiscal
 
 Pacote: `com.farelo.api.fiscal`.
+
+**Política atual de escrita:** somente `ADMIN` pode criar/alterar
+`FiscalProfile` e definir `CompanyFiscalConfiguration`. As leituras desses
+controllers mantêm a política anterior. Os parágrafos de FARELO-150 a
+FARELO-155 abaixo registram as decisões *daqueles tickets* quando ainda
+não havia RBAC fiscal; não descrevem a política atual de escrita.
 
 - **`FiscalProfile`** (FARELO-150): entidade JPA — uma classificação
   fiscal/tributária reutilizável (ex: "Isento", "Tributado padrão") que um

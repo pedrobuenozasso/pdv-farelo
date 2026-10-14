@@ -369,6 +369,14 @@ explicitamente" que `productionStation` já estabeleceu.
   `fiscalProfileId` não existe, `code: "FISCAL_PROFILE_NOT_FOUND"` (mesmo
   formato do `POST`).
 
+### `GET /api/v1/commands`
+
+Lista resumida para a grade interna do PDV, ordenada pelo número. Requer
+`ADMIN`, `MANAGER`, `CASHIER` ou `ATTENDANT`; não é chamada pelo cardápio QR.
+Cada registro contém `number`, `status` e `tableNumber` (nulo sem mesa).
+Nome, telefone e histórico financeiro não são retornados. A interface
+reconsulta a lista periodicamente e após alterações locais.
+
 ### `GET /api/v1/commands/{number}`
 
 Busca uma comanda pelo `number`. (FARELO-032)
@@ -1145,6 +1153,15 @@ com `status: "PENDING"` e `retryCount` incrementado em 1.
 
 ### `POST /api/v1/ingredients`
 
+**Acesso para ingredientes e fichas técnicas:** todos os endpoints de
+`IngredientController` (`GET`/`POST`/`PUT` em `/ingredients`),
+`RecipeController` (`GET`/`POST`/`PATCH` em `/recipes`) e
+`RecipeItemController` (`GET`/`POST`/`DELETE` em
+`/recipes/{recipeId}/items`) requerem `ADMIN` ou `MANAGER`, inclusive as
+leituras. Sem token válido retornam `401 UNAUTHENTICATED`; demais papéis,
+inclusive `CASHIER`, recebem `403 FORBIDDEN`. As rotas irmãs de movimento
+e saldo de estoque seguem sua própria política documentada abaixo.
+
 Cria um ingrediente. (FARELO-090; `minimumStock` é FARELO-099)
 
 Primeiro endpoint do domínio `inventory`. Sem `active` no corpo — um
@@ -1901,6 +1918,8 @@ FARELO-122) para o desenho completo do mecanismo.
 
 ### `GET /api/v1/notifications`
 
+**Acesso:** Bearer JWT de `ADMIN` ou `MANAGER`. Sem autenticação: `401`; outros perfis: `403`.
+
 Lista notificações (`Notification`) — registros de algo que precisa ser
 (ou já foi) enviado a um destinatário, hoje sempre uma mensagem de
 WhatsApp. (FARELO-110)
@@ -1946,6 +1965,8 @@ Lista vazia (`[]`) quando não existe nenhuma notificação (ou nenhuma com o
 `status` filtrado).
 
 ### `POST /api/v1/notifications/{id}/send`
+
+**Acesso:** Bearer JWT de `ADMIN` ou `MANAGER`. Sem autenticação: `401`; outros perfis: `403`. O worker automático usa `NotificationSender` diretamente e não depende desta rota HTTP.
 
 Aciona manualmente o mecanismo real de envio (FARELO-111): tenta entregar a
 notificação `{id}` via Meta WhatsApp Cloud API
@@ -2326,12 +2347,18 @@ caixa de `POST /api/v1/commands/{number}/payments`.
 
 ### `GET /api/v1/cash-sessions` / `GET /api/v1/cash-sessions/{id}`
 
-Lista todos os caixas (mais recente primeiro) ou busca um por id.
+Lista caixas (mais recente primeiro) ou busca um por id.
 (FARELO-307)
 
 **Requer: `ADMIN`, `MANAGER`, `CASHIER`**.
 
-**Erros** — `GET /{id}`: `404 Not Found`, `code: "CASH_SESSION_NOT_FOUND"`.
+`CASHIER` vê somente sessões abertas por sua própria conta. `ADMIN` e
+`MANAGER` podem consultar todas para supervisão. A tentativa do Caixa de
+consultar por id uma sessão de outro operador retorna `403 FORBIDDEN`.
+
+**Erros** — `GET /{id}`: `404 Not Found`, `code: "CASH_SESSION_NOT_FOUND"`
+quando o id não existe; `403 FORBIDDEN` quando existe mas pertence a outro
+operador.
 
 ### `POST /api/v1/cash-sessions/{id}/close`
 
@@ -2339,6 +2366,9 @@ Fecha um caixa — informa o valor de fechamento em dinheiro contado.
 (FARELO-308)
 
 **Requer: `ADMIN`, `MANAGER`, `CASHIER`**.
+
+`CASHIER` fecha apenas o próprio caixa; `ADMIN`/`MANAGER` podem fechar
+outro caixa. Tentativa de fechar caixa alheio retorna `403 FORBIDDEN`.
 
 **Request body**
 
@@ -2395,6 +2425,10 @@ caixa, sem estar ligado a nenhum pedido. (FARELO-310)
 **Requer: `ADMIN`, `MANAGER`, `CASHIER`**. Auditável — cada chamada grava
 um `AuditLog` (`CASH_WITHDRAWAL_RECORDED`/`CASH_SUPPLY_RECORDED`).
 
+`CASHIER` movimenta apenas o próprio caixa; `ADMIN`/`MANAGER` podem
+supervisionar qualquer sessão. Uma sessão alheia retorna `403 FORBIDDEN`
+antes de registrar o movimento.
+
 **Request body**
 
 ```json
@@ -2432,6 +2466,9 @@ Lista os movimentos (`CashMovement`) de um caixa, mais antigo primeiro.
 
 **Requer: `ADMIN`, `MANAGER`, `CASHIER`**.
 
+`CASHIER` consulta movimentos apenas do próprio caixa; uma sessão alheia
+retorna `403 FORBIDDEN`. `ADMIN`/`MANAGER` podem consultar todas.
+
 ### `POST /api/v1/cash-sessions/{id}/expenses` (despesa) e `POST /api/v1/cash-sessions/{id}/incomes` (receita)
 
 Lança uma despesa ou receita direto do caixa, fora do fluxo de pedido/
@@ -2442,6 +2479,8 @@ Mesmo formato de request/response/erros/RBAC de `.../withdrawals`/
 `AuditLog` `CASH_EXPENSE_RECORDED`/`CASH_INCOME_RECORDED`.
 
 ### `POST /api/v1/fiscal-profiles`
+
+**Requer: `ADMIN`** para cadastrar classificação fiscal.
 
 Cria um perfil fiscal. (FARELO-150)
 
@@ -2554,6 +2593,8 @@ Mesmo formato de item de `GET /api/v1/fiscal-profiles`.
 
 ### `PUT /api/v1/fiscal-profiles/{id}`
 
+**Requer: `ADMIN`** para alterar classificação fiscal.
+
 Atualiza (substituição completa) um perfil fiscal existente. (FARELO-150)
 
 Fecha o CRUD básico de `FiscalProfile` — sem `DELETE` por enquanto (fora
@@ -2598,10 +2639,9 @@ torná-lo opcional na criação.
 - `404 Not Found` — `{id}` do perfil fiscal não existe,
   `code: "FISCAL_PROFILE_NOT_FOUND"`.
 
-Nenhum endpoint de `fiscal-profiles` tem a marca "Requer" — sem
-`@RequireRole` ainda, mesmo raciocínio de `IngredientController` (ver
-seção "Autenticação/RBAC" acima e `docs/domain-model.md`, seção `fiscal`,
-para o raciocínio completo).
+`POST` e `PUT` retornam `401 UNAUTHENTICATED` sem token válido e
+`403 FORBIDDEN` para qualquer papel diferente de `ADMIN`. `GET` e
+`GET /{id}` mantêm o acesso atual sem exigência de papel.
 
 ### `GET /api/v1/company-fiscal-configuration`
 
@@ -2637,6 +2677,8 @@ CRUD genérico de `fiscal-profiles`).
   social reais de nenhuma empresa para inventar um valor inicial.
 
 ### `PUT /api/v1/company-fiscal-configuration`
+
+**Requer: `ADMIN`** para definir ou substituir a identidade fiscal da empresa.
 
 Define (primeira chamada) ou substitui por completo (chamadas seguintes) a
 configuração fiscal da empresa. (FARELO-155)
@@ -2687,11 +2729,9 @@ do cliente a operação é sempre "definir a configuração atual".
 - `400 Bad Request` — `cnpj`/`legalName` ausente/em branco, no formato de
   erro padrão, `code: "VALIDATION_ERROR"`.
 
-Nenhum endpoint de `company-fiscal-configuration` tem a marca "Requer" —
-sem `@RequireRole` ainda, mesmo raciocínio de `fiscal-profiles`/
-`IngredientController` (ver seção "Autenticação/RBAC" acima e
-`docs/domain-model.md`, seção `fiscal`, subseção FARELO-155, para o
-raciocínio completo).
+`PUT` retorna `401 UNAUTHENTICATED` sem token válido e `403 FORBIDDEN`
+para qualquer papel diferente de `ADMIN`. `GET` mantém o acesso atual
+sem exigência de papel.
 
 ### `GET /api/v1/commands/{number}/fiscal-documents`
 
