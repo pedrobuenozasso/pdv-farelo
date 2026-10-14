@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -14,15 +15,21 @@ import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { ApiError, listCategories, type Category } from "@/lib/api/categories";
 import {
+  listFiscalProfiles,
+  type FiscalProfile,
+} from "@/lib/api/fiscal-profiles";
+import {
   createProduct,
   listProducts,
   updateProduct,
   type Product,
   type ProductionStation,
 } from "@/lib/api/products";
+import { useSession } from "@/lib/use-session";
 
 const PRODUCTS_QUERY_KEY = ["products"];
 const CATEGORIES_QUERY_KEY = ["categories"];
+const FISCAL_PROFILES_QUERY_KEY = ["fiscal-profiles"];
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -63,6 +70,7 @@ const productFormSchema = z.object({
   availableOnMenu: z.boolean(),
   availableOnPos: z.boolean(),
   productionStation: z.enum(["", "BAR", "KITCHEN"]),
+  fiscalProfileId: z.string(),
 });
 
 type ProductFormValues = z.infer<typeof productFormSchema>;
@@ -85,6 +93,7 @@ function apiErrorMessageFor(error: unknown, fallback: string) {
 
 export default function ProductsAdminPage() {
   const queryClient = useQueryClient();
+  const session = useSession();
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -110,6 +119,11 @@ export default function ProductsAdminPage() {
     queryKey: CATEGORIES_QUERY_KEY,
     queryFn: listCategories,
   });
+  const fiscalProfilesQuery = useQuery({
+    queryKey: FISCAL_PROFILES_QUERY_KEY,
+    queryFn: listFiscalProfiles,
+  });
+  const fiscalProfiles = fiscalProfilesQuery.data ?? [];
 
   const categories = categoriesQuery.data ?? [];
   const categoryNameById = new Map(
@@ -149,6 +163,7 @@ export default function ProductsAdminPage() {
       availableOnMenu: true,
       availableOnPos: true,
       productionStation: "",
+      fiscalProfileId: "",
     },
   });
 
@@ -171,6 +186,7 @@ export default function ProductsAdminPage() {
       availableOnMenu: values.availableOnMenu,
       availableOnPos: values.availableOnPos,
       productionStation: values.productionStation || undefined,
+      fiscalProfileId: values.fiscalProfileId || null,
     });
   });
 
@@ -191,9 +207,19 @@ export default function ProductsAdminPage() {
                 produtos
               </p>
             </div>
-            <Button onClick={() => setCreateOpen((open) => !open)}>
-              {createOpen ? "Fechar" : "Novo produto"}
-            </Button>
+            <div className="flex items-center gap-2">
+              {session?.role === "ADMIN" && (
+                <Link
+                  href="/admin/fiscal-profiles"
+                  className="text-primary text-sm font-semibold"
+                >
+                  Perfis fiscais
+                </Link>
+              )}
+              <Button onClick={() => setCreateOpen((open) => !open)}>
+                {createOpen ? "Fechar" : "Novo produto"}
+              </Button>
+            </div>
           </div>
 
           {createOpen ? (
@@ -320,6 +346,35 @@ export default function ProductsAdminPage() {
                       ),
                     )}
                   </select>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="fiscalProfileId"
+                    className="text-sm font-medium"
+                  >
+                    Perfil fiscal (opcional)
+                  </label>
+                  <select
+                    id="fiscalProfileId"
+                    className={inputClass}
+                    {...register("fiscalProfileId")}
+                  >
+                    <option value="">Sem perfil fiscal</option>
+                    {fiscalProfiles
+                      .filter((profile) => profile.active)
+                      .map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name}
+                          {profile.ncm ? ` · NCM ${profile.ncm}` : ""}
+                        </option>
+                      ))}
+                  </select>
+                  {fiscalProfilesQuery.isError && (
+                    <p className="text-red text-sm">
+                      Não foi possível carregar os perfis fiscais.
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-6 text-sm font-medium">
@@ -455,6 +510,7 @@ export default function ProductsAdminPage() {
                           key={product.id}
                           product={product}
                           categories={categories}
+                          fiscalProfiles={fiscalProfiles}
                           onCancel={() => setEditingProductId(null)}
                           onSaved={() => setEditingProductId(null)}
                         />
@@ -462,6 +518,15 @@ export default function ProductsAdminPage() {
                         <tr key={product.id} className="border-line border-t">
                           <td className="px-5 py-3.5 text-sm font-semibold">
                             {product.name}
+                            <div className="text-ink-soft text-xs font-normal">
+                              Fiscal:{" "}
+                              {product.fiscalProfileId
+                                ? (fiscalProfiles.find(
+                                    (profile) =>
+                                      profile.id === product.fiscalProfileId,
+                                  )?.name ?? "perfil não carregado")
+                                : "não classificado"}
+                            </div>
                           </td>
                           <td className="text-ink-soft px-3 py-3.5 text-sm">
                             {categoryNameById.get(product.categoryId) ??
@@ -540,11 +605,13 @@ function ReadonlyDot({ on }: { on: boolean }) {
 function ProductEditRow({
   product,
   categories,
+  fiscalProfiles,
   onCancel,
   onSaved,
 }: {
   product: Product;
   categories: Category[];
+  fiscalProfiles: FiscalProfile[];
   onCancel: () => void;
   onSaved: () => void;
 }) {
@@ -566,6 +633,7 @@ function ProductEditRow({
       availableOnMenu: product.availableOnMenu,
       availableOnPos: product.availableOnPos,
       productionStation: product.productionStation ?? "",
+      fiscalProfileId: product.fiscalProfileId ?? "",
     },
   });
 
@@ -581,6 +649,7 @@ function ProductEditRow({
         availableOnMenu: values.availableOnMenu,
         availableOnPos: values.availableOnPos,
         productionStation: values.productionStation || undefined,
+        fiscalProfileId: values.fiscalProfileId || null,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
@@ -680,6 +749,34 @@ function ProductEditRow({
                     </option>
                   ),
                 )}
+              </select>
+            </div>
+            <div className="flex min-w-[180px] flex-1 flex-col gap-1">
+              <select
+                aria-label="Perfil fiscal"
+                className={inputClass}
+                {...register("fiscalProfileId")}
+              >
+                <option value="">Sem perfil fiscal</option>
+                {product.fiscalProfileId &&
+                  !fiscalProfiles.some(
+                    (profile) => profile.id === product.fiscalProfileId,
+                  ) && (
+                    <option value={product.fiscalProfileId}>
+                      Perfil atual (não carregado)
+                    </option>
+                  )}
+                {fiscalProfiles
+                  .filter(
+                    (profile) =>
+                      profile.active || profile.id === product.fiscalProfileId,
+                  )
+                  .map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name}
+                      {profile.active ? "" : " (inativo)"}
+                    </option>
+                  ))}
               </select>
             </div>
           </div>

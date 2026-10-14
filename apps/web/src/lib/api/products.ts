@@ -20,6 +20,7 @@ export type Product = {
   categoryId: string;
   imageUrl: string | null;
   productionStation: ProductionStation | null;
+  fiscalProfileId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -38,6 +39,7 @@ export type CreateProductInput = {
   availableOnMenu?: boolean;
   availableOnPos?: boolean;
   productionStation?: ProductionStation;
+  fiscalProfileId?: string | null;
 };
 
 // PUT is a full replace: unlike create, active/availableOnMenu/availableOnPos
@@ -52,6 +54,7 @@ export type UpdateProductInput = {
   availableOnMenu: boolean;
   availableOnPos: boolean;
   productionStation?: ProductionStation;
+  fiscalProfileId?: string | null;
 };
 
 const API_BASE_URL =
