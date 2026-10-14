@@ -128,6 +128,27 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void listsNumberedComandasForPdvStaff() throws Exception {
+        mockMvc.perform(get("/api/v1/commands")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].number").value(1))
+                .andExpect(jsonPath("$[0].status").value("AVAILABLE"))
+                .andExpect(jsonPath("$[0].customerPhone").doesNotExist())
+                .andExpect(jsonPath("$[99].number").value(100));
+    }
+
+    @Test
+    void keepsComandaListPrivateToPdvStaff() throws Exception {
+        mockMvc.perform(get("/api/v1/commands"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(get("/api/v1/commands")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.KITCHEN)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void returnsCommandForExistingNumber() throws Exception {
         mockMvc.perform(get("/api/v1/commands/{number}", 1))
                 .andExpect(status().isOk())

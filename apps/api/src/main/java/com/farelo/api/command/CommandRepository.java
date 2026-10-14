@@ -5,12 +5,15 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface CommandRepository extends JpaRepository<Command, UUID> {
 
     Optional<Command> findByNumber(int number);
+
+    List<Command> findAllByOrderByNumberAsc();
 
     // FARELO-315: distinct table count, not command count — nothing today
     // stops two different commands from referencing the same table (no

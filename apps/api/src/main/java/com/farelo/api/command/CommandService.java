@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 
 @Service
@@ -69,6 +70,11 @@ public class CommandService {
     public Command findByNumber(int number) {
         return commandRepository.findByNumber(number)
                 .orElseThrow(() -> new CommandNotFoundException(number));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Command> listAll() {
+        return commandRepository.findAllByOrderByNumberAsc();
     }
 
     // Note: read-check-write without a locking strategy — two near-

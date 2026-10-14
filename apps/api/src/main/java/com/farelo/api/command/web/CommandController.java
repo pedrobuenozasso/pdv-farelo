@@ -5,6 +5,7 @@ import com.farelo.api.command.CommandService;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -50,6 +51,12 @@ public class CommandController {
 
     public CommandController(CommandService commandService) {
         this.commandService = commandService;
+    }
+
+    @GetMapping
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
+    public List<CommandSummaryResponse> list() {
+        return commandService.listAll().stream().map(CommandSummaryResponse::from).toList();
     }
 
     // {number} is the human-facing business identifier (1-100), never the
