@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { apiErrorMessage } from "@/lib/api/client";
+import { useSession } from "@/lib/use-session";
 import {
   createUser,
   listUsers,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/api/users";
 
 const USERS_QUERY_KEY = ["users"];
+const CASHIER_USERNAME = "caixa.farelodebolo";
 
 const ROLE_LABEL: Record<UserRole, string> = {
   ADMIN: "Admin",
@@ -40,31 +42,58 @@ const userFormSchema = z.object({
   email: z.union([z.literal(""), z.email("Email inválido")]),
   username: z.union([
     z.literal(""),
-    z.string().regex(/^[A-Za-z][A-Za-z0-9._-]{2,63}$/, "Use 3 a 64 caracteres: letras, números, ponto, hífen ou _"),
+    z
+      .string()
+      .regex(
+        /^[A-Za-z][A-Za-z0-9._-]{2,63}$/,
+        "Use 3 a 64 caracteres: letras, números, ponto, hífen ou _",
+      ),
   ]),
   role: z.enum(["ADMIN", "MANAGER", "CASHIER", "KITCHEN", "ATTENDANT"]),
 });
 
-const requireIdentifier = <T extends { email: string; username: string }>(values: T, ctx: z.RefinementCtx) => {
+const requireIdentifier = <T extends { email: string; username: string }>(
+  values: T,
+  ctx: z.RefinementCtx,
+) => {
   if (!values.email && !values.username) {
-    ctx.addIssue({ code: "custom", path: ["username"], message: "Informe nome de usuário ou e-mail" });
+    ctx.addIssue({
+      code: "custom",
+      path: ["username"],
+      message: "Informe nome de usuário ou e-mail",
+    });
   }
 };
 
-const createUserFormSchema = userFormSchema.extend({
-  password: z
-    .string()
-    .min(8, "Mínimo 8 caracteres")
-    .max(72, "Máximo 72 caracteres"),
-}).superRefine(requireIdentifier);
+const createUserFormSchema = userFormSchema
+  .extend({
+    password: z
+      .string()
+      .min(8, "Mínimo 8 caracteres")
+      .max(72, "Máximo 72 caracteres"),
+    passwordConfirmation: z.string().min(1, "Confirme a senha"),
+  })
+  .superRefine((values, ctx) => {
+    requireIdentifier(values, ctx);
+    if (values.password !== values.passwordConfirmation) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["passwordConfirmation"],
+        message: "As senhas não coincidem",
+      });
+    }
+  });
 
-const editUserFormSchema = userFormSchema.extend({ active: z.boolean() }).superRefine(requireIdentifier);
+const editUserFormSchema = userFormSchema
+  .extend({ active: z.boolean() })
+  .superRefine(requireIdentifier);
 
 type CreateUserFormValues = z.infer<typeof createUserFormSchema>;
 type EditUserFormValues = z.infer<typeof editUserFormSchema>;
 
 export default function UsersAdminPage() {
   const queryClient = useQueryClient();
+  const session = useSession();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [passwordId, setPasswordId] = useState<string | null>(null);
@@ -72,6 +101,7 @@ export default function UsersAdminPage() {
   const usersQuery = useQuery({
     queryKey: USERS_QUERY_KEY,
     queryFn: listUsers,
+    enabled: session?.role === "ADMIN",
   });
 
   const {
@@ -81,7 +111,14 @@ export default function UsersAdminPage() {
     formState: { errors, isSubmitting },
   } = useForm<CreateUserFormValues>({
     resolver: zodResolver(createUserFormSchema),
-    defaultValues: { name: "", email: "", username: "", password: "", role: "ATTENDANT" },
+    defaultValues: {
+      name: "",
+      email: "",
+      username: "",
+      password: "",
+      passwordConfirmation: "",
+      role: "ATTENDANT",
+    },
   });
 
   const createMutation = useMutation({
@@ -97,9 +134,24 @@ export default function UsersAdminPage() {
     createMutation.error,
     "Não foi possível criar o usuário.",
   );
+  const cashierUser = usersQuery.data?.find(
+    (user) => user.username?.toLowerCase() === CASHIER_USERNAME,
+  );
+
+  function prepareCashierAccount() {
+    reset({
+      name: "Caixa Farelo de Bolo",
+      email: "",
+      username: CASHIER_USERNAME,
+      password: "",
+      passwordConfirmation: "",
+      role: "CASHIER",
+    });
+    setCreateOpen(true);
+  }
 
   return (
-    <AuthGuard allow={["ADMIN", "MANAGER"]}>
+    <AuthGuard allow={["ADMIN"]}>
       <AdminShell>
         <div className="mx-auto flex max-w-4xl flex-col gap-6">
           <div className="flex items-center justify-between">
@@ -114,11 +166,40 @@ export default function UsersAdminPage() {
             </Button>
           </div>
 
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h2 className="font-semibold">Acesso do Caixa</h2>
+                <p className="text-ink-soft mt-1 text-sm">
+                  {cashierUser
+                    ? `@${CASHIER_USERNAME} já está cadastrado como ${ROLE_LABEL[cashierUser.role]} (${cashierUser.active ? "ativo" : "inativo"}).`
+                    : usersQuery.isLoading
+                      ? "Verificando se o login do Caixa já existe..."
+                      : usersQuery.isError
+                        ? "Não foi possível verificar o cadastro do Caixa. Tente recarregar a página."
+                      : `Prepare @${CASHIER_USERNAME} com papel Caixa. A conta só será criada após preencher e confirmar a senha aqui e clicar em Adicionar; não envie a senha por chat.`}
+                </p>
+              </div>
+              {!cashierUser && usersQuery.isSuccess ? (
+                <Button type="button" onClick={prepareCashierAccount}>
+                  Preparar login do Caixa
+                </Button>
+              ) : null}
+            </div>
+          </Card>
+
           {createOpen ? (
             <Card>
               <form
-                onSubmit={handleSubmit((values) =>
-                  createMutation.mutate(values),
+                onSubmit={handleSubmit(
+                  ({ name, email, username, password, role }) =>
+                    createMutation.mutate({
+                      name,
+                      email,
+                      username,
+                      password,
+                      role,
+                    }),
                 )}
                 noValidate
                 className="flex flex-wrap items-end gap-3"
@@ -134,11 +215,15 @@ export default function UsersAdminPage() {
                   <label className="text-sm font-medium">Nome de usuário</label>
                   <input className={inputClass} {...register("username")} />
                   {errors.username ? (
-                    <p className="text-red text-sm">{errors.username.message}</p>
+                    <p className="text-red text-sm">
+                      {errors.username.message}
+                    </p>
                   ) : null}
                 </div>
                 <div className="flex min-w-[200px] flex-1 flex-col gap-1">
-                  <label className="text-sm font-medium">E-mail (opcional)</label>
+                  <label className="text-sm font-medium">
+                    E-mail (opcional)
+                  </label>
                   <input
                     type="email"
                     className={inputClass}
@@ -152,12 +237,27 @@ export default function UsersAdminPage() {
                   <label className="text-sm font-medium">Senha</label>
                   <input
                     type="password"
+                    autoComplete="new-password"
                     className={inputClass}
                     {...register("password")}
                   />
                   {errors.password ? (
                     <p className="text-red text-sm">
                       {errors.password.message}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex min-w-[160px] flex-col gap-1">
+                  <label className="text-sm font-medium">Confirmar senha</label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    className={inputClass}
+                    {...register("passwordConfirmation")}
+                  />
+                  {errors.passwordConfirmation ? (
+                    <p className="text-red text-sm">
+                      {errors.passwordConfirmation.message}
                     </p>
                   ) : null}
                 </div>
@@ -245,7 +345,9 @@ function UserRow({
           {user.username ? (
             <div className="text-ink-faint text-xs">@{user.username}</div>
           ) : null}
-          {user.email ? <div className="text-ink-faint text-xs">{user.email}</div> : null}
+          {user.email ? (
+            <div className="text-ink-faint text-xs">{user.email}</div>
+          ) : null}
         </div>
         <span className="text-ink-soft w-24 text-sm">
           {ROLE_LABEL[user.role]}
@@ -349,13 +451,22 @@ function UserEditForm({ user, onSaved }: { user: User; onSaved: () => void }) {
         ) : null}
       </div>
       <div className="flex min-w-[200px] flex-1 flex-col gap-1">
-        <input aria-label="Nome de usuário" className={inputClass} {...register("username")} />
+        <input
+          aria-label="Nome de usuário"
+          className={inputClass}
+          {...register("username")}
+        />
         {errors.username ? (
           <p className="text-red text-xs">{errors.username.message}</p>
         ) : null}
       </div>
       <div className="flex min-w-[200px] flex-1 flex-col gap-1">
-        <input aria-label="E-mail opcional" type="email" className={inputClass} {...register("email")} />
+        <input
+          aria-label="E-mail opcional"
+          type="email"
+          className={inputClass}
+          {...register("email")}
+        />
         {errors.email ? (
           <p className="text-red text-xs">{errors.email.message}</p>
         ) : null}
@@ -393,11 +504,13 @@ function UserPasswordForm({
   onSaved: () => void;
 }) {
   const [newPassword, setNewPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
 
   const passwordMutation = useMutation({
     mutationFn: () => updateUserPassword(user.id, newPassword),
     onSuccess: () => {
       setNewPassword("");
+      setPasswordConfirmation("");
       onSaved();
     },
   });
@@ -413,14 +526,32 @@ function UserPasswordForm({
         <label className="text-sm font-medium">Nova senha</label>
         <input
           type="password"
+          autoComplete="new-password"
           value={newPassword}
           onChange={(event) => setNewPassword(event.target.value)}
           className={inputClass}
         />
         {errorMsg ? <p className="text-red text-xs">{errorMsg}</p> : null}
       </div>
+      <div className="flex min-w-[200px] flex-1 flex-col gap-1">
+        <label className="text-sm font-medium">Confirmar senha</label>
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={passwordConfirmation}
+          onChange={(event) => setPasswordConfirmation(event.target.value)}
+          className={inputClass}
+        />
+        {passwordConfirmation && passwordConfirmation !== newPassword ? (
+          <p className="text-red text-xs">As senhas não coincidem.</p>
+        ) : null}
+      </div>
       <Button
-        disabled={newPassword.length < 8 || passwordMutation.isPending}
+        disabled={
+          newPassword.length < 8 ||
+          newPassword !== passwordConfirmation ||
+          passwordMutation.isPending
+        }
         onClick={() => passwordMutation.mutate()}
         className="px-4 py-2 text-[13px]"
       >

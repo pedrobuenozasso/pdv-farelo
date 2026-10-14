@@ -48,7 +48,7 @@ const TOP_ITEMS = [
     ),
   },
   {
-    href: "/admin/products",
+    href: "/admin",
     label: "Admin",
     icon: (
       <svg
@@ -70,23 +70,36 @@ const TOP_ITEMS = [
   },
 ] as const;
 
-// Sub-seções do Admin — todas as páginas que usam AdminShell já estão sob
-// /admin/*, então essa lista aparece sempre (não só quando o topo "Admin"
-// está ativo).
 const ADMIN_SECTIONS = [
-  { href: "/admin/categories", label: "Categorias" },
-  { href: "/admin/products", label: "Produtos" },
-  { href: "/admin/inventory", label: "Estoque" },
-  { href: "/admin/notifications", label: "Notificações" },
-  { href: "/admin/print-jobs", label: "Impressão" },
-  { href: "/admin/users", label: "Usuários" },
-  { href: "/admin/commands/qrcodes", label: "QR Codes" },
+  {
+    label: "Cadastros",
+    items: [
+      { href: "/admin/categories", label: "Grupos / categorias" },
+      { href: "/admin/products", label: "Produtos" },
+      { href: "/admin/users", label: "Usuários" },
+      { href: "/admin/fiscal-profiles", label: "Perfis fiscais" },
+    ],
+  },
+  {
+    label: "Operação",
+    items: [
+      { href: "/admin/inventory", label: "Estoque" },
+      { href: "/admin/commands/qrcodes", label: "Comandas / QR Codes" },
+      { href: "/admin/print-jobs", label: "Impressão" },
+      { href: "/admin/notifications", label: "Notificações" },
+    ],
+  },
 ] as const;
+const ADMIN_ONLY_LINKS = new Set<string>([
+  "/admin/users",
+  "/admin/fiscal-profiles",
+]);
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const loggedIn = useSession() !== null;
+  const session = useSession();
+  const loggedIn = session !== null;
 
   function handleLogout() {
     clearSession();
@@ -99,7 +112,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
           carry the admin nav chrome. The content area (below) stays
           visible; each page decides its own screen-vs-print content. */}
       <div className="border-line bg-surface flex w-56 shrink-0 flex-col gap-6 border-r p-4 print:hidden">
-        <Link href="/pdv" className="flex items-center gap-2.5 px-1.5">
+        <Link href="/admin" className="flex items-center gap-2.5 px-1.5">
           <LogoBadge size={34} />
           <span className="font-serif text-base font-semibold italic">
             Farelo OS
@@ -108,9 +121,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
         <div className="flex flex-col gap-1">
           {TOP_ITEMS.map((item) => {
-            // The "Admin" tab's href is just its default landing page
-            // (/admin/products), but it should read as active across
-            // every /admin/* sub-section, not only that one path.
             const active = item.href.startsWith("/admin")
               ? pathname.startsWith("/admin")
               : pathname.startsWith(item.href);
@@ -132,28 +142,35 @@ export function AdminShell({ children }: { children: ReactNode }) {
           })}
         </div>
 
-        <div className="border-line flex flex-col gap-1 border-t pt-4">
-          <div className="text-ink-faint px-3.5 pb-1 text-[11px] font-bold tracking-wide uppercase">
-            Cadastros
+        {ADMIN_SECTIONS.map((section) => (
+          <div
+            key={section.label}
+            className="border-line flex flex-col gap-1 border-t pt-4"
+          >
+            <div className="text-ink-faint px-3.5 pb-1 text-[11px] font-bold tracking-wide uppercase">
+              {section.label}
+            </div>
+            {section.items
+              .filter(
+                (item) =>
+                  !ADMIN_ONLY_LINKS.has(item.href) || session?.role === "ADMIN",
+              )
+              .map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "rounded-lg px-3.5 py-2 text-sm font-medium",
+                    pathname.startsWith(item.href)
+                      ? "bg-primary-soft text-primary-dark"
+                      : "text-ink-soft hover:bg-bg-alt",
+                  )}
+                >
+                  {item.label}
+                </Link>
+              ))}
           </div>
-          {ADMIN_SECTIONS.map((item) => {
-            const active = pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "rounded-lg px-3.5 py-2 text-sm font-medium",
-                  active
-                    ? "bg-primary-soft text-primary-dark"
-                    : "text-ink-soft hover:bg-bg-alt",
-                )}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
+        ))}
 
         {loggedIn ? (
           <button

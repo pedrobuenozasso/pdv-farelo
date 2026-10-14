@@ -44,8 +44,18 @@ function LoginForm() {
   const onSubmit = handleSubmit(async (values) => {
     try {
       const result = await login(values);
-      setSession({ ...result, role: decodeRole(result.token) });
-      const redirect = searchParams.get("redirect") ?? "/pdv";
+      const role = decodeRole(result.token);
+      setSession({ ...result, role });
+      const requested = searchParams.get("redirect");
+      const landing =
+        role === "ADMIN" || role === "MANAGER"
+          ? "/admin"
+          : role === "KITCHEN"
+            ? "/kds"
+            : "/pdv";
+      const redirect = requested && /^\/(admin|pdv|kds)(\/|$)/.test(requested)
+        ? requested
+        : landing;
       router.push(redirect);
     } catch (error) {
       setError("root", {

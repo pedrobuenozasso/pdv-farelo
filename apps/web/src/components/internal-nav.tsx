@@ -10,8 +10,9 @@ import { useSession } from "@/lib/use-session";
 
 const TABS = [
   { href: "/pdv", label: "PDV" },
+  { href: "/pdv/caixa", label: "Caixa" },
   { href: "/kds", label: "Cozinha" },
-  { href: "/admin/products", label: "Admin" },
+  { href: "/admin", label: "Admin" },
 ] as const;
 
 // Shared top bar for the internal tools (/pdv, /admin/*) — matches the
@@ -22,7 +23,8 @@ const TABS = [
 export function InternalNav() {
   const pathname = usePathname();
   const router = useRouter();
-  const loggedIn = useSession() !== null;
+  const session = useSession();
+  const loggedIn = session !== null;
 
   function handleLogout() {
     clearSession();
@@ -38,8 +40,32 @@ export function InternalNav() {
         </span>
       </Link>
       <div className="flex items-center gap-1">
-        {TABS.map((tab) => {
-          const active = pathname.startsWith(tab.href);
+        {TABS.filter((tab) => {
+          if (tab.href === "/admin")
+            return session?.role === "ADMIN" || session?.role === "MANAGER";
+          if (tab.href === "/pdv/caixa")
+            return (
+              session?.role === "ADMIN" ||
+              session?.role === "MANAGER" ||
+              session?.role === "CASHIER"
+            );
+          if (tab.href === "/kds")
+            return (
+              session?.role === "ADMIN" ||
+              session?.role === "MANAGER" ||
+              session?.role === "KITCHEN"
+            );
+          return (
+            session?.role === "ADMIN" ||
+            session?.role === "MANAGER" ||
+            session?.role === "CASHIER" ||
+            session?.role === "ATTENDANT"
+          );
+        }).map((tab) => {
+          const active =
+            tab.href === "/pdv"
+              ? pathname === "/pdv"
+              : pathname.startsWith(tab.href);
           return (
             <Link
               key={tab.href}

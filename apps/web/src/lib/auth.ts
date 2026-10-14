@@ -69,6 +69,26 @@ export function decodeRole(token: string): UserRole | null {
   }
 }
 
+// Used only to distinguish the operator's cash session in the UI. The API
+// verifies this signed subject independently on every cash-handling request.
+export function decodeUserId(token: string): string | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const claims: unknown = JSON.parse(
+      atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    return typeof claims === "object" &&
+      claims !== null &&
+      "sub" in claims &&
+      typeof claims.sub === "string"
+      ? claims.sub
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // Memoized by the raw localStorage strings, not just called fresh every
 // time: `getSession` doubles as `useSession`'s `useSyncExternalStore`
 // snapshot (see use-session.ts), which requires a snapshot function to
