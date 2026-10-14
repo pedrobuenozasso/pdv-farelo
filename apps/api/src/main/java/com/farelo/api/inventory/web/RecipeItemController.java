@@ -2,6 +2,8 @@ package com.farelo.api.inventory.web;
 
 import com.farelo.api.inventory.RecipeItem;
 import com.farelo.api.inventory.RecipeItemService;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -44,6 +46,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/recipes/{recipeId}/items")
+@RequireRole({UserRole.ADMIN, UserRole.MANAGER})
 public class RecipeItemController {
 
     private final RecipeItemService recipeItemService;

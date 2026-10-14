@@ -6,6 +6,10 @@ import com.farelo.api.inventory.IngredientRepository;
 import com.farelo.api.inventory.IngredientUnit;
 import com.farelo.api.inventory.InventoryMovementRepository;
 import com.farelo.api.inventory.RecipeItemRepository;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -59,6 +64,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
 
+    private String adminToken;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -74,6 +81,15 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
     @BeforeEach
     void cleanInventoryTables() {
         // recipe_item also FKs into ingredient (recipe_item.ingredient_id),
@@ -84,11 +100,20 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
         inventoryMovementRepository.deleteAll();
         recipeItemRepository.deleteAll();
         ingredientRepository.deleteAll();
+        adminToken = tokenFor(UserRole.ADMIN);
+    }
+
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Inventory Test User", "inventory-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode("test-password"), role));
+        return jwtTokenService.issue(user).token();
     }
 
     @Test
     void createsIngredientAndPersistsIt() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Leite", "unit": "MILLILITER"}
@@ -115,6 +140,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsBlankNameWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "", "unit": "GRAM"}
@@ -128,6 +154,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsMissingUnitWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Leite"}
@@ -141,6 +168,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsInvalidUnitWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Leite", "unit": "LITER"}
@@ -150,7 +178,8 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsEmptyListWhenNoIngredientsExist() throws Exception {
-        mockMvc.perform(get("/api/v1/ingredients"))
+        mockMvc.perform(get("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
@@ -161,7 +190,8 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
         ingredientRepository.save(new Ingredient("Leite", IngredientUnit.MILLILITER));
         ingredientRepository.save(new Ingredient("Café em grão", IngredientUnit.GRAM));
 
-        MvcResult result = mockMvc.perform(get("/api/v1/ingredients"))
+        MvcResult result = mockMvc.perform(get("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andReturn();
@@ -179,7 +209,8 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     void findsIngredientById() throws Exception {
         Ingredient ingredient = ingredientRepository.save(new Ingredient("Copo 300ml", IngredientUnit.UNIT));
 
-        mockMvc.perform(get("/api/v1/ingredients/{id}", ingredient.getId()))
+        mockMvc.perform(get("/api/v1/ingredients/{id}", ingredient.getId())
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(ingredient.getId().toString()))
                 .andExpect(jsonPath("$.name").value("Copo 300ml"))
@@ -190,7 +221,8 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     void returnsIngredientNotFoundWhenGettingUnknownId() throws Exception {
         UUID missingId = UUID.randomUUID();
 
-        mockMvc.perform(get("/api/v1/ingredients/{id}", missingId))
+        mockMvc.perform(get("/api/v1/ingredients/{id}", missingId)
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("INGREDIENT_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -210,6 +242,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -237,6 +270,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -260,6 +294,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/ingredients/{id}", missingId)
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isNotFound())
@@ -281,6 +316,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -299,6 +335,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -310,6 +347,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void createsIngredientWithMinimumStockAndPersistsIt() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Café em grão", "unit": "GRAM", "minimumStock": 5000}
@@ -329,6 +367,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void createsIngredientWithoutMinimumStockLeavesItUnconfigured() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Chocolate em pó", "unit": "GRAM"}
@@ -348,6 +387,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void rejectsNegativeMinimumStockOnCreateWithStandardErrorFormat() throws Exception {
         mockMvc.perform(post("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Leite", "unit": "MILLILITER", "minimumStock": -1}
@@ -372,6 +412,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -397,6 +438,7 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
@@ -421,10 +463,37 @@ class IngredientControllerIntegrationTests extends AbstractIntegrationTest {
                 """;
 
         mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
+    @Test
+    void requiresAdminOrManagerForIngredientReadsAndWrites() throws Exception {
+        mockMvc.perform(get("/api/v1/ingredients"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        mockMvc.perform(post("/api/v1/ingredients")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Leite\",\"unit\":\"MILLILITER\"}"))
+                .andExpect(status().isUnauthorized());
+
+        String cashierToken = tokenFor(UserRole.CASHIER);
+        mockMvc.perform(get("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        mockMvc.perform(post("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + cashierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Leite\",\"unit\":\"MILLILITER\"}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/ingredients")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
+                .andExpect(status().isOk());
+        assertThat(ingredientRepository.count()).isZero();
+    }
 }

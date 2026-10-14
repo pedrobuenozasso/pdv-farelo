@@ -3,13 +3,19 @@ package com.farelo.api.notification.web;
 import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.notification.Notification;
 import com.farelo.api.notification.NotificationRepository;
+import com.farelo.api.notification.NotificationStatus;
 import com.farelo.api.notification.NotificationType;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -23,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Integration test for {@code POST /api/v1/notifications/{id}/send}
@@ -37,6 +44,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 class NotificationSendControllerIntegrationTests extends AbstractIntegrationTest {
+
+    private String adminToken;
 
     private static HttpServer stubServer;
     private static final AtomicInteger nextResponseStatus = new AtomicInteger(200);
@@ -73,9 +82,26 @@ class NotificationSendControllerIntegrationTests extends AbstractIntegrationTest
     @Autowired
     private NotificationRepository notificationRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
     @BeforeEach
     void resetStubToSucceed() {
         nextResponseStatus.set(200);
+        adminToken = tokenFor(UserRole.ADMIN);
+    }
+
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Notification Send Test User", "notification-send-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode("test-password"), role));
+        return jwtTokenService.issue(user).token();
     }
 
     @Test
@@ -84,7 +110,8 @@ class NotificationSendControllerIntegrationTests extends AbstractIntegrationTest
                 new Notification(NotificationType.ORDER_READY, "5511999999999", "Seu pedido está pronto!"));
         nextResponseStatus.set(200);
 
-        mockMvc.perform(post("/api/v1/notifications/{id}/send", notification.getId()))
+        mockMvc.perform(post("/api/v1/notifications/{id}/send", notification.getId())
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(notification.getId().toString()))
                 .andExpect(jsonPath("$.status").value("SENT"));
@@ -96,7 +123,8 @@ class NotificationSendControllerIntegrationTests extends AbstractIntegrationTest
                 new Notification(NotificationType.STOCK_LOW, "5511988888888", "Estoque baixo: Leite"));
         nextResponseStatus.set(500);
 
-        mockMvc.perform(post("/api/v1/notifications/{id}/send", notification.getId()))
+        mockMvc.perform(post("/api/v1/notifications/{id}/send", notification.getId())
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(notification.getId().toString()))
                 .andExpect(jsonPath("$.status").value("FAILED"));
@@ -106,9 +134,33 @@ class NotificationSendControllerIntegrationTests extends AbstractIntegrationTest
     void sendReturns404WhenNotificationDoesNotExist() throws Exception {
         UUID unknownId = UUID.randomUUID();
 
-        mockMvc.perform(post("/api/v1/notifications/{id}/send", unknownId))
+        mockMvc.perform(post("/api/v1/notifications/{id}/send", unknownId)
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOTIFICATION_NOT_FOUND"));
+    }
+
+    @Test
+    void sendRequiresAdminOrManagerAndDoesNotDeliverForUnauthorizedCallers() throws Exception {
+        Notification notification = notificationRepository.saveAndFlush(
+                new Notification(NotificationType.ORDER_READY, "5511999999999", "Seu pedido está pronto!"));
+
+        mockMvc.perform(post("/api/v1/notifications/{id}/send", notification.getId()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+
+        mockMvc.perform(post("/api/v1/notifications/{id}/send", notification.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+        assertThat(notificationRepository.findById(notification.getId()))
+                .hasValueSatisfying(saved -> assertThat(saved.getStatus()).isEqualTo(NotificationStatus.PENDING));
+
+        mockMvc.perform(post("/api/v1/notifications/{id}/send", notification.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SENT"));
     }
 
 }

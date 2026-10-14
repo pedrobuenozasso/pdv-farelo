@@ -12,12 +12,18 @@ import com.farelo.api.inventory.Recipe;
 import com.farelo.api.inventory.RecipeItem;
 import com.farelo.api.inventory.RecipeItemRepository;
 import com.farelo.api.inventory.RecipeRepository;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -49,6 +55,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
 
+    private String adminToken;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -70,6 +78,27 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
+    @BeforeEach
+    void createAdminToken() {
+        adminToken = tokenFor(UserRole.ADMIN);
+    }
+
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Recipe Item Test User", "recipe-item-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode("test-password"), role));
+        return jwtTokenService.issue(user).token();
+    }
+
     private Recipe createRecipe(String productName) {
         Category category = categoryRepository.save(new Category("Padaria"));
         Product product = productRepository.save(new Product(productName, new BigDecimal("12.00"), category));
@@ -86,6 +115,7 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         Ingredient bacon = createIngredient("Bacon", IngredientUnit.GRAM);
 
         MvcResult result = mockMvc.perform(post("/api/v1/recipes/{recipeId}/items", recipe.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"ingredientId": "%s", "quantity": 80}
@@ -117,6 +147,7 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         UUID missingRecipeId = UUID.randomUUID();
 
         mockMvc.perform(post("/api/v1/recipes/{recipeId}/items", missingRecipeId)
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"ingredientId": "%s", "quantity": 100}
@@ -133,6 +164,7 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         UUID missingIngredientId = UUID.randomUUID();
 
         mockMvc.perform(post("/api/v1/recipes/{recipeId}/items", recipe.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"ingredientId": "%s", "quantity": 1}
@@ -150,6 +182,7 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         recipeItemRepository.save(new RecipeItem(recipe, flour, new BigDecimal("500")));
 
         mockMvc.perform(post("/api/v1/recipes/{recipeId}/items", recipe.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"ingredientId": "%s", "quantity": 250}
@@ -165,6 +198,7 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         Recipe recipe = createRecipe("Bolo de chocolate");
 
         mockMvc.perform(post("/api/v1/recipes/{recipeId}/items", recipe.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity": 1}
@@ -181,6 +215,7 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         Ingredient orange = createIngredient("Laranja", IngredientUnit.UNIT);
 
         mockMvc.perform(post("/api/v1/recipes/{recipeId}/items", recipe.getId())
+                        .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"ingredientId": "%s", "quantity": 0}
@@ -195,7 +230,8 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
     void returnsEmptyListWhenRecipeHasNoItems() throws Exception {
         Recipe recipe = createRecipe("Torta de limão");
 
-        mockMvc.perform(get("/api/v1/recipes/{recipeId}/items", recipe.getId()))
+        mockMvc.perform(get("/api/v1/recipes/{recipeId}/items", recipe.getId())
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
@@ -205,7 +241,8 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
     void returnsRecipeNotFoundWhenListingItemsOfUnknownRecipe() throws Exception {
         UUID missingRecipeId = UUID.randomUUID();
 
-        mockMvc.perform(get("/api/v1/recipes/{recipeId}/items", missingRecipeId))
+        mockMvc.perform(get("/api/v1/recipes/{recipeId}/items", missingRecipeId)
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RECIPE_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -221,7 +258,8 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         recipeItemRepository.save(new RecipeItem(recipeA, chicken, new BigDecimal("120")));
         recipeItemRepository.save(new RecipeItem(recipeB, heart, new BigDecimal("100")));
 
-        MvcResult result = mockMvc.perform(get("/api/v1/recipes/{recipeId}/items", recipeA.getId()))
+        MvcResult result = mockMvc.perform(get("/api/v1/recipes/{recipeId}/items", recipeA.getId())
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andReturn();
@@ -239,7 +277,8 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         Ingredient ice = createIngredient("Gelo", IngredientUnit.GRAM);
         RecipeItem item = recipeItemRepository.save(new RecipeItem(recipe, ice, new BigDecimal("30")));
 
-        mockMvc.perform(delete("/api/v1/recipes/{recipeId}/items/{itemId}", recipe.getId(), item.getId()))
+        mockMvc.perform(delete("/api/v1/recipes/{recipeId}/items/{itemId}", recipe.getId(), item.getId())
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isNoContent());
 
         assertThat(recipeItemRepository.findById(item.getId())).isEmpty();
@@ -250,7 +289,8 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         UUID missingRecipeId = UUID.randomUUID();
         UUID someItemId = UUID.randomUUID();
 
-        mockMvc.perform(delete("/api/v1/recipes/{recipeId}/items/{itemId}", missingRecipeId, someItemId))
+        mockMvc.perform(delete("/api/v1/recipes/{recipeId}/items/{itemId}", missingRecipeId, someItemId)
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RECIPE_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -262,7 +302,8 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         Recipe recipe = createRecipe("Cappuccino");
         UUID missingItemId = UUID.randomUUID();
 
-        mockMvc.perform(delete("/api/v1/recipes/{recipeId}/items/{itemId}", recipe.getId(), missingItemId))
+        mockMvc.perform(delete("/api/v1/recipes/{recipeId}/items/{itemId}", recipe.getId(), missingItemId)
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RECIPE_ITEM_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -276,7 +317,8 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         Ingredient milk = createIngredient("Leite", IngredientUnit.MILLILITER);
         RecipeItem item = recipeItemRepository.save(new RecipeItem(recipeA, milk, new BigDecimal("150")));
 
-        mockMvc.perform(delete("/api/v1/recipes/{recipeId}/items/{itemId}", recipeB.getId(), item.getId()))
+        mockMvc.perform(delete("/api/v1/recipes/{recipeId}/items/{itemId}", recipeB.getId(), item.getId())
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RECIPE_ITEM_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -285,4 +327,26 @@ class RecipeItemControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(recipeItemRepository.findById(item.getId())).isPresent();
     }
 
+    @Test
+    void requiresAdminOrManagerForRecipeItemReadsAndWrites() throws Exception {
+        Recipe recipe = createRecipe("Receita protegida");
+        mockMvc.perform(get("/api/v1/recipes/{recipeId}/items", recipe.getId()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        mockMvc.perform(delete("/api/v1/recipes/{recipeId}/items/{itemId}", recipe.getId(), UUID.randomUUID()))
+                .andExpect(status().isUnauthorized());
+
+        String cashierToken = tokenFor(UserRole.CASHIER);
+        mockMvc.perform(get("/api/v1/recipes/{recipeId}/items", recipe.getId())
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        mockMvc.perform(delete("/api/v1/recipes/{recipeId}/items/{itemId}", recipe.getId(), UUID.randomUUID())
+                        .header("Authorization", "Bearer " + cashierToken))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/recipes/{recipeId}/items", recipe.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
+                .andExpect(status().isOk());
+    }
 }

@@ -36,25 +36,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * The test that actually proves FARELO-122's scope boundary held: with
- * {@link RoleAuthorizationInterceptor} registered application-wide (via
- * {@link RbacWebMvcConfig}), a handful of pre-existing endpoints — picked
- * from three different, unrelated domains — must still return {@code 200}
- * with <b>no</b> {@code Authorization} header at all, exactly as they did
- * before this ticket. None of these controllers are annotated with
- * {@link RequireRole}; if any of them started requiring a token, that would
- * mean the interceptor stopped being purely annotation-driven (see
- * {@link RoleAuthorizationInterceptor}'s javadoc, step 2 of the pipeline) —
- * exactly the regression this ticket's instructions call out as the one
- * to guard against.
+ * Regression coverage for {@link RoleAuthorizationInterceptor} registered
+ * application-wide via {@link RbacWebMvcConfig}. Public endpoints continue
+ * to work without a token, while endpoints annotated with
+ * {@link RequireRole} enforce their current policy.
  *
  * <p>Endpoints chosen deliberately span domains untouched by this ticket
  * and not on each other's dependency path: {@code catalog}
  * ({@code GET /api/v1/categories}), {@code inventory}
  * ({@code GET /api/v1/ingredients}), and {@code notification}
- * ({@code GET /api/v1/notifications}) — none of them {@code inventory}/
- * {@code ordering} internals this ticket was told not to touch, but real,
- * already-shipped, unauthenticated-by-design production endpoints.
+ * ({@code GET /api/v1/notifications}). Later access-control tickets
+ * protected the inventory and notification endpoints, so their tests below
+ * now assert the current authentication boundary instead.
  *
  * <h2>FARELO-123 additions</h2>
  *
@@ -100,15 +93,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@link #stockLossRecordingNowRequiresAuthentication()} prove the new
  * boundary; {@link #inventoryMovementListingStillWorksWithNoAuthorizationHeader()},
  * {@link #inventoryMovementBalanceStillWorksWithNoAuthorizationHeader()},
- * {@link #ingredientsListingStillWorksWithNoAuthorizationHeader()} (already
- * present since FARELO-122), {@link
- * #ingredientCreationStillWorksWithNoAuthorizationHeader()} and {@link
- * #ingredientUpdateStillWorksWithNoAuthorizationHeader()} prove this
- * ticket's blast radius stopped exactly there: the rest of {@code
- * InventoryMovementController} and the entirety of {@code
- * IngredientController} remain exactly as unprotected as before this
- * ticket ({@code RecipeController} was never touched at all, by this ticket
- * or any earlier one).
+ * the inventory movement listing and balance tests prove this ticket's
+ * original scope. IngredientController was protected in a later ticket;
+ * its current authentication boundary is asserted separately below.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -223,18 +210,13 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
     }
 
     @Test
-    void ingredientsListingStillWorksWithNoAuthorizationHeader() throws Exception {
+    void ingredientsListingNowRequiresAuthentication() throws Exception {
         mockMvc.perform(get("/api/v1/ingredients"))
-                .andExpect(status().isOk());
+                .andExpect(status().isUnauthorized());
     }
 
-    // FARELO-127: IngredientController itself is still completely untouched
-    // by this ticket — only two InventoryMovementController write endpoints
-    // gained @RequireRole (see this class's own javadoc, "FARELO-127"
-    // section). This is the test that would fail if that boundary were ever
-    // accidentally widened to IngredientController's own writes.
     @Test
-    void ingredientCreationStillWorksWithNoAuthorizationHeader() throws Exception {
+    void ingredientCreationNowRequiresAuthentication() throws Exception {
         String body = """
                 {
                   "name": "Ingrediente Regressão FARELO-127",
@@ -245,14 +227,11 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
         mockMvc.perform(post("/api/v1/ingredients")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isCreated());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
-    void ingredientUpdateStillWorksWithNoAuthorizationHeader() throws Exception {
-        Ingredient ingredient = ingredientRepository.save(
-                new Ingredient("Ingrediente Regressão FARELO-127 (update)", IngredientUnit.GRAM));
-
+    void ingredientUpdateNowRequiresAuthentication() throws Exception {
         String body = """
                 {
                   "name": "Ingrediente Regressão FARELO-127 (renomeado)",
@@ -261,10 +240,10 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
                 }
                 """;
 
-        mockMvc.perform(put("/api/v1/ingredients/{id}", ingredient.getId())
+        mockMvc.perform(put("/api/v1/ingredients/{id}", UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isOk());
+                .andExpect(status().isUnauthorized());
     }
 
     // FARELO-127: GET .../movements/GET .../balance on the very same
@@ -319,9 +298,9 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
     }
 
     @Test
-    void notificationsListingStillWorksWithNoAuthorizationHeader() throws Exception {
+    void notificationsListingNowRequiresAuthentication() throws Exception {
         mockMvc.perform(get("/api/v1/notifications"))
-                .andExpect(status().isOk());
+                .andExpect(status().isUnauthorized());
     }
 
     // FARELO-124: CommandController#findByNumber is deliberately left

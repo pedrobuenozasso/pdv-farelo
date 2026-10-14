@@ -4,6 +4,8 @@ import com.farelo.api.notification.Notification;
 import com.farelo.api.notification.NotificationSender;
 import com.farelo.api.notification.NotificationService;
 import com.farelo.api.notification.NotificationStatus;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.rbac.RequireRole;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,6 +28,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/notifications")
+@RequireRole({UserRole.ADMIN, UserRole.MANAGER})
 public class NotificationController {
 
     private final NotificationService notificationService;

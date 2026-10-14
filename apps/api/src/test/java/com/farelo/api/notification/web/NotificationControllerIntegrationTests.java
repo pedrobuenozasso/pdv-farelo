@@ -4,12 +4,19 @@ import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.notification.Notification;
 import com.farelo.api.notification.NotificationRepository;
 import com.farelo.api.notification.NotificationType;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.UUID;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -33,20 +40,40 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class NotificationControllerIntegrationTests extends AbstractIntegrationTest {
 
+    private String adminToken;
+
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
     private NotificationRepository notificationRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
     @BeforeEach
     void clearNotificationsTable() {
         notificationRepository.deleteAll();
+        adminToken = tokenFor(UserRole.ADMIN);
+    }
+
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User(
+                "Notification Test User", "notification-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode("test-password"), role));
+        return jwtTokenService.issue(user).token();
     }
 
     @Test
     void returnsEmptyListWhenNoNotificationsExist() throws Exception {
-        mockMvc.perform(get("/api/v1/notifications"))
+        mockMvc.perform(get("/api/v1/notifications")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
@@ -65,7 +92,8 @@ class NotificationControllerIntegrationTests extends AbstractIntegrationTest {
         sent.markSent();
         notificationRepository.saveAndFlush(sent);
 
-        mockMvc.perform(get("/api/v1/notifications"))
+        mockMvc.perform(get("/api/v1/notifications")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[0].id").value(pending.getId().toString()))
@@ -86,15 +114,33 @@ class NotificationControllerIntegrationTests extends AbstractIntegrationTest {
         failed.markFailed();
         notificationRepository.saveAndFlush(failed);
 
-        mockMvc.perform(get("/api/v1/notifications").param("status", "PENDING"))
+        mockMvc.perform(get("/api/v1/notifications").param("status", "PENDING")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].id").value(pending.getId().toString()));
 
-        mockMvc.perform(get("/api/v1/notifications").param("status", "FAILED"))
+        mockMvc.perform(get("/api/v1/notifications").param("status", "FAILED")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].id").value(failed.getId().toString()));
+    }
+
+    @Test
+    void listRequiresAdminOrManager() throws Exception {
+        mockMvc.perform(get("/api/v1/notifications"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+
+        mockMvc.perform(get("/api/v1/notifications")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+        mockMvc.perform(get("/api/v1/notifications")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
+                .andExpect(status().isOk());
     }
 
 }

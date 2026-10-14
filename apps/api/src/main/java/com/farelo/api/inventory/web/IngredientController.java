@@ -2,6 +2,8 @@ package com.farelo.api.inventory.web;
 
 import com.farelo.api.inventory.Ingredient;
 import com.farelo.api.inventory.IngredientService;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +21,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/ingredients")
+@RequireRole({UserRole.ADMIN, UserRole.MANAGER})
 public class IngredientController {
 
     private final IngredientService ingredientService;
