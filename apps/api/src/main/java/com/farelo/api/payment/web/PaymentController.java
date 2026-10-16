@@ -69,19 +69,10 @@ import java.util.List;
  * URL path is independent of which class handles it, so this costs
  * nothing.
  *
- * <p><b>{@link #listByCommand} stays unprotected</b>: same "leave a domain's
- * first read endpoint unprotected" precedent already followed by {@code
- * Notification} (FARELO-110) and {@code AuditLog} (FARELO-125) at their own
- * first tickets, and unaffected by {@link #record} landing above — read
- * access to the ledger carries none of the cash-handling-write concern that
- * justifies protecting {@code record} (same split {@code
- * InventoryMovementController} already has between its protected {@code
- * POST}s and unprotected {@code GET}s).
- *
- * <p><b>{@link #totalPaid} (FARELO-142) also stays unprotected</b>, same
- * reasoning as {@link #listByCommand}: it's a read over the same ledger,
- * exposing a derived aggregate rather than raw rows — no more sensitive
- * than the list it's computed from.
+ * <p>Payment reads ({@link #listByCommand}, {@link #totalPaid}, and
+ * {@link #balance}) require {@code ADMIN}/{@code MANAGER}/{@code CASHIER},
+ * matching the roles allowed to record and close payments. The ledger and
+ * its totals contain financial data used by the cashier workflow.
  *
  * <p><b>{@link #close} (FARELO-143) — moved here from {@code
  * com.farelo.api.command.web.CommandController}.</b> {@code POST
@@ -115,6 +106,7 @@ public class PaymentController {
     // com.farelo.api.command.web.CommandController /
     // com.farelo.api.ordering.web.CommandOrdersController.
     @GetMapping("/{number}/payments")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
     public List<PaymentResponse> listByCommand(@PathVariable int number) {
         return paymentService.listByCommand(number).stream()
                 .map(PaymentResponse::from)
@@ -169,19 +161,19 @@ public class PaymentController {
     // — see PaymentService#getTotalPaid's javadoc for the full reasoning,
     // including why this does not also expose "total owed"/"fully paid".
     @GetMapping("/{number}/payments/total")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
     public PaymentTotalResponse totalPaid(@PathVariable int number) {
         BigDecimal totalPaid = paymentService.getTotalPaid(number);
         return PaymentTotalResponse.of(number, totalPaid);
     }
 
-    // FARELO-223 ("Calcular saldo restante"). Same unprotected precedent as
-    // listByCommand/totalPaid above — a pure read over the same
-    // order/payment data, no more sensitive than either. See
+    // FARELO-223 ("Calcular saldo restante"). See
     // PaymentService#getBalance's javadoc for why this exists as a
     // dedicated backend computation: before this ticket, apps/web derived
     // totalOwed/remaining itself from raw order data, which the ticket's
     // own requirement ("backend deve ser fonte de verdade") rules out.
     @GetMapping("/{number}/payments/balance")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
     public PaymentBalanceResponse balance(@PathVariable int number) {
         PaymentBalance balance = paymentService.getBalance(number);
         return PaymentBalanceResponse.from(number, balance);

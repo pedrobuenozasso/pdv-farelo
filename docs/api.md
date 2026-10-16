@@ -54,11 +54,11 @@ a marca a alguns endpoints de `categories`/`products`/`users`), do
 FARELO-124 (que adicionou a marca a alguns endpoints de `commands`/
 `orders`/`print-jobs` — a superfície PDV/cozinha), do FARELO-127 (que
 adicionou a marca a exatamente dois endpoints de `ingredients`) e do
-FARELO-141 (que adicionou a marca ao único `POST` de `payments`, deixando o
-`GET` irmão sem marca — ver essa seção abaixo) — ver essas seções abaixo e o
-raciocínio completo em `docs/domain-model.md`, subseções FARELO-123,
-FARELO-124, FARELO-127 e FARELO-141. Dois casos seguem deliberadamente sem
-a marca mesmo depois do FARELO-124: os dois endpoints que o Cardápio QR
+FARELO-141 (que adicionou a marca ao `POST` de `payments`) — ver essas
+seções abaixo e o raciocínio completo em `docs/domain-model.md`,
+subseções FARELO-123, FARELO-124, FARELO-127 e FARELO-141. Dois casos
+seguem deliberadamente sem a marca mesmo depois do FARELO-124: os dois
+endpoints que o Cardápio QR
 (cliente anônimo, sem login) depende diretamente
 (`GET /api/v1/commands/{number}`, `POST /api/v1/orders`), e três dos quatro
 endpoints de `print-jobs`, que são chamados só pelo Farelo Edge Agent — uma
@@ -2076,12 +2076,10 @@ Sempre `200 OK` — sem parâmetro de path a validar.
 Lista todos os pagamentos registrados contra uma comanda, mais antigo
 primeiro (`createdAt` asc). (FARELO-140)
 
-Somente leitura. Sem marca "Requer" — este endpoint não exige
-nenhuma autenticação, mesmo padrão não-protegido de todo endpoint de
-primeiro corte deste projeto até aqui (ver seção "Autenticação/RBAC" acima
-e `docs/domain-model.md`, seção `payment`, para o raciocínio completo dessa
-decisão e da colocação do controller no próprio pacote `payment`, não em
-`command`).
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`**. Sem token válido retorna
+`401 UNAUTHENTICATED`; outros papéis recebem `403 FORBIDDEN`. A listagem
+contém dados financeiros da comanda e segue os mesmos papéis das ações de
+pagamento e fechamento.
 
 Sem paginação — mesma lógica YAGNI já aplicada em
 `GET /api/v1/commands/{number}/orders`/`GET
@@ -2225,9 +2223,9 @@ um agregado derivado separado da listagem do ledger que ele soma. Ver
 raciocínio completo, incluindo por que este endpoint não expõe "total
 devido"/"totalmente pago" (isso é FARELO-143).
 
-Somente leitura, sem marca "Requer" — mesmo padrão não-protegido de
-`GET .../payments` acima (leitura sobre o mesmo ledger, sem a natureza de
-manuseio de caixa que justifica proteger `POST .../payments`).
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`**. Sem token válido retorna
+`401 UNAUTHENTICATED`; outros papéis recebem `403 FORBIDDEN`, como na
+listagem de pagamentos.
 
 **Response — `200 OK`**
 
@@ -2258,6 +2256,28 @@ para o comportamento completo, incluindo o novo `code:
 mesma classe (`PaymentController`), não mais em `CommandController` — ver
 `docs/domain-model.md`, subseção FARELO-143 de `payment`, para o
 raciocínio de dependência completo.
+
+### `GET /api/v1/commands/{number}/payments/balance`
+
+Retorna o total devido, o total pago e o saldo restante da comanda.
+
+**Requer: `ADMIN`, `MANAGER`, `CASHIER`**. Sem token válido retorna
+`401 UNAUTHENTICATED`; outros papéis recebem `403 FORBIDDEN`.
+
+**Response — `200 OK`**
+
+```json
+{
+  "commandNumber": 1,
+  "totalOwed": 25.00,
+  "totalDiscount": 0.00,
+  "totalPaid": 10.00,
+  "remaining": 15.00
+}
+```
+
+`remaining` é limitado a zero quando a comanda está paga a mais. Retorna
+`404 COMMAND_NOT_FOUND` para uma comanda inexistente.
 
 ### `POST /api/v1/shifts`
 

@@ -90,11 +90,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * exclusion tests (73-77), covering {@code
  * com.farelo.api.payment.PaymentService#closeCommand(int)}'s new validation.
  *
- * <p><b>{@link #listByCommand} and {@link #totalPaid} stay unprotected</b> —
- * see {@link PaymentController}'s javadoc for why, same precedent as {@code
- * NotificationControllerIntegrationTests}/{@code
- * AuditLogControllerIntegrationTests}. No token/{@code Authorization} header
- * is sent by any {@code GET} test below, and none is required.
+ * <p>All payment reads require {@code ADMIN}/{@code MANAGER}/{@code CASHIER},
+ * as do recording and closing payments. The read access tests cover all
+ * three payment GET routes with missing, forbidden, and allowed roles.
  *
  * <p><b>{@link #record} and {@link #close} require a token</b> (FARELO-141/
  * FARELO-034: {@code ADMIN}/{@code MANAGER}/{@code CASHIER}) — every {@code
@@ -370,9 +368,47 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         return jwtTokenService.issue(user).token();
     }
 
+    private static final String[] PAYMENT_READ_PATHS = {
+            "/api/v1/commands/47/payments",
+            "/api/v1/commands/72/payments/total",
+            "/api/v1/commands/82/payments/balance"
+    };
+
+    @Test
+    void paymentReadsRequireAuthentication() throws Exception {
+        for (String path : PAYMENT_READ_PATHS) {
+            mockMvc.perform(get(path))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        }
+    }
+
+    @Test
+    void paymentReadsRejectAttendantAndKitchenRoles() throws Exception {
+        for (UserRole role : new UserRole[]{UserRole.ATTENDANT, UserRole.KITCHEN}) {
+            String token = tokenFor(role);
+            for (String path : PAYMENT_READ_PATHS) {
+                mockMvc.perform(get(path).header("Authorization", "Bearer " + token))
+                        .andExpect(status().isForbidden())
+                        .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+            }
+        }
+    }
+
+    @Test
+    void paymentReadsAllowAdminManagerAndCashier() throws Exception {
+        for (UserRole role : new UserRole[]{UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER}) {
+            String token = tokenFor(role);
+            for (String path : PAYMENT_READ_PATHS) {
+                mockMvc.perform(get(path).header("Authorization", "Bearer " + token))
+                        .andExpect(status().isOk());
+            }
+        }
+    }
+
     @Test
     void returnsEmptyListWhenCommandHasNoPayments() throws Exception {
-        mockMvc.perform(get("/api/v1/commands/{number}/payments", COMMAND_WITHOUT_PAYMENTS))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments", COMMAND_WITHOUT_PAYMENTS).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
@@ -380,7 +416,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsNotFoundForUnknownCommandNumber() throws Exception {
-        mockMvc.perform(get("/api/v1/commands/{number}/payments", 999))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments", 999).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -402,7 +438,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         // A payment on a different command must not leak into this list.
         paymentRepository.save(new Payment(otherCommand, new BigDecimal("50.00"), PaymentMethod.OTHER));
 
-        mockMvc.perform(get("/api/v1/commands/{number}/payments", COMMAND_WITH_PAYMENTS))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments", COMMAND_WITH_PAYMENTS).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[0].id").value(first.getId().toString()))
@@ -751,7 +787,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void totalPaidReturnsZeroWhenCommandHasNoPayments() throws Exception {
-        mockMvc.perform(get("/api/v1/commands/{number}/payments/total", TOTAL_COMMAND_WITHOUT_PAYMENTS))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/total", TOTAL_COMMAND_WITHOUT_PAYMENTS).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.commandNumber").value(TOTAL_COMMAND_WITHOUT_PAYMENTS))
                 .andExpect(jsonPath("$.totalPaid").value(0));
@@ -767,7 +803,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         // A payment on a different command must not leak into this total.
         paymentRepository.save(new Payment(otherCommand, new BigDecimal("500.00"), PaymentMethod.OTHER));
 
-        mockMvc.perform(get("/api/v1/commands/{number}/payments/total", TOTAL_COMMAND_WITH_PAYMENTS))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/total", TOTAL_COMMAND_WITH_PAYMENTS).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.commandNumber").value(TOTAL_COMMAND_WITH_PAYMENTS))
                 .andExpect(jsonPath("$.totalPaid").value(20.75));
@@ -775,7 +811,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void totalPaidReturnsNotFoundForUnknownCommandNumber() throws Exception {
-        mockMvc.perform(get("/api/v1/commands/{number}/payments/total", 999))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/total", 999).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -786,7 +822,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void balanceReturnsZeroTotalsWhenCommandHasNoOrdersOrPayments() throws Exception {
-        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_EMPTY_NUMBER))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_EMPTY_NUMBER).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.commandNumber").value(BALANCE_EMPTY_NUMBER))
                 .andExpect(jsonPath("$.totalOwed").value(0))
@@ -799,7 +835,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         createOrder(BALANCE_PARTIAL_NUMBER, new BigDecimal("25.00"), 1, OrderStatus.DELIVERED);
         paymentRepository.save(new Payment(command(BALANCE_PARTIAL_NUMBER), new BigDecimal("10.00"), PaymentMethod.CASH));
 
-        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_PARTIAL_NUMBER))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_PARTIAL_NUMBER).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalOwed").value(25.00))
                 .andExpect(jsonPath("$.totalPaid").value(10.00))
@@ -813,7 +849,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         createOrder(BALANCE_OVERPAID_NUMBER, new BigDecimal("20.00"), 1, OrderStatus.DELIVERED);
         paymentRepository.save(new Payment(command(BALANCE_OVERPAID_NUMBER), new BigDecimal("30.00"), PaymentMethod.CASH));
 
-        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_OVERPAID_NUMBER))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_OVERPAID_NUMBER).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalOwed").value(20.00))
                 .andExpect(jsonPath("$.totalPaid").value(30.00))
@@ -822,7 +858,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void balanceReturnsNotFoundForUnknownCommandNumber() throws Exception {
-        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", 999))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", 999).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"));
     }
@@ -841,7 +877,7 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                 command, DiscountType.FIXED_AMOUNT, null, new BigDecimal("50.00"), new BigDecimal("10.00"),
                 "Teste", UUID.randomUUID(), "Test User"));
 
-        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_WITH_DISCOUNT_NUMBER))
+        mockMvc.perform(get("/api/v1/commands/{number}/payments/balance", BALANCE_WITH_DISCOUNT_NUMBER).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalOwed").value(50.00))
                 .andExpect(jsonPath("$.totalDiscount").value(10.00))
