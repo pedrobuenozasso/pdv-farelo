@@ -18,6 +18,7 @@ Este documento é preenchido incrementalmente à medida que cada domínio é imp
 | `recipe` | Ficha técnica de produtos — **implementada dentro do pacote `inventory`** (`Recipe`/`RecipeItem`, FARELO-091/092), não como pacote próprio; linha mantida por rastreabilidade com o roadmap original | Em andamento (ver `inventory`) |
 | `notification` | `Notification`, adapter WhatsApp Cloud API | Em andamento |
 | `payment` | `Payment`, múltiplos pagamentos por comanda | Em andamento |
+| `discount` | Descontos por comanda e item, com registro do operador | Em andamento |
 | `fiscal` | `FiscalProfile`, `FiscalDocument`, NFC-e (futuro) | Em andamento |
 | `reporting` | Relatórios e analytics | Não iniciado |
 | `audit` | `AuditLog` de operações sensíveis | Em andamento |
@@ -152,8 +153,8 @@ para os endpoints.
   usuário que fez a chamada); um `PUT` que só muda outro campo (nome) sem
   tocar o preço não grava nenhum `AuditLog`; a linha gravada é consultável
   via `GET /api/v1/audit-logs?entityType=Product&entityId=...` (endpoint
-  já existente, FARELO-125, sem autenticação na chamada — mesma
-  característica "ainda não protegido" documentada na seção `audit`).
+  já existente, FARELO-125, agora com token de `ADMIN` conforme a política
+  atual da seção `audit`).
 
 - **FARELO-151 ("Associar Product com FiscalProfile")**: `Product` ganha um
   campo `fiscalProfile`, `@ManyToOne(fetch = LAZY)` **opcional** (sem
@@ -3194,6 +3195,10 @@ alfabética/de tabela) porque é o domínio que registra o que operações
 sensíveis de `security`/RBAC (e de todo o resto do sistema) fizeram —
 faz sentido lê-la em seguida.
 
+**Política atual de leitura:** `GET /api/v1/audit-logs` exige `ADMIN`, pois
+expõe identidade de operadores e snapshots de operações sensíveis. As notas
+do FARELO-125 abaixo registram a decisão histórica de seu primeiro corte.
+
 - **`AuditLog`** (FARELO-125): entidade JPA — um registro durável e
   *append-only* de uma operação sensível: quem fez, quando, o quê, e (quando
   aplicável) o que mudou. Prompt mestre seção 27: "Operações sensíveis
@@ -3343,20 +3348,15 @@ faz sentido lê-la em seguida.
   cobre a leitura, mesmo corte que `Notification`/FARELO-110 fez no seu
   próprio primeiro ticket. Ver `docs/api.md` para o endpoint completo.
 
-  **Decisão — endpoint deliberadamente desprotegido, sem `@RequireRole`**:
+  **Decisão histórica do primeiro corte — endpoint então desprotegido**:
   seguindo o precedente já estabelecido por este código de adiar "quem pode
   chamar isto" para um ticket dedicado de aplicação de RBAC (FARELO-123/124),
   em vez de embutir essa decisão num ticket de feature não relacionado — ver
   `RoleAuthorizationInterceptorRegressionIntegrationTests`, que prova
   explicitamente que `GET /api/v1/notifications` (o mesmo corte de primeiro
-  ticket que este endpoint segue) continuou desprotegido através de
-  FARELO-122/123. Um futuro ticket de aplicação de RBAC, quando um mirar o
-  domínio `audit`, é o lugar certo para decidir quais papéis (plausivelmente
-  só `ADMIN` — isto é arguivelmente mais sensível que `GET /api/v1/users`,
-  que FARELO-123 restringiu a `ADMIN`/`MANAGER`) podem ler a trilha de
-  auditoria; um ticket isolado que só constrói entidade/repositório/endpoint
-  de leitura não tem, por conta própria, nenhum conceito de identidade do
-  lado do request para decidir isso contra.
+  ticket que este endpoint seguiu) continuou desprotegido através de
+  FARELO-122/123. A aplicação atual de RBAC ao domínio `audit` decidiu
+  por `ADMIN` devido à sensibilidade dos snapshots e identidades expostos.
 
   **Testes**: `AuditLogRepositoryIntegrationTests` (mapeamento JPA contra
   Postgres real — grava e encontra com `previousValue`/`newValue` presentes,
@@ -4623,11 +4623,11 @@ fechamento e movimentos, além do RBAC de papel na borda HTTP.
 
 Pacote: `com.farelo.api.fiscal`.
 
-**Política atual de escrita:** somente `ADMIN` pode criar/alterar
-`FiscalProfile` e definir `CompanyFiscalConfiguration`. As leituras desses
-controllers mantêm a política anterior. Os parágrafos de FARELO-150 a
-FARELO-155 abaixo registram as decisões *daqueles tickets* quando ainda
-não havia RBAC fiscal; não descrevem a política atual de escrita.
+**Política atual de acesso:** somente `ADMIN` pode criar/alterar
+`FiscalProfile` e ler/definir `CompanyFiscalConfiguration`. `ADMIN` e
+`MANAGER` podem ler perfis e documentos fiscais por comanda; os mesmos dois
+papéis podem fazer a transição manual de um documento. Os parágrafos dos
+tickets abaixo registram decisões históricas e não substituem esta política.
 
 - **`FiscalProfile`** (FARELO-150): entidade JPA — uma classificação
   fiscal/tributária reutilizável (ex: "Isento", "Tributado padrão") que um
@@ -4738,12 +4738,12 @@ não havia RBAC fiscal; não descrevem a política atual de escrita.
   (`404`/`FISCAL_PROFILE_NOT_FOUND`) registrada em `ApiExceptionHandler`,
   mesmo formato de `IngredientNotFoundException`/`CategoryNotFoundException`.
 
-  **Decisão de RBAC — deliberadamente SEM `@RequireRole` em nenhum
-  endpoint**: mesmo precedente de "deixar os primeiros endpoints de um
+  **Decisão histórica de RBAC do FARELO-150 — então SEM `@RequireRole` em
+  nenhum endpoint**: mesmo precedente de "deixar os primeiros endpoints de um
   domínio novo desprotegidos" já seguido por `Payment` (FARELO-140) e
   `Notification`/`AuditLog` nos próprios primeiros tickets — e reforçado
-  por um precedente ainda mais direto: `IngredientController` **continua
-  inteiramente sem `@RequireRole` até hoje**, apesar de ser exatamente o
+  por um precedente então mais direto: `IngredientController` **ainda estava
+  inteiramente sem `@RequireRole` naquele momento**, apesar de ser exatamente o
   mesmo tipo de valor de lookup configurado por Admin que `FiscalProfile`
   é. O FARELO-123 ("Proteger Admin") listou `IngredientController`
   **explicitamente fora de escopo** ("RBAC de estoque, se algum dia
@@ -4872,10 +4872,8 @@ persistir o valor já validado pelo DTO.
 formato de sucesso/validação/limpar-campo-opcional já usado pelos testes
 de `description`/`Ingredient.minimumStock`.
 
-**RBAC**: nenhuma mudança — `FiscalProfileController` continua sem
-`@RequireRole` em nenhum endpoint, mesmo raciocínio/precedente já
-documentado na seção `FiscalProfile` acima (aplicação de RBAC é sempre um
-ticket dedicado e distinto, ainda não nomeado para `fiscal`).
+**RBAC no ticket original**: nenhuma mudança. A política atual de acesso
+está descrita no início desta seção.
 
 ### FARELO-153 — Adicionar CFOP
 
@@ -4947,9 +4945,8 @@ DTO.
 formato de sucesso/validação/limpar-campo-opcional já usado pelos testes de
 `ncm`.
 
-**RBAC**: nenhuma mudança — `FiscalProfileController` continua sem
-`@RequireRole` em nenhum endpoint, mesmo raciocínio/precedente já
-documentado na seção `FiscalProfile` acima.
+**RBAC no ticket original**: nenhuma mudança. A política atual de acesso
+está descrita no início desta seção.
 
 ### FARELO-154 — Adicionar CST/CSOSN
 
@@ -5095,9 +5092,8 @@ são coisas testadas separadamente" já implícito nos testes de `ncm`/`cfop`).
 formato de sucesso/validação/limpar-campo-opcional já usado pelos testes de
 `ncm`/`cfop`, mais os casos novos de exclusão mútua.
 
-**RBAC**: nenhuma mudança — `FiscalProfileController` continua sem
-`@RequireRole` em nenhum endpoint, mesmo raciocínio/precedente já
-documentado na seção `FiscalProfile` acima.
+**RBAC no ticket original**: nenhuma mudança. A política atual de acesso
+está descrita no início desta seção.
 
 ### FARELO-155 — Criar `CompanyFiscalConfiguration`
 
@@ -5418,7 +5414,7 @@ para a escolha análoga: `fiscal` já depende de `command`
 então manter o controller aqui também mantém essa dependência numa
 direção só.
 
-**Decisão de RBAC — deliberadamente SEM `@RequireRole`**: mesmo precedente
+**Decisão histórica do FARELO-156 — então SEM `@RequireRole`**: mesmo precedente
 de "deixar o primeiro endpoint de leitura de um domínio novo desprotegido"
 já seguido por `Notification` (FARELO-110), `AuditLog` (FARELO-125) e o
 próprio `Payment#listByCommand` (FARELO-140) nos seus primeiros tickets —
@@ -5601,10 +5597,10 @@ processo de backend), deixando este endpoint como uma superfície
 manual/de operabilidade genuinamente separada e ainda útil (ex: suporte
 resolvendo manualmente um documento travado), não algo para apagar depois.
 
-**RBAC — `ADMIN`/`MANAGER`, diferente do `retry` do FARELO-079.** O
-endpoint de listagem (`GET .../fiscal-documents`, FARELO-156) continua
-desprotegido — nenhum ticket dedicado de RBAC para `fiscal` existe ainda.
-O novo `POST .../transition`, porém, exige `@RequireRole({ADMIN, MANAGER})`
+**RBAC — `ADMIN`/`MANAGER`, diferente do `retry` do FARELO-079.** No
+primeiro corte, o endpoint de listagem (`GET .../fiscal-documents`,
+FARELO-156) estava desprotegido; atualmente exige `ADMIN` ou `MANAGER`.
+O `POST .../transition` exige `@RequireRole({ADMIN, MANAGER})`
 — raciocínio diferente da escolha deliberadamente ampla de "todos os cinco
 papéis" do `PrintJobController#retry`: um retry de impressão é de baixo
 risco e facilmente reversível (reimprimir um ticket, limitado a 3
@@ -5647,6 +5643,14 @@ mantido ao longo desta suíte (ver as subseções FARELO-156 acima e
 Nenhuma FK cross-tabela nova é introduzida por este ticket (só métodos de
 serviço/controller e duas exceções novas), então nenhuma landmine de
 limpeza nova surge aqui — mesma razão já dada na subseção FARELO-156.
+
+## discount
+
+Pacote: `com.farelo.api.discount`. Descontos por comanda ou item registram
+valor e operador responsável em `Discount`; a aplicação exige `ADMIN`,
+`MANAGER` ou `CASHIER`. A leitura da lista por comanda (`GET
+/api/v1/commands/{number}/discounts`) exige os mesmos papéis. Chamadas sem
+token válido retornam `401`; `ATTENDANT` e `KITCHEN` recebem `403`.
 
 ## Outbox (infraestrutura cross-cutting)
 

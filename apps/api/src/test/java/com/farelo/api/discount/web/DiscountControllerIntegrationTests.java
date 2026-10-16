@@ -49,9 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * the time this class was written).
  *
  * <p>Same role list as {@code PaymentController#record}: {@code
- * ADMIN}/{@code MANAGER}/{@code CASHIER} for {@link #apply}; {@link
- * #listByCommand} stays unprotected, same precedent as {@code
- * PaymentController#listByCommand}.
+ * ADMIN}/{@code MANAGER}/{@code CASHIER} for both write and read routes.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -222,10 +220,24 @@ class DiscountControllerIntegrationTests extends AbstractIntegrationTest {
                                 """))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(get("/api/v1/commands/{number}/discounts", LIST_NUMBER))
+        mockMvc.perform(get("/api/v1/commands/{number}/discounts", LIST_NUMBER)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].discountedAmount").value(5.00));
+    }
+
+    @Test
+    void rejectsAnonymousAndNonCashHandlingReaders() throws Exception {
+        mockMvc.perform(get("/api/v1/commands/{number}/discounts", LIST_NUMBER))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        for (UserRole role : List.of(UserRole.ATTENDANT, UserRole.KITCHEN)) {
+            mockMvc.perform(get("/api/v1/commands/{number}/discounts", LIST_NUMBER)
+                            .header("Authorization", "Bearer " + tokenFor(role)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        }
     }
 
     @Test

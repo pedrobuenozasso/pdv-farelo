@@ -70,8 +70,7 @@ import org.springframework.web.bind.annotation.RestController;
  * blast radius. If real operational discipline ever proves insufficient,
  * enforcing this at the DB level is a small, isolated follow-up.
  *
- * <p>Changing the company's fiscal identity requires {@code ADMIN}; the
- * read endpoint retains its existing access policy.
+ * <p>Reading or changing the company's fiscal identity requires {@code ADMIN}.
  */
 @RestController
 @RequestMapping("/api/v1/company-fiscal-configuration")
@@ -84,6 +83,7 @@ public class CompanyFiscalConfigurationController {
     }
 
     @GetMapping
+    @RequireRole(UserRole.ADMIN)
     public CompanyFiscalConfigurationResponse get() {
         return CompanyFiscalConfigurationResponse.from(companyFiscalConfigurationService.get());
     }

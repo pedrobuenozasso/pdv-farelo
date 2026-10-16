@@ -43,10 +43,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * FiscalDocumentServiceIntegrationTests}' own 26-27, and {@code
  * PaymentControllerIntegrationTests}' javadoc for the fuller registry).
  *
- * <p><b>{@link #listByCommand} stays unprotected</b> — see {@link
- * FiscalDocumentController}'s javadoc for why. No token/{@code
- * Authorization} header is sent by any {@code GET} test below, and none is
- * required.
+ * <p>{@link #listByCommand} requires {@code ADMIN}/{@code MANAGER}, matching
+ * the fiscal document transition route.
  *
  * <p><b>{@link #transition} requires {@code ADMIN}/{@code MANAGER}</b> — see
  * {@link FiscalDocumentController}'s javadoc, "endpoint-exposure decision",
@@ -117,7 +115,8 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsEmptyListWhenCommandHasNoFiscalDocuments() throws Exception {
-        mockMvc.perform(get("/api/v1/commands/{number}/fiscal-documents", COMMAND_WITHOUT_DOCUMENTS))
+        mockMvc.perform(get("/api/v1/commands/{number}/fiscal-documents", COMMAND_WITHOUT_DOCUMENTS)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
@@ -125,7 +124,8 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsNotFoundForUnknownCommandNumber() throws Exception {
-        mockMvc.perform(get("/api/v1/commands/{number}/fiscal-documents", 999))
+        mockMvc.perform(get("/api/v1/commands/{number}/fiscal-documents", 999)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -146,7 +146,8 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
         // list.
         fiscalDocumentRepository.save(new FiscalDocument(otherCommand));
 
-        mockMvc.perform(get("/api/v1/commands/{number}/fiscal-documents", COMMAND_WITH_DOCUMENTS))
+        mockMvc.perform(get("/api/v1/commands/{number}/fiscal-documents", COMMAND_WITH_DOCUMENTS)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[0].id").value(first.getId().toString()))
@@ -158,6 +159,17 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$[0].updatedAt").exists())
                 .andExpect(jsonPath("$[1].id").value(second.getId().toString()))
                 .andExpect(jsonPath("$[1].status").value("PENDING"));
+    }
+
+    @Test
+    void protectsFiscalDocumentReads() throws Exception {
+        mockMvc.perform(get("/api/v1/commands/{number}/fiscal-documents", COMMAND_WITHOUT_DOCUMENTS))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        mockMvc.perform(get("/api/v1/commands/{number}/fiscal-documents", COMMAND_WITHOUT_DOCUMENTS)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
     }
 
     // --- FARELO-157: POST .../fiscal-documents/{id}/transition ----------

@@ -498,7 +498,8 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsEmptyListWhenNoFiscalProfilesExist() throws Exception {
-        mockMvc.perform(get("/api/v1/fiscal-profiles"))
+        mockMvc.perform(get("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
@@ -509,7 +510,8 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
         fiscalProfileRepository.save(new FiscalProfile("Tributado padrão"));
         fiscalProfileRepository.save(new FiscalProfile("Isento"));
 
-        MvcResult result = mockMvc.perform(get("/api/v1/fiscal-profiles"))
+        MvcResult result = mockMvc.perform(get("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andReturn();
@@ -527,7 +529,8 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     void findsFiscalProfileById() throws Exception {
         FiscalProfile fiscalProfile = fiscalProfileRepository.save(new FiscalProfile("Isento"));
 
-        mockMvc.perform(get("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId()))
+        mockMvc.perform(get("/api/v1/fiscal-profiles/{id}", fiscalProfile.getId())
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(fiscalProfile.getId().toString()))
                 .andExpect(jsonPath("$.name").value("Isento"));
@@ -537,11 +540,28 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     void returnsFiscalProfileNotFoundWhenGettingUnknownId() throws Exception {
         UUID missingId = UUID.randomUUID();
 
-        mockMvc.perform(get("/api/v1/fiscal-profiles/{id}", missingId))
+        mockMvc.perform(get("/api/v1/fiscal-profiles/{id}", missingId)
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("FISCAL_PROFILE_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
                 .andExpect(jsonPath("$.correlationId").exists());
+    }
+
+    @Test
+    void protectsFiscalProfileReadsAndAllowsManager() throws Exception {
+        UUID id = UUID.randomUUID();
+        for (String path : List.of("/api/v1/fiscal-profiles", "/api/v1/fiscal-profiles/" + id)) {
+            mockMvc.perform(get(path))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+            mockMvc.perform(get(path).header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        }
+        mockMvc.perform(get("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
+                .andExpect(status().isOk());
     }
 
     @Test

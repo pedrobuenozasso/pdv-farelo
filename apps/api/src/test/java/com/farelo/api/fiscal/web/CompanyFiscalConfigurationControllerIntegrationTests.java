@@ -82,7 +82,8 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
 
     @Test
     void returnsNotFoundWhenNotConfiguredYet() throws Exception {
-        mockMvc.perform(get("/api/v1/company-fiscal-configuration"))
+        mockMvc.perform(get("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("COMPANY_FISCAL_CONFIGURATION_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -155,7 +156,8 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
                                 """))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/v1/company-fiscal-configuration"))
+        mockMvc.perform(get("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.cnpj").value("12.345.678/0001-90"))
                 .andExpect(jsonPath("$.legalName").value("Farelo Comércio de Alimentos LTDA"));
@@ -254,6 +256,19 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
         assertThat(companyFiscalConfigurationRepository.count()).isZero();
+    }
+
+    @Test
+    void rejectsAnonymousAndNonAdminFiscalConfigurationRead() throws Exception {
+        mockMvc.perform(get("/api/v1/company-fiscal-configuration"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        for (UserRole role : List.of(UserRole.MANAGER, UserRole.CASHIER)) {
+            mockMvc.perform(get("/api/v1/company-fiscal-configuration")
+                            .header("Authorization", "Bearer " + tokenFor(role)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        }
     }
 
     @Test

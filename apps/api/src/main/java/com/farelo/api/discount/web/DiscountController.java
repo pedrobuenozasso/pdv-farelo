@@ -33,10 +33,8 @@ import java.util.List;
  * {@code OrderController#cancelItem} already does for its own
  * actor-denormalization need.
  *
- * <p><b>{@link #listByCommand} stays unprotected</b>, same "a domain's
- * read endpoint over its own ledger carries no more sensitivity than the
- * write it's computed from" precedent {@code PaymentController#listByCommand}
- * already follows.
+ * <p>Reading the discount ledger uses the same {@code ADMIN}/{@code
+ * MANAGER}/{@code CASHIER} roles as applying a discount.
  *
  * <p><b>Placement note</b>: {@code discount} depends on {@code command}/
  * {@code ordering}/{@code security} ({@link DiscountService}), so this
@@ -56,6 +54,7 @@ public class DiscountController {
     }
 
     @GetMapping("/{number}/discounts")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER})
     public List<DiscountResponse> listByCommand(@PathVariable int number) {
         return discountService.listByCommand(number).stream()
                 .map(DiscountResponse::from)

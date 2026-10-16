@@ -718,10 +718,9 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                                 """))
                 .andExpect(status().isCreated());
 
-        // GET /api/v1/audit-logs stays unprotected at its own first ticket
-        // (FARELO-125) — no Authorization header here on purpose, same as
-        // every other test exercising that endpoint.
+        // Audit reads require ADMIN even when the stock movement is queryable separately.
         mockMvc.perform(get("/api/v1/audit-logs")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .param("entityType", "Ingredient")
                         .param("entityId", beans.getId().toString()))
                 .andExpect(status().isOk())

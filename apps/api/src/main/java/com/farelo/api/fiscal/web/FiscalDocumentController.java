@@ -42,12 +42,8 @@ import java.util.UUID;
  * cross-domain dependency in the opposite direction (AGENTS.md: "evitar
  * dependências cruzadas desnecessárias").
  *
- * <p><b>{@link #listByCommand} stays unprotected</b>: same "leave a
- * domain's first read endpoint unprotected" precedent already followed by
- * {@code Notification} (FARELO-110), {@code AuditLog} (FARELO-125) and
- * {@code Payment}'s own {@code listByCommand} (FARELO-140) at their own
- * first tickets — no ticket dedicated to RBAC enforcement for {@code
- * fiscal} exists yet.
+ * <p>Reading fiscal documents requires {@code ADMIN} or {@code MANAGER},
+ * the same roles allowed to perform the manual transition below.
  *
  * <h2>{@link #transition} — endpoint-exposure decision (FARELO-157)</h2>
  *
@@ -81,9 +77,8 @@ import java.util.UUID;
  * still-useful manual/operability surface (e.g. support staff manually
  * resolving a stuck document) rather than something to delete later.
  *
- * <p><b>{@link #transition} requires a role, unlike {@link
- * #listByCommand}</b> — {@code @RequireRole({ADMIN, MANAGER})}. Different
- * reasoning than {@code PrintJobController#retry}'s deliberately broad
+ * <p><b>{@link #transition} requires {@code ADMIN} or {@code MANAGER}</b>,
+ * unlike {@code PrintJobController#retry}'s deliberately broad
  * "all five roles" choice: a print retry is low-stakes and easily reversed
  * (re-print a ticket, capped at 3 attempts), station-agnostic, and
  * something anyone standing near a jammed printer should be able to do.
@@ -115,6 +110,7 @@ public class FiscalDocumentController {
     // com.farelo.api.payment.web.PaymentController /
     // com.farelo.api.ordering.web.CommandOrdersController.
     @GetMapping("/{number}/fiscal-documents")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
     public List<FiscalDocumentResponse> listByCommand(@PathVariable int number) {
         return fiscalDocumentService.listByCommand(number).stream()
                 .map(FiscalDocumentResponse::from)

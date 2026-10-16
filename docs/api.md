@@ -1993,13 +1993,9 @@ Lista registros de auditoria (`AuditLog`) — um registro durável e
 append-only de uma operação sensível: quem fez, quando, o quê, e (quando
 aplicável) o que mudou. (FARELO-125)
 
-Somente leitura. **Nenhum produtor real existe ainda** — nada neste ticket
-cria uma `AuditLog` de verdade; auditar alteração de preço (FARELO-126) e
-auditar ajuste de estoque (FARELO-127) são tickets futuros e distintos. Sem
-marca "Requer" — este endpoint não exige nenhuma autenticação, mesmo padrão
-não-protegido de todo endpoint de primeiro corte deste projeto até aqui (ver
-seção "Autenticação/RBAC" acima e `docs/domain-model.md`, subseção `audit`
-para o raciocínio completo dessa decisão).
+Somente leitura. **Requer: `ADMIN`** porque os registros incluem a identidade
+dos operadores e snapshots de operações sensíveis. Sem token válido retorna
+`401 UNAUTHENTICATED`; outros papéis recebem `403 FORBIDDEN`.
 
 **Query parameters opcionais**
 
@@ -2553,6 +2549,9 @@ Header `Location: /api/v1/fiscal-profiles/{id}`.
 Lista todos os perfis fiscais (ativos e inativos), ordenados por `name`
 (asc). (FARELO-150)
 
+**Requer: `ADMIN`, `MANAGER`**. Sem token válido retorna `401
+UNAUTHENTICATED`; os demais papéis recebem `403 FORBIDDEN`.
+
 Sem paginação/filtro `active`-only por enquanto (YAGNI, mesmo padrão de
 `GET /api/v1/categories`/`GET /api/v1/ingredients` — mantido para um
 ticket futuro se o Admin precisar).
@@ -2581,6 +2580,8 @@ Lista vazia (`[]`) quando não há perfis fiscais cadastrados.
 ### `GET /api/v1/fiscal-profiles/{id}`
 
 Busca um perfil fiscal pelo `id` técnico (UUID). (FARELO-150)
+
+**Requer: `ADMIN`, `MANAGER`**, com as mesmas respostas `401`/`403` da lista.
 
 **Response — `200 OK`**
 
@@ -2640,14 +2641,17 @@ torná-lo opcional na criação.
   `code: "FISCAL_PROFILE_NOT_FOUND"`.
 
 `POST` e `PUT` retornam `401 UNAUTHENTICATED` sem token válido e
-`403 FORBIDDEN` para qualquer papel diferente de `ADMIN`. `GET` e
-`GET /{id}` mantêm o acesso atual sem exigência de papel.
+`403 FORBIDDEN` para qualquer papel diferente de `ADMIN`. As leituras
+exigem `ADMIN` ou `MANAGER`.
 
 ### `GET /api/v1/company-fiscal-configuration`
 
 Retorna a identidade/configuração fiscal da própria empresa (a que um dia
 emitirá NFC-e) — **não** confundir com `fiscal-profiles`, que classifica
 produtos. (FARELO-155)
+
+**Requer: `ADMIN`**. Sem token válido retorna `401 UNAUTHENTICATED`;
+outros papéis recebem `403 FORBIDDEN`.
 
 Caminho **singular, sem `{id}`** — só existe uma configuração. Ver
 `docs/domain-model.md`, seção `fiscal`, subseção FARELO-155, para o
@@ -2730,22 +2734,20 @@ do cliente a operação é sempre "definir a configuração atual".
   erro padrão, `code: "VALIDATION_ERROR"`.
 
 `PUT` retorna `401 UNAUTHENTICATED` sem token válido e `403 FORBIDDEN`
-para qualquer papel diferente de `ADMIN`. `GET` mantém o acesso atual
-sem exigência de papel.
+para qualquer papel diferente de `ADMIN`. `GET` exige o mesmo papel.
 
 ### `GET /api/v1/commands/{number}/fiscal-documents`
 
 Lista todos os documentos fiscais registrados contra uma comanda, mais
 antigo primeiro (`createdAt` asc). (FARELO-156, "Criar FiscalDocument")
 
+**Requer: `ADMIN`, `MANAGER`**. Sem token válido retorna `401
+UNAUTHENTICATED`; outros papéis recebem `403 FORBIDDEN`.
+
 Somente leitura — nada neste código produz um `FiscalDocument` de verdade
 ainda (isso é Epic 12, "NFC-e", gated em "Somente iniciar após validação
-contábil"). Sem marca "Requer" — este endpoint não exige nenhuma
-autenticação, mesmo padrão não-protegido de todo endpoint de primeiro
-corte deste projeto até aqui (ver seção "Autenticação/RBAC" acima e
-`docs/domain-model.md`, seção `fiscal`, subseção FARELO-156, para o
-raciocínio completo e para a colocação do controller no próprio pacote
-`fiscal`, não em `command`).
+contábil"). O controller fica no pacote `fiscal`, pois o domínio já depende
+de `command`.
 
 Sem paginação — mesma lógica YAGNI já aplicada em
 `GET /api/v1/commands/{number}/payments`/`GET
@@ -3096,5 +3098,12 @@ mesa distinta, não por comanda.
 
 `occupancyPercentage` é `0.0` quando não há nenhuma mesa cadastrada
 (evita divisão por zero), arredondado para uma casa decimal.
+
+### `GET /api/v1/commands/{number}/discounts`
+
+Lista os descontos registrados para a comanda, em ordem de criação.
+**Requer: `ADMIN`, `MANAGER` ou `CASHIER`**, os mesmos papéis autorizados a
+aplicar descontos. Sem token válido retorna `401 UNAUTHENTICATED`; outros
+papéis recebem `403 FORBIDDEN`.
 
 _(demais endpoints a preencher conforme implementados)_

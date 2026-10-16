@@ -35,9 +35,8 @@ import java.util.UUID;
  * (name/description) an Admin will want to correct a typo in before
  * FARELO-151 starts referencing it by id.
  *
- * <p>Fiscal classification changes require {@code ADMIN}. Read endpoints
- * retain their existing access policy; this follow-up restricts only the
- * write surface, independently of the original FARELO-150 scope.
+ * <p>Fiscal classification changes require {@code ADMIN}; reads are
+ * available to {@code ADMIN} and {@code MANAGER}.
  */
 @RestController
 @RequestMapping("/api/v1/fiscal-profiles")
@@ -68,6 +67,7 @@ public class FiscalProfileController {
     // No active-only filter yet — YAGNI, same as CategoryController/
     // IngredientController's list(), no consumer (Admin) asking for it yet.
     @GetMapping
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
     public List<FiscalProfileResponse> list() {
         return fiscalProfileService.listAll().stream()
                 .map(FiscalProfileResponse::from)
@@ -75,6 +75,7 @@ public class FiscalProfileController {
     }
 
     @GetMapping("/{id}")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
     public FiscalProfileResponse getById(@PathVariable UUID id) {
         return FiscalProfileResponse.from(fiscalProfileService.getById(id));
     }

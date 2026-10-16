@@ -3,11 +3,16 @@ package com.farelo.api.audit.web;
 import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.audit.AuditLog;
 import com.farelo.api.audit.AuditLogRepository;
+import com.farelo.api.security.User;
+import com.farelo.api.security.UserRepository;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.JwtTokenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
@@ -20,9 +25,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Integration test for {@code GET /api/v1/audit-logs} (FARELO-125), against
- * a real PostgreSQL instance (Testcontainers). No {@code @RequireRole} —
- * every request here goes unauthenticated on purpose, proving the endpoint
- * stayed unprotected (see {@code AuditLogController}'s javadoc).
+ * a real PostgreSQL instance (Testcontainers). The audit trail requires
+ * an authenticated {@code ADMIN}.
  *
  * <p>Clears the {@code audit_log} table itself in {@code @BeforeEach} for a
  * deterministic starting point on every test, including a literal
@@ -43,14 +47,34 @@ class AuditLogControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private AuditLogRepository auditLogRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
+    private String adminToken;
+
     @BeforeEach
     void clearAuditLogTable() {
         auditLogRepository.deleteAll();
+        adminToken = tokenFor(UserRole.ADMIN);
+    }
+
+    private String tokenFor(UserRole role) {
+        User user = userRepository.save(new User("Audit Reader",
+                "audit-%s@farelo.dev".formatted(UUID.randomUUID()),
+                passwordEncoder.encode("test-password"), role));
+        return jwtTokenService.issue(user).token();
     }
 
     @Test
     void returnsEmptyListWhenNoAuditLogsExist() throws Exception {
-        mockMvc.perform(get("/api/v1/audit-logs"))
+        mockMvc.perform(get("/api/v1/audit-logs")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
@@ -70,7 +94,8 @@ class AuditLogControllerIntegrationTests extends AbstractIntegrationTest {
                 userId, "Ana Souza", "ana@farelo.dev",
                 "STOCK_ADJUSTED", "Ingredient", UUID.randomUUID(), null, "{\"qty\":5}"));
 
-        mockMvc.perform(get("/api/v1/audit-logs"))
+        mockMvc.perform(get("/api/v1/audit-logs")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[0].id").value(newer.getId().toString()))
@@ -94,6 +119,7 @@ class AuditLogControllerIntegrationTests extends AbstractIntegrationTest {
                 "PRICE_CHANGED", "Product", UUID.randomUUID(), "{\"price\":10}", "{\"price\":12}"));
 
         mockMvc.perform(get("/api/v1/audit-logs")
+                        .header("Authorization", "Bearer " + adminToken)
                         .param("entityType", "Product")
                         .param("entityId", entityId.toString()))
                 .andExpect(status().isOk())
@@ -111,10 +137,25 @@ class AuditLogControllerIntegrationTests extends AbstractIntegrationTest {
                 UUID.randomUUID(), "Carlos Lima", "carlos@farelo.dev",
                 "PRICE_CHANGED", "Product", UUID.randomUUID(), "{\"price\":10}", "{\"price\":12}"));
 
-        mockMvc.perform(get("/api/v1/audit-logs").param("userId", userId.toString()))
+        mockMvc.perform(get("/api/v1/audit-logs")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("userId", userId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].id").value(match.getId().toString()));
+    }
+
+    @Test
+    void rejectsAnonymousAndNonAdminReaders() throws Exception {
+        mockMvc.perform(get("/api/v1/audit-logs"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        for (UserRole role : new UserRole[]{UserRole.MANAGER, UserRole.CASHIER}) {
+            mockMvc.perform(get("/api/v1/audit-logs")
+                            .header("Authorization", "Bearer " + tokenFor(role)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        }
     }
 
 }

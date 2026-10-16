@@ -954,10 +954,9 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        // GET /api/v1/audit-logs stays unprotected at its own first ticket
-        // (FARELO-125) — no Authorization header here on purpose, same as
-        // every other test exercising that endpoint.
+        // Audit reads now require ADMIN even when the underlying product is public.
         mockMvc.perform(get("/api/v1/audit-logs")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .param("entityType", "Product")
                         .param("entityId", product.getId().toString()))
                 .andExpect(status().isOk())
