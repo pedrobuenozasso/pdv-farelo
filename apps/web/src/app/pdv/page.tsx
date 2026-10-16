@@ -76,6 +76,7 @@ import { listProducts, type Product } from "@/lib/api/products";
 import { getTableOccupancy, listTables } from "@/lib/api/tables";
 import { cn } from "@/lib/cn";
 import { decodeUserId } from "@/lib/auth";
+import { parseMoneyCents } from "@/lib/money-input";
 import { useSession } from "@/lib/use-session";
 
 // Tom de atendente, diferente do texto amigável ao cliente em
@@ -1360,20 +1361,34 @@ function PaymentPanel({
         .string()
         .trim()
         .min(1, "Valor é obrigatório")
-        .refine((value) => !Number.isNaN(Number(value)), "Valor inválido")
-        .refine((value) => Number(value) > 0, "Valor deve ser maior que zero"),
+        .refine(
+          (value) => parseMoneyCents(value) !== null,
+          "Informe reais e até dois centavos",
+        )
+        .refine(
+          (value) => (parseMoneyCents(value) ?? 0) > 0,
+          "Valor deve ser maior que zero",
+        ),
       method: z.enum(["PIX", "CREDIT_CARD", "DEBIT_CARD", "CASH", "OTHER"]),
       // FARELO-225 ("Tratar troco em dinheiro") — optional, CASH-only on
       // the wire (see recordPayment's input type); left as a plain string
       // here so the field can be empty without failing validation.
-      amountReceived: z.string().trim().optional(),
+      amountReceived: z
+        .string()
+        .trim()
+        .refine(
+          (value) => value === "" || parseMoneyCents(value) !== null,
+          "Informe reais e até dois centavos",
+        )
+        .optional(),
     })
     .refine(
       (data) =>
         data.method !== "CASH" ||
         !data.amountReceived ||
-        (!Number.isNaN(Number(data.amountReceived)) &&
-          Number(data.amountReceived) >= Number(data.amount)),
+        (parseMoneyCents(data.amountReceived) !== null &&
+          (parseMoneyCents(data.amountReceived) ?? -1) >=
+            (parseMoneyCents(data.amount) ?? Number.MAX_SAFE_INTEGER)),
       {
         message: "Dinheiro recebido deve ser maior ou igual ao valor",
         path: ["amountReceived"],
@@ -1431,13 +1446,15 @@ function PaymentPanel({
   // Live preview only — the authoritative changeGiven the cashier acts on
   // comes back from the backend in recordPaymentMutation's response (see
   // onSuccess below), not from this client-side arithmetic.
+  const amountCents = parseMoneyCents(amount ?? "");
+  const receivedCents = parseMoneyCents(amountReceived ?? "");
   const previewChange =
     method === "CASH" &&
     amountReceived &&
-    !Number.isNaN(Number(amountReceived)) &&
-    !Number.isNaN(Number(amount)) &&
-    Number(amountReceived) >= Number(amount)
-      ? Number(amountReceived) - Number(amount)
+    amountCents !== null &&
+    receivedCents !== null &&
+    receivedCents >= amountCents
+      ? (receivedCents - amountCents) / 100
       : null;
 
   const recordPaymentMutation = useMutation({
@@ -1446,12 +1463,12 @@ function PaymentPanel({
         throw new Error("Abra ou selecione um caixa antes de receber.");
       }
       const input = {
-        amount: Number(values.amount),
+        amount: parseMoneyCents(values.amount)! / 100,
         method: values.method,
         cashSessionId: selectedCashSession.id,
         amountReceived:
           values.method === "CASH" && values.amountReceived
-            ? Number(values.amountReceived)
+            ? parseMoneyCents(values.amountReceived)! / 100
             : undefined,
       };
       paymentIntent.current = paymentIntentFor(
