@@ -562,6 +562,17 @@ HTTP — protegê-lo quebraria o fluxo de pedido do cliente por completo. Ver
 a subseção FARELO-124 de `docs/domain-model.md` para o raciocínio
 completo.
 
+**Idempotência de criação**: clientes QR e PDV devem enviar o header
+`Idempotency-Key: <UUID>` gerado uma vez por intenção de pedido e reutilizar
+essa chave em tentativas após falha de rede. A mesma chave e o mesmo corpo
+efetivo devolvem o `201 Created`, `Location` e snapshot da resposta originais,
+sem criar outro pedido, consumir estoque ou publicar outro evento. A mesma
+chave com conteúdo diferente, inclusive entre COMANDA e BALCAO, devolve
+`409 IDEMPOTENCY_KEY_REUSED`; uma chave fora do formato UUID canônico devolve
+`400 INVALID_IDEMPOTENCY_KEY`. A reserva e o resultado são persistidos na
+mesma transação que o pedido. O header permanece opcional para clientes
+legados, que não recebem essa garantia até passarem a enviá-lo.
+
 **Nome/telefone do cliente**: aceita `customerName`/`customerPhone`
 opcionais no corpo, persistidos como snapshot simples no próprio pedido
 (mesmo espírito do snapshot de preço de `unitPrice`, ver

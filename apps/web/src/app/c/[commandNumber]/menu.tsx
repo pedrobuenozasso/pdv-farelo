@@ -11,14 +11,19 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
 import type { Category } from "@/lib/api/categories";
 import { apiErrorMessage } from "@/lib/api/client";
-import { createOrder } from "@/lib/api/orders";
+import {
+  createOrder,
+  orderIntentFor,
+  type CreateOrderInput,
+  type OrderIntent,
+} from "@/lib/api/orders";
 import type { Product } from "@/lib/api/products";
 
 export type MenuSection = { category: Category; products: Product[] };
@@ -85,6 +90,7 @@ export function Menu({
   // lugar nenhum além disso.
   const [customerName, setCustomerName] = useState("");
   const [orderConfirmed, setOrderConfirmed] = useState(false);
+  const orderIntent = useRef<OrderIntent | null>(null);
 
   const productById = new Map(
     sections.flatMap((section) =>
@@ -138,8 +144,12 @@ export function Menu({
   });
 
   const createOrderMutation = useMutation({
-    mutationFn: createOrder,
+    mutationFn: (draft: CreateOrderInput) => {
+      orderIntent.current = orderIntentFor(draft, orderIntent.current);
+      return createOrder({ ...draft, idempotencyKey: orderIntent.current.key });
+    },
     onSuccess: () => {
+      orderIntent.current = null;
       setOrderConfirmed(true);
       setCart({});
       setCheckoutStep("cart");
@@ -154,7 +164,7 @@ export function Menu({
 
   const onCheckoutSubmit = handleSubmit((values) => {
     setCustomerName(values.name);
-    createOrderMutation.mutate({
+    const draft = {
       commandNumber,
       items: cartItems.map((item) => ({
         productId: item.product.id,
@@ -162,7 +172,8 @@ export function Menu({
       })),
       customerName: values.name,
       customerPhone: values.phone,
-    });
+    };
+    createOrderMutation.mutate(draft);
   });
 
   const checkoutErrorMessage = apiErrorMessage(

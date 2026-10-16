@@ -75,13 +75,18 @@ export type CreateOrderInput = {
   customerPhone?: string;
   note?: string;
   printOnConfirm?: boolean;
+  idempotencyKey?: string;
 };
 
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
+  const { idempotencyKey, ...body } = input;
   const response = await fetch("/api/v1/orders", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    headers: {
+      "Content-Type": "application/json",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
+    body: JSON.stringify(body),
   });
   return parseResponse<Order>(response);
 }
@@ -96,17 +101,36 @@ export type CreateBalcaoOrderInput = {
   customerPhone?: string;
   note?: string;
   printOnConfirm?: boolean;
+  idempotencyKey?: string;
 };
 
 export async function createBalcaoOrder(
   input: CreateBalcaoOrderInput,
 ): Promise<Order> {
+  const { idempotencyKey, ...body } = input;
   const response = await fetch("/api/v1/orders/balcao", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify(input),
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
+    body: JSON.stringify(body),
   });
   return parseResponse<Order>(response);
+}
+
+export type OrderIntent = { payload: string; key: string };
+
+// Keep the same key while retrying an unchanged draft after a network error.
+export function orderIntentFor(
+  body: object,
+  previous: OrderIntent | null,
+): OrderIntent {
+  const payload = JSON.stringify(body);
+  return previous?.payload === payload
+    ? previous
+    : { payload, key: crypto.randomUUID() };
 }
 
 // GET /api/v1/commands/{number}/orders (FARELO-035, PDV) — lives here

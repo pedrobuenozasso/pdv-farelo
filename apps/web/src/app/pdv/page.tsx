@@ -48,9 +48,11 @@ import {
   listCommandOrders,
   markOrderCancelled,
   markOrderDelivered,
+  orderIntentFor,
   resendOrderItemToProduction,
   resendOrderToProduction,
   type Order,
+  type OrderIntent,
   type OrderItem,
   type OrderItemCancelReason,
   type OrderStatus,
@@ -610,6 +612,7 @@ function AddItemPanel({
   // read-once bookkeeping for the mutation callback, not something that
   // should trigger a re-render on its own.
   const receiveAfterRef = useRef(false);
+  const orderIntent = useRef<OrderIntent | null>(null);
 
   const productsQuery = useQuery({
     queryKey: ["pdv", "products"],
@@ -621,14 +624,18 @@ function AddItemPanel({
   });
 
   const addItemMutation = useMutation({
-    mutationFn: () =>
-      createOrder({
+    mutationFn: () => {
+      const draft = {
         commandNumber,
         items: cart,
         note: note.trim() || undefined,
         printOnConfirm,
-      }),
+      };
+      orderIntent.current = orderIntentFor(draft, orderIntent.current);
+      return createOrder({ ...draft, idempotencyKey: orderIntent.current.key });
+    },
     onSuccess: () => {
+      orderIntent.current = null;
       setSelectedProductId(null);
       setQuantity(1);
       setCart([]);
@@ -926,6 +933,7 @@ function BalcaoPanel({ onClose }: { onClose: () => void }) {
   const [note, setNote] = useState("");
   const [printOnConfirm, setPrintOnConfirm] = useState(true);
   const [lastCreated, setLastCreated] = useState<Order | null>(null);
+  const orderIntent = useRef<OrderIntent | null>(null);
 
   const productsQuery = useQuery({
     queryKey: ["pdv", "products"],
@@ -937,13 +945,20 @@ function BalcaoPanel({ onClose }: { onClose: () => void }) {
   });
 
   const createMutation = useMutation({
-    mutationFn: (product: Product) =>
-      createBalcaoOrder({
+    mutationFn: (product: Product) => {
+      const draft = {
         items: [{ productId: product.id, quantity }],
         note: note.trim() || undefined,
         printOnConfirm,
-      }),
+      };
+      orderIntent.current = orderIntentFor(draft, orderIntent.current);
+      return createBalcaoOrder({
+        ...draft,
+        idempotencyKey: orderIntent.current.key,
+      });
+    },
     onSuccess: (order) => {
+      orderIntent.current = null;
       setSelectedProductId(null);
       setQuantity(1);
       setNote("");

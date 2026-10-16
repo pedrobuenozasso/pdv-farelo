@@ -1,6 +1,5 @@
 package com.farelo.api.ordering.web;
 
-import com.farelo.api.ordering.NewOrderItem;
 import com.farelo.api.ordering.OrderItem;
 import com.farelo.api.ordering.OrderService;
 import com.farelo.api.ordering.OrderWithItems;
@@ -14,9 +13,9 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.util.List;
@@ -45,32 +44,25 @@ import java.util.UUID;
 public class OrderController {
 
     private final OrderService orderService;
+    private final OrderCreationIdempotencyService creationIdempotencyService;
 
-    public OrderController(OrderService orderService) {
+    public OrderController(OrderService orderService, OrderCreationIdempotencyService creationIdempotencyService) {
         this.orderService = orderService;
+        this.creationIdempotencyService = creationIdempotencyService;
     }
 
     @PostMapping
     public ResponseEntity<OrderResponse> create(
             @Valid @RequestBody CreateOrderRequest request,
-            UriComponentsBuilder uriComponentsBuilder) {
-        List<NewOrderItem> items = request.items().stream()
-                .map(item -> new NewOrderItem(item.productId(), item.quantity()))
-                .toList();
-
-        OrderWithItems result = orderService.create(
-                request.commandNumber(), items, request.customerName(), request.customerPhone(), request.note(),
-                request.printOnConfirmOrDefault());
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        OrderResponse result = creationIdempotencyService.create(request, idempotencyKey);
 
         // No GET /api/v1/orders/{id} yet (future ticket) — the Location
         // header still names the resource's URI, which is correct even
         // before a handler exists to resolve it.
-        URI location = uriComponentsBuilder
-                .path("/api/v1/orders/{id}")
-                .buildAndExpand(result.order().getId())
-                .toUri();
+        URI location = URI.create("/api/v1/orders/" + result.id());
 
-        return ResponseEntity.created(location).body(OrderResponse.from(result));
+        return ResponseEntity.created(location).body(result);
     }
 
     // FARELO-312: BALCAO — a walk-up counter sale with no comanda. Unlike
@@ -84,21 +76,12 @@ public class OrderController {
     @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
     public ResponseEntity<OrderResponse> createBalcao(
             @Valid @RequestBody CreateBalcaoOrderRequest request,
-            UriComponentsBuilder uriComponentsBuilder) {
-        List<NewOrderItem> items = request.items().stream()
-                .map(item -> new NewOrderItem(item.productId(), item.quantity()))
-                .toList();
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        OrderResponse result = creationIdempotencyService.createBalcao(request, idempotencyKey);
 
-        OrderWithItems result = orderService.createBalcao(
-                items, request.customerName(), request.customerPhone(), request.note(),
-                request.printOnConfirmOrDefault());
+        URI location = URI.create("/api/v1/orders/" + result.id());
 
-        URI location = uriComponentsBuilder
-                .path("/api/v1/orders/{id}")
-                .buildAndExpand(result.order().getId())
-                .toUri();
-
-        return ResponseEntity.created(location).body(OrderResponse.from(result));
+        return ResponseEntity.created(location).body(result);
     }
 
     // Kitchen queue (FARELO-059): every order across every command that
