@@ -2,6 +2,10 @@ package com.farelo.api.cashier.web;
 
 import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.cashier.CashSessionRepository;
+import com.farelo.api.cashier.CashSession;
+import com.farelo.api.cashier.CashMovement;
+import com.farelo.api.cashier.CashMovementRepository;
+import com.farelo.api.cashier.CashMovementType;
 import com.farelo.api.cashier.Shift;
 import com.farelo.api.cashier.ShiftRepository;
 import com.farelo.api.command.Command;
@@ -58,6 +62,9 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
     private CashSessionRepository cashSessionRepository;
 
     @Autowired
+    private CashMovementRepository cashMovementRepository;
+
+    @Autowired
     private ShiftRepository shiftRepository;
 
     @Autowired
@@ -85,19 +92,18 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
     // discipline PaymentControllerIntegrationTests documents).
     private final List<Payment> createdPayments = new ArrayList<>();
     private final List<Command> createdCommands = new ArrayList<>();
+    private final List<CashMovement> createdMovements = new ArrayList<>();
 
     @AfterEach
     void cleanUp() {
+        cashMovementRepository.deleteAll(createdMovements);
+        paymentRepository.deleteAll(createdPayments);
         cashSessionRepository.deleteAll();
         shiftRepository.deleteAll();
-    }
-
-    @AfterEach
-    void cleanUpReconcileFixtures() {
-        paymentRepository.deleteAll(createdPayments);
         commandRepository.deleteAll(createdCommands);
         createdPayments.clear();
         createdCommands.clear();
+        createdMovements.clear();
     }
 
     // Business numbers well outside the shared 1-100 seed (FARELO-031) —
@@ -110,8 +116,9 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
         return command;
     }
 
-    private Payment createCashPayment(Command command, BigDecimal amount) {
-        Payment payment = paymentRepository.save(new Payment(command, amount, PaymentMethod.CASH));
+    private Payment createCashPayment(Command command, BigDecimal amount, UUID sessionId) {
+        Payment payment = paymentRepository.save(new Payment(
+                command, amount, PaymentMethod.CASH, cashSessionRepository.findById(sessionId).orElseThrow()));
         createdPayments.add(payment);
         return payment;
     }
@@ -145,7 +152,7 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(cashier))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"shiftId": "%s"}
+                                {"shiftId": "%s", "openingAmount": 0}
                                 """.formatted(shift.getId())))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").exists())
@@ -153,6 +160,7 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.shiftName").value(shift.getName()))
                 .andExpect(jsonPath("$.openedByUserId").value(cashier.getId().toString()))
                 .andExpect(jsonPath("$.openedByUserName").value(cashier.getName()))
+                .andExpect(jsonPath("$.openingAmount").value(0))
                 .andExpect(jsonPath("$.status").value("OPEN"))
                 .andExpect(jsonPath("$.reconciliationStatus").value("PENDING"))
                 .andExpect(jsonPath("$.closingAmount").value(nullValue()))
@@ -165,6 +173,24 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void requiresKnownNonnegativeOpeningAmount() throws Exception {
+        Shift shift = persistedShift();
+        String token = tokenFor(UserRole.CASHIER);
+        mockMvc.perform(post("/api/v1/cash-sessions")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        mockMvc.perform(post("/api/v1/cash-sessions")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": -1}".formatted(shift.getId())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
     void rejectsSecondOpenSessionForSameOperator() throws Exception {
         Shift shift = persistedShift();
         User cashier = persistedUser(UserRole.CASHIER);
@@ -173,13 +199,13 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(shift.getId())))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(shift.getId())))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CASH_SESSION_ALREADY_OPEN"));
     }
@@ -191,13 +217,13 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(shift.getId())))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(shift.getId())))
                 .andExpect(status().isCreated());
     }
 
@@ -206,7 +232,7 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(UUID.randomUUID())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(UUID.randomUUID())))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("SHIFT_NOT_FOUND"));
     }
@@ -217,7 +243,7 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
 
         mockMvc.perform(post("/api/v1/cash-sessions")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(shift.getId())))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
@@ -229,7 +255,7 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(shift.getId())))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"));
     }
@@ -253,14 +279,14 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
         MvcResult firstResult = mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + tokenA)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(shift.getId())))
                 .andExpect(status().isCreated())
                 .andReturn();
         Thread.sleep(10);
         MvcResult secondResult = mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + tokenB)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(shift.getId())))
                 .andExpect(status().isCreated())
                 .andReturn();
 
@@ -294,7 +320,7 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
         MvcResult openResult = mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(shift.getId())))
                 .andExpect(status().isCreated())
                 .andReturn();
         UUID id = objectMapper.readValue(openResult.getResponse().getContentAsString(), CashSessionResponse.class).id();
@@ -317,10 +343,15 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
     // FARELO-308 -- POST .../close below.
 
     private UUID openSession(String token, Shift shift) throws Exception {
+        return openSession(token, shift, BigDecimal.ZERO);
+    }
+
+    private UUID openSession(String token, Shift shift, BigDecimal openingAmount) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": %s}"
+                                .formatted(shift.getId(), openingAmount)))
                 .andExpect(status().isCreated())
                 .andReturn();
         return objectMapper.readValue(result.getResponse().getContentAsString(), CashSessionResponse.class).id();
@@ -526,8 +557,8 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
         Command command = createCommand(900001);
 
         UUID id = openSession(cashierToken, shift);
-        createCashPayment(command, new BigDecimal("30.00"));
-        createCashPayment(command, new BigDecimal("20.00"));
+        createCashPayment(command, new BigDecimal("30.00"), id);
+        createCashPayment(command, new BigDecimal("20.00"), id);
         mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
                         .header("Authorization", "Bearer " + cashierToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -551,7 +582,7 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
         Command command = createCommand(900002);
 
         UUID id = openSession(cashierToken, shift);
-        createCashPayment(command, new BigDecimal("40.00"));
+        createCashPayment(command, new BigDecimal("40.00"), id);
         mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
                         .header("Authorization", "Bearer " + cashierToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -574,8 +605,8 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
         Command command = createCommand(900003);
 
         UUID id = openSession(cashierToken, shift);
-        createCashPayment(command, new BigDecimal("10.00"));
-        createdPayments.add(paymentRepository.save(new Payment(command, new BigDecimal("500.00"), PaymentMethod.PIX)));
+        createCashPayment(command, new BigDecimal("10.00"), id);
+        createdPayments.add(paymentRepository.save(new Payment(command, new BigDecimal("500.00"), PaymentMethod.PIX, cashSessionRepository.findById(id).orElseThrow())));
         mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
                         .header("Authorization", "Bearer " + cashierToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -587,6 +618,70 @@ class CashSessionControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.reconciliationStatus").value("MATCHED"))
                 .andExpect(jsonPath("$.expectedAmount").value(10.00));
+    }
+
+    @Test
+    void reconcilesOnlyLinkedPaymentsAndSignedMovementsForEachConcurrentDrawer() throws Exception {
+        Shift shift = persistedShift();
+        String firstOperator = tokenFor(UserRole.CASHIER);
+        String secondOperator = tokenFor(UserRole.CASHIER);
+        Command command = createCommand(900004);
+
+        UUID firstId = openSession(firstOperator, shift, new BigDecimal("100.00"));
+        UUID secondId = openSession(secondOperator, shift, new BigDecimal("50.00"));
+        createCashPayment(command, new BigDecimal("30.00"), firstId);
+        createCashPayment(command, new BigDecimal("80.00"), secondId);
+        createdPayments.add(paymentRepository.save(new Payment(
+                command, new BigDecimal("999.00"), PaymentMethod.CASH))); // legacy: no safe session link
+
+        CashSession first = cashSessionRepository.findById(firstId).orElseThrow();
+        for (CashMovementType type : CashMovementType.values()) {
+            BigDecimal amount = switch (type) {
+                case SUPPLY -> new BigDecimal("20.00");
+                case INCOME -> new BigDecimal("7.00");
+                case WITHDRAWAL -> new BigDecimal("10.00");
+                case EXPENSE -> new BigDecimal("5.00");
+            };
+            createdMovements.add(cashMovementRepository.save(new CashMovement(
+                    first, type, amount, "Conciliação de teste", first.getOpenedByUserId(),
+                    first.getOpenedByUserName())));
+        }
+
+        closeForReconciliation(firstId, firstOperator, "142.00");
+        closeForReconciliation(secondId, secondOperator, "130.00");
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", firstId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reconciliationStatus").value("MATCHED"))
+                .andExpect(jsonPath("$.expectedAmount").value(142.00));
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", secondId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reconciliationStatus").value("MATCHED"))
+                .andExpect(jsonPath("$.expectedAmount").value(130.00));
+    }
+
+    private void closeForReconciliation(UUID id, String token, String amount) throws Exception {
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/close", id)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"closingAmount\": " + amount + "}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsReconciliationWhenHistoricalOpeningAmountIsUnknown() throws Exception {
+        Shift shift = persistedShift();
+        User cashier = persistedUser(UserRole.CASHIER);
+        CashSession legacy = cashSessionRepository.save(new CashSession(
+                shift, cashier.getId(), cashier.getName()));
+        closeForReconciliation(legacy.getId(), tokenFor(cashier), "0");
+
+        mockMvc.perform(post("/api/v1/cash-sessions/{id}/reconcile", legacy.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CASH_SESSION_OPENING_AMOUNT_UNKNOWN"));
     }
 
     @Test

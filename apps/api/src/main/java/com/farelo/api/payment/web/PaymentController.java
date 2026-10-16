@@ -144,7 +144,8 @@ public class PaymentController {
             AuthenticatedPrincipal principal,
             UriComponentsBuilder uriComponentsBuilder) {
         Payment payment = paymentService.record(
-                number, request.amount(), request.method(), principal.userId());
+                number, request.amount(), request.method(), request.cashSessionId(),
+                principal.userId(), principal.role());
 
         BigDecimal changeGiven = request.amountReceived() != null
                 ? request.amountReceived().subtract(request.amount())

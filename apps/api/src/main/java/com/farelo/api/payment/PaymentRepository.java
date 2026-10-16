@@ -1,6 +1,7 @@
 package com.farelo.api.payment;
 
 import com.farelo.api.command.Command;
+import com.farelo.api.cashier.CashSession;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -11,6 +12,13 @@ import java.util.List;
 import java.util.UUID;
 
 public interface PaymentRepository extends JpaRepository<Payment, UUID> {
+
+    @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p "
+            + "WHERE p.cashSession = :session AND p.method = :method")
+    BigDecimal sumAmountByCashSessionAndMethod(
+            @Param("session") CashSession session, @Param("method") PaymentMethod method);
+
+    List<Payment> findByCashSession(CashSession session);
 
     // Backs GET /api/v1/commands/{number}/payments (PaymentService#listByCommand)
     // — oldest first, same ordering direction/convention as

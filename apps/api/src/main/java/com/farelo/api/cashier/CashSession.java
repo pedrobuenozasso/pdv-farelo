@@ -83,6 +83,9 @@ public class CashSession {
     @Column(name = "opened_at", nullable = false, updatable = false)
     private OffsetDateTime openedAt;
 
+    @Column(name = "opening_amount", precision = 10, scale = 2, updatable = false)
+    private BigDecimal openingAmount;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private CashSessionStatus status = CashSessionStatus.OPEN;
@@ -128,10 +131,17 @@ public class CashSession {
         // required by JPA
     }
 
-    public CashSession(Shift shift, UUID openedByUserId, String openedByUserName) {
+    public CashSession(Shift shift, UUID openedByUserId, String openedByUserName, BigDecimal openingAmount) {
         this.shift = shift;
         this.openedByUserId = openedByUserId;
         this.openedByUserName = openedByUserName;
+        this.openingAmount = openingAmount;
+    }
+
+    /** For pre-migration fixtures only: historical opening cash is unknown. */
+    @Deprecated
+    public CashSession(Shift shift, UUID openedByUserId, String openedByUserName) {
+        this(shift, openedByUserId, openedByUserName, null);
     }
 
     @PrePersist
@@ -165,6 +175,10 @@ public class CashSession {
 
     public OffsetDateTime getOpenedAt() {
         return openedAt;
+    }
+
+    public BigDecimal getOpeningAmount() {
+        return openingAmount;
     }
 
     public CashSessionStatus getStatus() {

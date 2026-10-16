@@ -27,6 +27,7 @@ public record PaymentRecordResponse(
         int commandNumber,
         BigDecimal amount,
         PaymentMethod method,
+        UUID cashSessionId,
         OffsetDateTime createdAt,
         BigDecimal changeGiven) {
 
@@ -36,6 +37,7 @@ public record PaymentRecordResponse(
                 payment.getCommand().getNumber(),
                 payment.getAmount(),
                 payment.getMethod(),
+                payment.getCashSession().getId(),
                 payment.getCreatedAt(),
                 changeGiven);
     }

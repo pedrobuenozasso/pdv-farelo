@@ -63,7 +63,7 @@ public class CashSessionController {
             @Valid @RequestBody CashSessionOpenRequest request,
             AuthenticatedPrincipal principal,
             UriComponentsBuilder uriComponentsBuilder) {
-        CashSession session = cashSessionService.open(request.shiftId(), principal.userId());
+        CashSession session = cashSessionService.open(request.shiftId(), request.openingAmount(), principal.userId());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/cash-sessions/{id}")

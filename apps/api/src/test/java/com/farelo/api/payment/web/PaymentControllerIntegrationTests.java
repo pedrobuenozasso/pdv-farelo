@@ -3,6 +3,10 @@ package com.farelo.api.payment.web;
 import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.audit.AuditLog;
 import com.farelo.api.audit.AuditLogRepository;
+import com.farelo.api.cashier.CashSession;
+import com.farelo.api.cashier.CashSessionRepository;
+import com.farelo.api.cashier.Shift;
+import com.farelo.api.cashier.ShiftRepository;
 import com.farelo.api.catalog.Category;
 import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
@@ -186,6 +190,16 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
     private PaymentRepository paymentRepository;
 
     @Autowired
+    private CashSessionRepository cashSessionRepository;
+
+    @Autowired
+    private ShiftRepository shiftRepository;
+
+    private UUID currentSessionId;
+    private final List<CashSession> createdCashSessions = new ArrayList<>();
+    private final List<Shift> createdShifts = new ArrayList<>();
+
+    @Autowired
     private DiscountRepository discountRepository;
 
     @Autowired
@@ -328,12 +342,31 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                 .forEach(discountRepository::delete);
     }
 
+    @AfterEach
+    void cleanUpCashSessionFixtures() {
+        for (CashSession session : createdCashSessions) {
+            paymentRepository.deleteAll(paymentRepository.findByCashSession(session));
+        }
+        cashSessionRepository.deleteAll(createdCashSessions);
+        shiftRepository.deleteAll(createdShifts);
+        createdCashSessions.clear();
+        createdShifts.clear();
+        currentSessionId = null;
+    }
+
     private String tokenFor(UserRole role) {
         User user = userRepository.save(new User(
                 "Test User",
                 "test-%s@farelo.dev".formatted(UUID.randomUUID()),
                 passwordEncoder.encode(PASSWORD),
                 role));
+        Shift shift = shiftRepository.save(new Shift(
+                "PAYMENT TEST " + UUID.randomUUID(), "Caixa Dinheiro", "Tesouraria"));
+        CashSession session = cashSessionRepository.save(new CashSession(
+                shift, user.getId(), user.getName(), BigDecimal.ZERO));
+        createdShifts.add(shift);
+        createdCashSessions.add(session);
+        currentSessionId = session.getId();
         return jwtTokenService.issue(user).token();
     }
 
@@ -392,13 +425,14 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 25.50, "method": "PIX"}
-                                """))
+                                {"amount": 25.50, "method": "PIX", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").exists())
                 .andExpect(jsonPath("$.commandNumber").value(RECORD_OPEN_NUMBER))
                 .andExpect(jsonPath("$.amount").value(25.50))
                 .andExpect(jsonPath("$.method").value("PIX"))
+                .andExpect(jsonPath("$.cashSessionId").value(currentSessionId.toString()))
                 .andExpect(jsonPath("$.createdAt").exists());
 
         List<Payment> persisted = paymentRepository.findByCommandOrderByCreatedAtAsc(command(RECORD_OPEN_NUMBER));
@@ -425,8 +459,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 40.00, "method": "CASH"}
-                                """))
+                                {"amount": 40.00, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.commandNumber").value(RECORD_PAYMENT_REQUESTED_NUMBER))
                 .andExpect(jsonPath("$.amount").value(40.00))
@@ -446,8 +480,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 90.00, "method": "CASH", "amountReceived": 100.00}
-                                """))
+                                {"amount": 90.00, "method": "CASH", "amountReceived": 100.00, "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.amount").value(90.00))
                 .andExpect(jsonPath("$.method").value("CASH"))
@@ -468,8 +502,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 40.00, "method": "CASH"}
-                                """))
+                                {"amount": 40.00, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.changeGiven").value(0));
     }
@@ -482,8 +516,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 50.00, "method": "PIX", "amountReceived": 60.00}
-                                """))
+                                {"amount": 50.00, "method": "PIX", "amountReceived": 60.00, "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 
@@ -499,8 +533,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 50.00, "method": "CASH", "amountReceived": 40.00}
-                                """))
+                                {"amount": 50.00, "method": "CASH", "amountReceived": 40.00, "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 
@@ -516,8 +550,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 10.00, "method": "CASH"}
-                                """))
+                                {"amount": 10.00, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("COMMAND_CANNOT_ACCEPT_PAYMENTS"))
                 .andExpect(jsonPath("$.message").exists())
@@ -534,8 +568,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 10.00, "method": "CASH"}
-                                """))
+                                {"amount": 10.00, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("COMMAND_CANNOT_ACCEPT_PAYMENTS"))
                 .andExpect(jsonPath("$.message").exists())
@@ -550,8 +584,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 10.00, "method": "CASH"}
-                                """))
+                                {"amount": 10.00, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("COMMAND_CANNOT_ACCEPT_PAYMENTS"));
     }
@@ -562,8 +596,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 10.00, "method": "CASH"}
-                                """))
+                                {"amount": 10.00, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("COMMAND_NOT_FOUND"));
     }
@@ -576,8 +610,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 0, "method": "CASH"}
-                                """))
+                                {"amount": 0, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.message").exists())
@@ -594,8 +628,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": -5.00, "method": "CASH"}
-                                """))
+                                {"amount": -5.00, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.message").exists())
@@ -610,8 +644,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 10.00}
-                                """))
+                                {"amount": 10.00, "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
@@ -623,8 +657,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/commands/{number}/payments", RECORD_RBAC_NUMBER)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 10.00, "method": "CASH"}
-                                """))
+                                {"amount": 10.00, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
                 .andExpect(jsonPath("$.correlationId").exists());
@@ -641,8 +675,8 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.ATTENDANT))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 10.00, "method": "CASH"}
-                                """))
+                                {"amount": 10.00, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"))
                 .andExpect(jsonPath("$.correlationId").exists());
@@ -658,9 +692,59 @@ class PaymentControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"amount": 10.00, "method": "CASH"}
-                                """))
+                                {"amount": 10.00, "method": "CASH", "cashSessionId": "%s"}
+                                """.formatted(currentSessionId)))
                 .andExpect(status().isCreated());
+    }
+
+    @Test
+    void requiresExplicitSessionAndPreventsCashierFromUsingAnotherDrawer() throws Exception {
+        setStatus(RECORD_RBAC_NUMBER, CommandStatus.OPEN);
+        String firstToken = tokenFor(UserRole.CASHIER);
+        UUID firstSessionId = currentSessionId;
+        String secondToken = tokenFor(UserRole.CASHIER);
+        UUID secondSessionId = currentSessionId;
+
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", RECORD_RBAC_NUMBER)
+                        .header("Authorization", "Bearer " + firstToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 10, \"method\": \"CASH\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", RECORD_RBAC_NUMBER)
+                        .header("Authorization", "Bearer " + firstToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 10, \"method\": \"CASH\", \"cashSessionId\": \"%s\"}"
+                                .formatted(secondSessionId)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+        assertThat(paymentRepository.findByCommandOrderByCreatedAtAsc(command(RECORD_RBAC_NUMBER))).isEmpty();
+
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", RECORD_RBAC_NUMBER)
+                        .header("Authorization", "Bearer " + firstToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 10, \"method\": \"CASH\", \"cashSessionId\": \"%s\"}"
+                                .formatted(firstSessionId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.cashSessionId").value(firstSessionId.toString()));
+
+        cashSessionRepository.findById(secondSessionId).ifPresent(session -> {
+            session.setStatus(com.farelo.api.cashier.CashSessionStatus.CLOSED);
+            session.setClosingAmount(BigDecimal.ZERO);
+            session.setClosedAt(java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC));
+            session.setClosedByUserId(session.getOpenedByUserId());
+            session.setClosedByUserName(session.getOpenedByUserName());
+            cashSessionRepository.save(session);
+        });
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", RECORD_RBAC_NUMBER)
+                        .header("Authorization", "Bearer " + secondToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 10, \"method\": \"CASH\", \"cashSessionId\": \"%s\"}"
+                                .formatted(secondSessionId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CASH_SESSION_NOT_OPEN"));
     }
 
     // --- FARELO-142: GET .../payments/total ---------------------------------

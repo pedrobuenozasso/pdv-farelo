@@ -17,7 +17,7 @@ import java.util.UUID;
 
 /**
  * FARELO-307 gave this class its first two methods, {@link #open(UUID,
- * UUID)} (backing {@code POST /api/v1/cash-sessions}) and {@link
+ * BigDecimal, UUID)} (backing {@code POST /api/v1/cash-sessions}) and {@link
  * #getById(UUID)}/{@link #listAll()} (backing {@code GET
  * /api/v1/cash-sessions}[/{id}]). FARELO-308 adds {@link #close(UUID,
  * java.math.BigDecimal, UUID, UserRole)} (backing {@code POST
@@ -63,16 +63,19 @@ public class CashSessionService {
     private final ShiftService shiftService;
     private final UserService userService;
     private final PaymentRepository paymentRepository;
+    private final CashMovementRepository cashMovementRepository;
 
     public CashSessionService(
             CashSessionRepository cashSessionRepository,
             ShiftService shiftService,
             UserService userService,
-            PaymentRepository paymentRepository) {
+            PaymentRepository paymentRepository,
+            CashMovementRepository cashMovementRepository) {
         this.cashSessionRepository = cashSessionRepository;
         this.shiftService = shiftService;
         this.userService = userService;
         this.paymentRepository = paymentRepository;
+        this.cashMovementRepository = cashMovementRepository;
     }
 
     /**
@@ -85,7 +88,7 @@ public class CashSessionService {
      *     "one per operator, not per shift" reasoning.
      */
     @Transactional
-    public CashSession open(UUID shiftId, UUID actorId) {
+    public CashSession open(UUID shiftId, BigDecimal openingAmount, UUID actorId) {
         cashSessionRepository.findByOpenedByUserIdAndStatus(actorId, CashSessionStatus.OPEN)
                 .ifPresent(existing -> {
                     throw new CashSessionAlreadyOpenException(actorId, existing.getId());
@@ -94,7 +97,7 @@ public class CashSessionService {
         Shift shift = shiftService.getById(shiftId);
         User actor = userService.getById(actorId);
 
-        CashSession session = new CashSession(shift, actor.getId(), actor.getName());
+        CashSession session = new CashSession(shift, actor.getId(), actor.getName(), openingAmount);
         return cashSessionRepository.save(session);
     }
 
@@ -152,6 +155,19 @@ public class CashSessionService {
         return session;
     }
 
+    /** Serializes payment, movement and close writes on the same drawer row. */
+    @Transactional
+    public CashSession findOpenAccessibleForUpdate(UUID id, UUID actorId, UserRole role) {
+        CashSession session = cashSessionRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new CashSessionNotFoundException(id));
+        session.getShift().getName(); // initialize for CashSessionResponse after the transaction
+        requireAccess(session, actorId, role);
+        if (session.getStatus() != CashSessionStatus.OPEN) {
+            throw new CashSessionNotOpenException(id, session.getStatus());
+        }
+        return session;
+    }
+
     private void requireAccess(CashSession session, UUID actorId, UserRole role) {
         if (role == UserRole.ADMIN || role == UserRole.MANAGER
                 || (role == UserRole.CASHIER && actorId.equals(session.getOpenedByUserId()))) {
@@ -202,7 +218,7 @@ public class CashSessionService {
      */
     @Transactional
     public CashSession close(UUID id, BigDecimal closingAmount, UUID actorId, UserRole role) {
-        CashSession session = findOpenAccessible(id, actorId, role);
+        CashSession session = findOpenAccessibleForUpdate(id, actorId, role);
         User actor = userService.getById(actorId);
 
         session.setStatus(CashSessionStatus.CLOSED);
@@ -220,22 +236,10 @@ public class CashSessionService {
      * {@code docs/gaps-sischef-pdv.md}'s "passo separado do fechamento".
      * Compares {@code closingAmount} (the physical cash counted, informed
      * at close time) against {@code expectedAmount} (the system-calculated
-     * figure computed here): the sum of every {@code CASH} {@code Payment}
-     * whose {@code createdAt} falls within the session's {@code openedAt}–
-     * {@code closedAt} window, via {@link
-     * PaymentRepository#sumAmountByMethodAndCreatedAtBetween} — the one,
-     * read-only point of contact this domain has with {@code payment} (see
-     * {@code docs/domain-model.md}, section {@code cashier}, for why this
-     * respects the "no máximo, leitura" scope boundary given to this whole
-     * ticket batch).
-     *
-     * <p><b>Known limitation, not fixed here</b>: {@code CashMovement}
-     * (sangria/suprimento/despesa/receita) doesn't exist yet as of this
-     * ticket (FARELO-310/311 come after) — a withdrawal/supply/expense/
-     * income recorded during a session is <b>not</b> subtracted/added into
-     * {@code expectedAmount} today. See this class's package-level design
-     * notes in {@code docs/domain-model.md} for the full writeup; fixing
-     * this is a future ticket's job, not silently guessed at here.
+     * figure computed here): opening float plus cash payments linked to
+     * this session, supplies and income, minus withdrawals and expenses.
+     * Historical sessions without a recorded opening float cannot be
+     * reconciled automatically.
      *
      * <p><b>No tolerance</b>: {@code MATCHED} requires the difference to be
      * exactly zero ({@link BigDecimal#compareTo}); any other value,
@@ -257,8 +261,16 @@ public class CashSessionService {
 
         User actor = userService.getById(actorId);
 
-        BigDecimal expectedAmount = paymentRepository.sumAmountByMethodAndCreatedAtBetween(
-                PaymentMethod.CASH, session.getOpenedAt(), session.getClosedAt());
+        if (session.getOpeningAmount() == null) {
+            throw new CashSessionOpeningAmountUnknownException(id);
+        }
+
+        BigDecimal expectedAmount = session.getOpeningAmount()
+                .add(paymentRepository.sumAmountByCashSessionAndMethod(session, PaymentMethod.CASH))
+                .add(cashMovementRepository.sumAmountByCashSessionAndType(session, CashMovementType.SUPPLY))
+                .add(cashMovementRepository.sumAmountByCashSessionAndType(session, CashMovementType.INCOME))
+                .subtract(cashMovementRepository.sumAmountByCashSessionAndType(session, CashMovementType.WITHDRAWAL))
+                .subtract(cashMovementRepository.sumAmountByCashSessionAndType(session, CashMovementType.EXPENSE));
         BigDecimal difference = session.getClosingAmount().subtract(expectedAmount);
         CashSessionReconciliationStatus result = difference.compareTo(BigDecimal.ZERO) == 0
                 ? CashSessionReconciliationStatus.MATCHED

@@ -103,7 +103,7 @@ class CashMovementControllerIntegrationTests extends AbstractIntegrationTest {
         MvcResult result = mockMvc.perform(post("/api/v1/cash-sessions")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"shiftId\": \"%s\"}".formatted(shift.getId())))
+                        .content("{\"shiftId\": \"%s\", \"openingAmount\": 0}".formatted(shift.getId())))
                 .andExpect(status().isCreated())
                 .andReturn();
         return objectMapper.readValue(result.getResponse().getContentAsString(), CashSessionResponse.class).id();

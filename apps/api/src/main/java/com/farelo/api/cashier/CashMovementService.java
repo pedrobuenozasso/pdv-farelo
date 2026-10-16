@@ -120,7 +120,7 @@ public class CashMovementService {
     private CashMovement record(
             UUID cashSessionId, CashMovementType type, BigDecimal amount, String description, UUID actorId,
             UserRole role) {
-        CashSession session = cashSessionService.findOpenAccessible(cashSessionId, actorId, role);
+        CashSession session = cashSessionService.findOpenAccessibleForUpdate(cashSessionId, actorId, role);
         User actor = userService.getById(actorId);
 
         CashMovement movement = new CashMovement(session, type, amount, description, actor.getId(), actor.getName());

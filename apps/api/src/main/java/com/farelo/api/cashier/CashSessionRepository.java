@@ -1,6 +1,8 @@
 package com.farelo.api.cashier;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -27,6 +29,10 @@ public interface CashSessionRepository extends JpaRepository<CashSession, UUID> 
     // already-loaded Shift instance ShiftService#getById returned.
     @Query("SELECT cs FROM CashSession cs JOIN FETCH cs.shift WHERE cs.id = :id")
     Optional<CashSession> findWithShiftById(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT cs FROM CashSession cs WHERE cs.id = :id")
+    Optional<CashSession> findByIdForUpdate(@Param("id") UUID id);
 
     @Query("SELECT cs FROM CashSession cs JOIN FETCH cs.shift ORDER BY cs.openedAt DESC")
     List<CashSession> findAllWithShiftByOrderByOpenedAtDesc();

@@ -1,7 +1,9 @@
 package com.farelo.api.cashier.web;
 
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 /**
@@ -14,5 +16,5 @@ import java.util.UUID;
  * request body" convention {@code PaymentController#record} already
  * established for {@code actorId}.
  */
-public record CashSessionOpenRequest(@NotNull UUID shiftId) {
+public record CashSessionOpenRequest(@NotNull UUID shiftId, @NotNull @PositiveOrZero BigDecimal openingAmount) {
 }

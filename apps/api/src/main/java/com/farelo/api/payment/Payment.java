@@ -1,6 +1,7 @@
 package com.farelo.api.payment;
 
 import com.farelo.api.command.Command;
+import com.farelo.api.cashier.CashSession;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -111,6 +112,10 @@ public class Payment {
     @JoinColumn(name = "command_id", nullable = false, updatable = false)
     private Command command;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "cash_session_id", updatable = false)
+    private CashSession cashSession;
+
     // BigDecimal / NUMERIC(10,2), never double/float — same money
     // convention as Product.price/OrderItem.unitPrice (AGENTS.md).
     @Column(name = "amount", nullable = false, updatable = false, precision = 10, scale = 2)
@@ -127,10 +132,17 @@ public class Payment {
         // required by JPA
     }
 
-    public Payment(Command command, BigDecimal amount, PaymentMethod method) {
+    public Payment(Command command, BigDecimal amount, PaymentMethod method, CashSession cashSession) {
         this.command = command;
         this.amount = amount;
         this.method = method;
+        this.cashSession = cashSession;
+    }
+
+    /** For pre-migration fixtures only: historical session identity is unknown. */
+    @Deprecated
+    public Payment(Command command, BigDecimal amount, PaymentMethod method) {
+        this(command, amount, method, null);
     }
 
     @PrePersist
@@ -144,6 +156,10 @@ public class Payment {
 
     public Command getCommand() {
         return command;
+    }
+
+    public CashSession getCashSession() {
+        return cashSession;
     }
 
     public BigDecimal getAmount() {

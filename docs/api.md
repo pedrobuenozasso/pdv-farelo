@@ -2088,6 +2088,7 @@ deles).
     "commandNumber": 1,
     "amount": 25.50,
     "method": "PIX",
+    "cashSessionId": "c9e8d7f6-...",
     "createdAt": "2026-09-02T13:00:00Z"
   }
 ]
@@ -2098,6 +2099,7 @@ deles).
 | `commandNumber` | Número de negócio da comanda (não o `id` técnico) — mesma convenção de `OrderResponse.commandNumber`. |
 | `amount` | `BigDecimal`, sempre positivo — o valor efetivamente pago nesta transação. |
 | `method` | Um de `PIX`/`CREDIT_CARD`/`DEBIT_CARD`/`CASH`/`OTHER`. |
+| `cashSessionId` | Caixa vinculado explicitamente; `null` apenas para pagamentos históricos sem vínculo confiável. |
 
 Sem `updatedAt` — este é um registro de ledger, imutável desde a criação
 (ver `docs/domain-model.md`, seção `payment`/`Payment`).
@@ -2133,7 +2135,8 @@ chamada, um por requisição.
 ```json
 {
   "amount": 25.50,
-  "method": "PIX"
+  "method": "PIX",
+  "cashSessionId": "c9e8d7f6-..."
 }
 ```
 
@@ -2141,6 +2144,7 @@ chamada, um por requisição.
 |---|---|
 | `amount` | `BigDecimal`, obrigatório, estritamente positivo (`@Positive`) — zero ou negativo é `400 VALIDATION_ERROR`. |
 | `method` | Obrigatório, um de `PIX`/`CREDIT_CARD`/`DEBIT_CARD`/`CASH`/`OTHER` — ausente/`null` é `400 VALIDATION_ERROR`. |
+| `cashSessionId` | UUID obrigatório de um caixa `OPEN`. `CASHIER` só registra no próprio caixa; `ADMIN`/`MANAGER` podem registrar em qualquer caixa aberto. |
 
 **Estados de origem válidos da comanda**: `OPEN` e `PAYMENT_REQUESTED` —
 mesmos dois estados que `POST /api/v1/commands/{number}/close` já aceita
@@ -2165,6 +2169,7 @@ REST `coleção/{id}`.
   "commandNumber": 1,
   "amount": 25.50,
   "method": "PIX",
+  "cashSessionId": "c9e8d7f6-...",
   "createdAt": "2026-09-02T13:00:00Z"
 }
 ```
@@ -2187,6 +2192,11 @@ REST `coleção/{id}`.
 - `400 Bad Request` — `amount` ausente/zero/negativo, ou `method`
   ausente/inválido, `code: "VALIDATION_ERROR"` (mesmo formato padrão de
   validação usado em todo o resto da API).
+- `400 Bad Request` — `cashSessionId` ausente/inválido.
+- `403 Forbidden` — `CASHIER` tenta usar o caixa de outro operador.
+- `404 Not Found` — caixa informado não existe, `CASH_SESSION_NOT_FOUND`.
+- `409 Conflict` — caixa informado não está aberto (`CASH_SESSION_NOT_OPEN`)
+  ou é legado sem valor de abertura conhecido (`CASH_SESSION_OPENING_AMOUNT_UNKNOWN`).
 
 ### `GET /api/v1/commands/{number}/payments/total`
 
@@ -2304,7 +2314,7 @@ caixa de `POST /api/v1/commands/{number}/payments`.
 **Request body**
 
 ```json
-{ "shiftId": "b1a2c3d4-..." }
+{ "shiftId": "b1a2c3d4-...", "openingAmount": 100.00 }
 ```
 
 **Response — `201 Created`**
@@ -2317,6 +2327,7 @@ caixa de `POST /api/v1/commands/{number}/payments`.
   "openedByUserId": "...",
   "openedByUserName": "Maria",
   "openedAt": "2026-09-07T13:00:00Z",
+  "openingAmount": 100.00,
   "status": "OPEN",
   "closingAmount": null,
   "closedAt": null,
@@ -2335,6 +2346,7 @@ caixa de `POST /api/v1/commands/{number}/payments`.
 
 **Erros**
 
+- `400 Bad Request` — `openingAmount` ausente ou negativo (`VALIDATION_ERROR`).
 - `404 Not Found` — `shiftId` não existe, `code: "SHIFT_NOT_FOUND"`.
 - `409 Conflict` — o usuário autenticado já tem um caixa `OPEN`, `code:
   "CASH_SESSION_ALREADY_OPEN"`. Ver `docs/domain-model.md`, seção
@@ -2389,15 +2401,16 @@ continua `PENDING` — a conferência é um passo separado (FARELO-309).
 
 ### `POST /api/v1/cash-sessions/{id}/reconcile`
 
-Confere um caixa fechado — soma os `Payment`s `CASH` registrados durante a
-janela do caixa (`openedAt` a `closedAt`) e compara contra o
-`closingAmount` informado no fechamento. (FARELO-309)
+Confere um caixa fechado. O valor esperado é `openingAmount` + pagamentos
+`CASH` vinculados à sessão + suprimentos + receitas - sangrias - despesas.
+Pagamentos de outra sessão, mesmo simultânea, e pagamentos históricos sem
+vínculo ficam fora da soma. Compara com o `closingAmount` informado no
+fechamento. (FARELO-309, fórmula atualizada)
 
 **Requer: `ADMIN`, `MANAGER`** — deliberadamente sem `CASHIER`: segregação
 de funções (quem opera o caixa não deveria autocertificar sua própria
 contagem). Ver `docs/domain-model.md`, seção `cashier`, para o raciocínio
-completo, incluindo a limitação conhecida (sangria/suprimento/despesa/
-receita ainda não entram nesse cálculo).
+completo.
 
 Sem corpo de requisição.
 
@@ -2412,6 +2425,8 @@ Sem corpo de requisição.
 - `409 Conflict` — caixa ainda não fechado, `code:
   "CASH_SESSION_NOT_CLOSED"`; ou já conferido, `code:
   "CASH_SESSION_ALREADY_RECONCILED"`.
+- `409 Conflict` — sessão histórica sem fundo de abertura conhecido,
+  `CASH_SESSION_OPENING_AMOUNT_UNKNOWN`. Não há backfill presumido.
 
 ### `POST /api/v1/cash-sessions/{id}/withdrawals` (sangria) e `POST /api/v1/cash-sessions/{id}/supplies` (suprimento)
 

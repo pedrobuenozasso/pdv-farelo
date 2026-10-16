@@ -4403,6 +4403,17 @@ Pacote: `com.farelo.api.payment`.
 
 ## cashier
 
+**Política atual de conciliação (posterior aos tickets históricos abaixo):**
+cada nova `CashSession` registra `openingAmount` explícito e cada novo
+`Payment` registra `cashSessionId` explícito. A migração V51 deixa ambos
+`NULL` apenas em registros antigos, sem inferir vínculos por horário nem
+atribuir fundo zero. Sessão antiga sem abertura conhecida não pode ser
+conciliada automaticamente. O esperado de uma sessão é abertura + pagamentos
+em dinheiro ligados a ela + suprimentos + receitas - sangrias - despesas;
+pagamentos de caixas simultâneos não se misturam. O `CASHIER` só pode lançar
+pagamento na própria sessão aberta; `ADMIN`/`MANAGER` podem supervisionar.
+As notas de FARELO-307..311 abaixo descrevem a implementação original.
+
 Pacote: `com.farelo.api.cashier`. Domínio novo, definido em
 `docs/gaps-sischef-pdv.md` ("Domínio Caixa") a partir de uma comparação
 funcional com o Sischef — deliberadamente isolado de `Order`/`OrderItem`/

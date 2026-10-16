@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 /**
  * Request body for {@code POST /api/v1/commands/{number}/payments}
@@ -52,7 +53,8 @@ import java.math.BigDecimal;
 public record PaymentRequest(
         @NotNull @Positive BigDecimal amount,
         @NotNull PaymentMethod method,
-        @Positive BigDecimal amountReceived) {
+        @Positive BigDecimal amountReceived,
+        @NotNull UUID cashSessionId) {
 
     @AssertTrue(message = "amountReceived só é permitido quando method é CASH")
     public boolean isAmountReceivedOnlyForCash() {

@@ -1,12 +1,16 @@
 package com.farelo.api.payment;
 
 import com.farelo.api.audit.AuditLogService;
+import com.farelo.api.cashier.CashSession;
+import com.farelo.api.cashier.CashSessionOpeningAmountUnknownException;
+import com.farelo.api.cashier.CashSessionService;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandNotFullyPaidException;
 import com.farelo.api.command.CommandService;
 import com.farelo.api.discount.DiscountService;
 import com.farelo.api.ordering.OrderService;
 import com.farelo.api.security.User;
+import com.farelo.api.security.UserRole;
 import com.farelo.api.security.UserService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,7 +25,7 @@ import java.util.UUID;
  * FARELO-140 gave this class its first method, {@link #listByCommand(int)} —
  * read-only, backing {@code GET /api/v1/commands/{number}/payments}.
  * FARELO-141 adds this class's first producer, {@link #record(int,
- * BigDecimal, PaymentMethod)}, backing {@code POST
+ * BigDecimal, PaymentMethod, UUID, UUID, UserRole)}, backing {@code POST
  * /api/v1/commands/{number}/payments} — the "Registrar pagamento manual"
  * ticket named in the prompt mestre (seção 47). FARELO-142 ("Permitir
  * múltiplos pagamentos por comanda") adds {@link #getTotalPaid(int)},
@@ -51,7 +55,7 @@ import java.util.UUID;
  *
  * <p><b>FARELO-305 ("Auditoria por usuário") adds {@link UserService}/
  * {@link AuditLogService}</b> — {@link #record(int, BigDecimal,
- * PaymentMethod, UUID)} now resolves the acting user and writes an {@link
+ * PaymentMethod, UUID, UUID, UserRole)} now resolves the acting user and writes an {@link
  * com.farelo.api.audit.AuditLog} entry, same seam {@code ProductService}/
  * {@code OrderService#markAsCancelled} already use for their own sensitive
  * actions. {@code security} depends on nothing in {@code payment}, so this
@@ -72,6 +76,7 @@ public class PaymentService {
     private final UserService userService;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
+    private final CashSessionService cashSessionService;
 
     public PaymentService(
             PaymentRepository paymentRepository,
@@ -80,7 +85,8 @@ public class PaymentService {
             DiscountService discountService,
             UserService userService,
             AuditLogService auditLogService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            CashSessionService cashSessionService) {
         this.paymentRepository = paymentRepository;
         this.commandService = commandService;
         this.orderService = orderService;
@@ -88,6 +94,7 @@ public class PaymentService {
         this.userService = userService;
         this.auditLogService = auditLogService;
         this.objectMapper = objectMapper;
+        this.cashSessionService = cashSessionService;
     }
 
     /**
@@ -130,9 +137,15 @@ public class PaymentService {
      *     full status-precondition reasoning).
      */
     @Transactional
-    public Payment record(int commandNumber, BigDecimal amount, PaymentMethod method, UUID actorId) {
+    public Payment record(
+            int commandNumber, BigDecimal amount, PaymentMethod method,
+            UUID cashSessionId, UUID actorId, UserRole role) {
         Command command = commandService.findForPayment(commandNumber);
-        Payment payment = new Payment(command, amount, method);
+        CashSession cashSession = cashSessionService.findOpenAccessibleForUpdate(cashSessionId, actorId, role);
+        if (cashSession.getOpeningAmount() == null) {
+            throw new CashSessionOpeningAmountUnknownException(cashSessionId);
+        }
+        Payment payment = new Payment(command, amount, method, cashSession);
         Payment saved = paymentRepository.save(payment);
 
         // FARELO-305 ("Auditoria por usuário"): recording a payment is
@@ -149,7 +162,8 @@ public class PaymentService {
 
     private String serializePayment(Payment payment) {
         try {
-            return objectMapper.writeValueAsString(new PaymentSnapshot(payment.getAmount(), payment.getMethod()));
+            return objectMapper.writeValueAsString(new PaymentSnapshot(
+                    payment.getAmount(), payment.getMethod(), payment.getCashSession().getId()));
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize payment snapshot", e);
         }
