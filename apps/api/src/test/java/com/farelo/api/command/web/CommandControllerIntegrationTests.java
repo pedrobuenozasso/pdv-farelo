@@ -149,14 +149,50 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void qrSecretsAreAvailableOnlyToAdministratorsAndManagers() throws Exception {
+        mockMvc.perform(get("/api/v1/commands/qr"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/commands/qr")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/commands/qr")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].qrToken").exists());
+        mockMvc.perform(get("/api/v1/commands/{number}", 1))
+                .andExpect(jsonPath("$.qrToken").doesNotExist());
+    }
+
+    @Test
     void returnsCommandForExistingNumber() throws Exception {
         mockMvc.perform(get("/api/v1/commands/{number}", 1))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
                 .andExpect(jsonPath("$.number").value(1))
                 .andExpect(jsonPath("$.status").value("AVAILABLE"))
-                .andExpect(jsonPath("$.createdAt").exists())
-                .andExpect(jsonPath("$.updatedAt").exists());
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.customerName").doesNotExist())
+                .andExpect(jsonPath("$.customerPhone").doesNotExist())
+                .andExpect(jsonPath("$.tableNumber").doesNotExist());
+    }
+
+    @Test
+    void customerDetailsRequireStaffAuthentication() throws Exception {
+        Command command = commandRepository.findByNumber(CUSTOMER_UPDATE_NUMBER).orElseThrow();
+        command.setCustomerName("Cliente privado");
+        command.setCustomerPhone("5511999999999");
+        commandRepository.save(command);
+
+        mockMvc.perform(get("/api/v1/commands/{number}", CUSTOMER_UPDATE_NUMBER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerName").doesNotExist())
+                .andExpect(jsonPath("$.customerPhone").doesNotExist());
+        mockMvc.perform(get("/api/v1/commands/{number}/details", CUSTOMER_UPDATE_NUMBER))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/commands/{number}/details", CUSTOMER_UPDATE_NUMBER)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerName").value("Cliente privado"))
+                .andExpect(jsonPath("$.customerPhone").value("5511999999999"));
     }
 
     @Test

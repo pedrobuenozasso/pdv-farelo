@@ -86,6 +86,11 @@ public class Command {
     @Column(name = "cycle_number", nullable = false, updatable = false)
     private int cycleNumber = 1;
 
+    // Secret printed in the QR code for this visit. A new Command row gets
+    // a fresh value, invalidating the prior visit's printed QR.
+    @Column(name = "qr_token", nullable = false, updatable = false)
+    private UUID qrToken = UUID.randomUUID();
+
     // EnumType.STRING, never ORDINAL — storing the ordinal would silently
     // corrupt data if CommandStatus's declaration order ever changes.
     @Enumerated(EnumType.STRING)
@@ -149,6 +154,10 @@ public class Command {
 
     public int getCycleNumber() {
         return cycleNumber;
+    }
+
+    public UUID getQrToken() {
+        return qrToken;
     }
 
     public void setNumber(int number) {

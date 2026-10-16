@@ -6,6 +6,17 @@ import type { NextConfig } from "next";
 const apiBaseUrl = process.env.API_BASE_URL ?? "http://localhost:8080";
 
 const nextConfig: NextConfig = {
+  async headers() {
+    return [
+      {
+        source: "/c/:path*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store" },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     return [
       {

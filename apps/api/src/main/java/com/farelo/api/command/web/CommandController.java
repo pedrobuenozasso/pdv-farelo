@@ -73,9 +73,15 @@ public class CommandController {
     // reasoning FARELO-123 already applied to
     // GET /api/v1/categories/GET /api/v1/products.
     @GetMapping("/{number}")
-    public CommandResponse findByNumber(@PathVariable int number) {
+    public CommandPublicResponse findByNumber(@PathVariable int number) {
         Command command = commandService.findByNumber(number);
-        return CommandResponse.from(command);
+        return CommandPublicResponse.from(command);
+    }
+
+    @GetMapping("/{number}/details")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
+    public CommandResponse findDetails(@PathVariable int number) {
+        return CommandResponse.from(commandService.findByNumber(number));
     }
 
     @GetMapping("/{number}/visits")

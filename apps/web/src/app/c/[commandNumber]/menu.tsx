@@ -80,9 +80,11 @@ function StepperButton({
 export function Menu({
   sections,
   commandNumber,
+  qrToken,
 }: {
   sections: MenuSection[];
   commandNumber: number;
+  qrToken: string | null;
 }) {
   const [cart, setCart] = useState<CartState>({});
   const [checkoutStep, setCheckoutStep] = useState<"cart" | "form">("cart");
@@ -166,6 +168,7 @@ export function Menu({
     setCustomerName(values.name);
     const draft = {
       commandNumber,
+      qrToken,
       items: cartItems.map((item) => ({
         productId: item.product.id,
         quantity: item.quantity,

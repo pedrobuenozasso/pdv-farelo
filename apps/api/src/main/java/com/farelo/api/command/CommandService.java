@@ -100,6 +100,17 @@ public class CommandService {
         }
     }
 
+    /**
+     * Holds the current visit while an order's possession proof and
+     * idempotency key are checked. The caller's transaction must include the
+     * eventual order creation so a close/reopen cannot switch visits between
+     * authorization and persistence.
+     */
+    @Transactional
+    public Command lockCurrentForOrder(int number) {
+        return findCurrentForUpdate(number);
+    }
+
     // Lock the current visit before changing it; the database also enforces
     // one active cycle and one row per (number, cycleNumber).
     @Transactional

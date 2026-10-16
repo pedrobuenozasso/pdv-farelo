@@ -45,6 +45,8 @@ export type CommandSummary = Pick<
   "number" | "cycleNumber" | "status" | "tableNumber"
 >;
 
+export type PublicCommand = Pick<Command, "number" | "status">;
+
 export async function listCommands(): Promise<CommandSummary[]> {
   const response = await fetch(COMMANDS_URL, {
     headers: authHeaders(),
@@ -59,12 +61,20 @@ export type UpdateCommandCustomerInput = {
 };
 
 export async function getCommand(number: number): Promise<Command> {
-  const response = await fetch(`${COMMANDS_URL}/${number}`, {
+  const response = await fetch(`${COMMANDS_URL}/${number}/details`, {
+    headers: authHeaders(),
     // Command status changes over time (opened, closed, blocked...) —
     // never serve a stale cached response for this.
     cache: "no-store",
   });
   return parseResponse<Command>(response);
+}
+
+export async function getPublicCommand(number: number): Promise<PublicCommand> {
+  const response = await fetch(`${COMMANDS_URL}/${number}`, {
+    cache: "no-store",
+  });
+  return parseResponse<PublicCommand>(response);
 }
 
 export async function listCommandVisits(number: number): Promise<Command[]> {

@@ -2,11 +2,8 @@
 
 // FARELO-250/251/252/253 — QR codes for the 1-100 seeded comandas.
 //
-// FARELO-250 ("Gerar QR Code por comanda"): each comanda's public URL is
-// {origin}/c/{number} — the customer-facing "Cardápio QR" route already
-// built (app/c/[commandNumber]/page.tsx). No new backend endpoint/route:
-// generating a QR code is purely "encode this existing URL as an image",
-// a frontend-only concern.
+// Each printed URL includes the current visit's random QR token. Reprint
+// after reopening a comanda: the next visit gets a new token.
 //
 // FARELO-251 ("Tela Admin de QR Codes"): this page, listing all 100.
 //
@@ -25,23 +22,30 @@
 // tool, not a new PrintJob type).
 
 import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { QRCodeCanvas, QRCodeSVG } from "qrcode.react";
+import { useQuery } from "@tanstack/react-query";
 
 import { AdminShell } from "@/components/admin-shell";
 import { AuthGuard } from "@/components/auth-guard";
 import { Button } from "@/components/ui/button";
 import { LogoBadge } from "@/components/logo-badge";
 import { useOrigin } from "@/lib/use-origin";
+import { listCommandQrTokens, type CommandQr } from "@/lib/api/command-qr";
 
-const COMMAND_NUMBERS = Array.from({ length: 100 }, (_, i) => i + 1);
-
-function menuUrl(origin: string, number: number): string {
-  return `${origin}/c/${number}`;
+function menuUrl(origin: string, number: number, qrToken: string): string {
+  return `${origin}/c/${number}?qr=${encodeURIComponent(qrToken)}`;
 }
 
 export default function CommandQrCodesAdminPage() {
   const origin = useOrigin();
+  const qrQuery = useQuery({
+    queryKey: ["commands", "qr"],
+    queryFn: listCommandQrTokens,
+  });
+  const codes = qrQuery.data ?? [];
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [printCodes, setPrintCodes] = useState<CommandQr[]>([]);
   const [rangeFrom, setRangeFrom] = useState("1");
   const [rangeTo, setRangeTo] = useState("100");
 
@@ -77,6 +81,10 @@ export default function CommandQrCodesAdminPage() {
             <p className="text-ink-soft mt-0.5 text-sm">
               {selected.size} de 100 selecionadas para impressão
             </p>
+            <p className="text-ink-soft mt-1 text-sm">
+              Reimprima o QR da comanda após cada novo atendimento. O código
+              anterior deixa de autorizar pedidos.
+            </p>
           </div>
 
           <div className="border-line bg-surface flex flex-wrap items-end gap-3 rounded-2xl border p-4">
@@ -111,7 +119,9 @@ export default function CommandQrCodesAdminPage() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => setSelected(new Set(COMMAND_NUMBERS))}
+              onClick={() =>
+                setSelected(new Set(codes.map((code) => code.number)))
+              }
               className="px-3 py-1.5 text-[13px]"
             >
               Selecionar todas
@@ -126,20 +136,30 @@ export default function CommandQrCodesAdminPage() {
             </Button>
             <Button
               type="button"
-              disabled={selected.size === 0}
-              onClick={() => window.print()}
+              disabled={
+                selected.size === 0 || qrQuery.isFetching || qrQuery.isError
+              }
+              onClick={async () => {
+                const latest = await qrQuery.refetch();
+                if (latest.isSuccess && latest.data) {
+                  flushSync(() => setPrintCodes(latest.data));
+                  window.print();
+                }
+              }}
               className="ml-auto px-4 py-2 text-[13px]"
             >
               Imprimir selecionados
             </Button>
           </div>
 
+          {qrQuery.isPending && <p>Carregando QR Codes...</p>}
+          {qrQuery.isError && <p>Não foi possível carregar os QR Codes.</p>}
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-            {COMMAND_NUMBERS.map((number) => (
+            {codes.map(({ number, qrToken }) => (
               <QrCodeCard
                 key={number}
                 number={number}
-                url={menuUrl(origin, number)}
+                url={menuUrl(origin, number, qrToken)}
                 selected={selected.has(number)}
                 onToggle={() => toggle(number)}
               />
@@ -151,8 +171,9 @@ export default function CommandQrCodesAdminPage() {
             the browser's print output (window.print() above). */}
         <div className="hidden print:block">
           <div className="grid grid-cols-3 gap-6">
-            {COMMAND_NUMBERS.filter((number) => selected.has(number)).map(
-              (number) => (
+            {printCodes
+              .filter(({ number }) => selected.has(number))
+              .map(({ number, qrToken }) => (
                 <div
                   key={number}
                   className="flex break-inside-avoid flex-col items-center gap-2 border border-dashed border-black p-4"
@@ -161,11 +182,13 @@ export default function CommandQrCodesAdminPage() {
                     <LogoBadge size={20} />
                     <span className="text-xs font-semibold">Farelo</span>
                   </div>
-                  <QRCodeSVG value={menuUrl(origin, number)} size={120} />
+                  <QRCodeSVG
+                    value={menuUrl(origin, number, qrToken)}
+                    size={120}
+                  />
                   <span className="text-sm font-bold">Comanda {number}</span>
                 </div>
-              ),
-            )}
+              ))}
           </div>
         </div>
       </AdminShell>

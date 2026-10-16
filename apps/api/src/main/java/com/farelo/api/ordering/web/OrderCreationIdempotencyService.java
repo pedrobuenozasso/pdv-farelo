@@ -1,8 +1,14 @@
 package com.farelo.api.ordering.web;
 
+import com.farelo.api.command.Command;
+import com.farelo.api.command.CommandService;
 import com.farelo.api.ordering.NewOrderItem;
 import com.farelo.api.ordering.OrderService;
 import com.farelo.api.ordering.OrderWithItems;
+import com.farelo.api.security.UserRole;
+import com.farelo.api.security.auth.InvalidTokenException;
+import com.farelo.api.security.auth.JwtTokenService;
+import com.farelo.api.security.rbac.InsufficientRoleException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityManager;
@@ -24,19 +30,28 @@ public class OrderCreationIdempotencyService {
     private final JdbcTemplate jdbcTemplate;
     private final EntityManager entityManager;
     private final ObjectMapper objectMapper;
+    private final CommandService commandService;
+    private final JwtTokenService jwtTokenService;
 
     public OrderCreationIdempotencyService(OrderService orderService, JdbcTemplate jdbcTemplate,
-                                           EntityManager entityManager, ObjectMapper objectMapper) {
+                                           EntityManager entityManager, ObjectMapper objectMapper,
+                                           CommandService commandService, JwtTokenService jwtTokenService) {
         this.orderService = orderService;
         this.jdbcTemplate = jdbcTemplate;
         this.entityManager = entityManager;
         this.objectMapper = objectMapper;
+        this.commandService = commandService;
+        this.jwtTokenService = jwtTokenService;
     }
 
     @Transactional
-    public OrderResponse create(CreateOrderRequest request, String keyHeader) {
+    public OrderResponse create(CreateOrderRequest request, String keyHeader,
+                                String qrTokenHeader, String authorizationHeader) {
+        Command visit = commandService.lockCurrentForOrder(request.commandNumber());
+        authorize(visit, qrTokenHeader, authorizationHeader);
         return execute("COMANDA", request.commandNumber(), request.items(), request.customerName(),
-                request.customerPhone(), request.note(), request.printOnConfirmOrDefault(), keyHeader, () -> {
+                request.customerPhone(), request.note(), request.printOnConfirmOrDefault(),
+                visit.getId(), keyHeader, () -> {
             List<NewOrderItem> items = request.items().stream()
                     .map(item -> new NewOrderItem(item.productId(), item.quantity()))
                     .toList();
@@ -48,7 +63,8 @@ public class OrderCreationIdempotencyService {
     @Transactional
     public OrderResponse createBalcao(CreateBalcaoOrderRequest request, String keyHeader) {
         return execute("BALCAO", null, request.items(), request.customerName(),
-                request.customerPhone(), request.note(), request.printOnConfirmOrDefault(), keyHeader, () -> {
+                request.customerPhone(), request.note(), request.printOnConfirmOrDefault(),
+                null, keyHeader, () -> {
             List<NewOrderItem> items = request.items().stream()
                     .map(item -> new NewOrderItem(item.productId(), item.quantity()))
                     .toList();
@@ -59,7 +75,8 @@ public class OrderCreationIdempotencyService {
 
     private OrderResponse execute(String type, Integer commandNumber, List<OrderItemRequest> items,
                                   String customerName, String customerPhone, String note,
-                                  boolean printOnConfirm, String keyHeader, OrderCreation create) {
+                                  boolean printOnConfirm, UUID visitId,
+                                  String keyHeader, OrderCreation create) {
         // Legacy clients remain accepted. New QR/PDV clients must generate one
         // UUID per intent and reuse it for retries to receive this guarantee.
         if (keyHeader == null) {
@@ -67,7 +84,7 @@ public class OrderCreationIdempotencyService {
         }
 
         UUID key = parseKey(keyHeader);
-        String fingerprint = fingerprint(type, commandNumber, items, customerName, customerPhone,
+        String fingerprint = fingerprint(type, commandNumber, visitId, items, customerName, customerPhone,
                 note, printOnConfirm);
         int claimed = jdbcTemplate.update("""
                 INSERT INTO order_creation_idempotency (idempotency_key, request_fingerprint)
@@ -108,9 +125,9 @@ public class OrderCreationIdempotencyService {
         }
     }
 
-    private String fingerprint(String type, Integer commandNumber, List<OrderItemRequest> items,
+    private String fingerprint(String type, Integer commandNumber, UUID visitId, List<OrderItemRequest> items,
                                String customerName, String customerPhone, String note, boolean printOnConfirm) {
-        byte[] payload = serialize(new FingerprintPayload(type, commandNumber, items, customerName,
+        byte[] payload = serialize(new FingerprintPayload(type, commandNumber, visitId, items, customerName,
                 customerPhone, note, printOnConfirm)).getBytes(StandardCharsets.UTF_8);
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(payload));
@@ -143,8 +160,31 @@ public class OrderCreationIdempotencyService {
         OrderWithItems run();
     }
 
-    private record FingerprintPayload(String type, Integer commandNumber, List<OrderItemRequest> items,
+    private record FingerprintPayload(String type, Integer commandNumber, UUID visitId,
+                                      List<OrderItemRequest> items,
                                       String customerName, String customerPhone, String note,
                                       boolean printOnConfirm) {
+    }
+
+    private void authorize(Command visit, String qrTokenHeader, String authorizationHeader) {
+        if (authorizationHeader != null) {
+            if (!authorizationHeader.startsWith("Bearer ") || authorizationHeader.length() <= 7) {
+                throw new InvalidTokenException("Invalid staff token", null);
+            }
+            UserRole role = jwtTokenService.parse(authorizationHeader.substring(7)).role();
+            if (role != UserRole.ADMIN && role != UserRole.MANAGER
+                    && role != UserRole.CASHIER && role != UserRole.ATTENDANT) {
+                throw new InsufficientRoleException(role);
+            }
+            return;
+        }
+        try {
+            if (qrTokenHeader != null && visit.getQrToken().equals(UUID.fromString(qrTokenHeader))) {
+                return;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Missing, malformed and incorrect QR proofs get the same outcome.
+        }
+        throw new InvalidTokenException("Valid command QR token required", null);
     }
 }

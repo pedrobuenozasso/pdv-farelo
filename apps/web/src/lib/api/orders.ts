@@ -70,6 +70,7 @@ export type Order = {
 
 export type CreateOrderInput = {
   commandNumber: number;
+  qrToken?: string | null;
   items: { productId: string; quantity: number }[];
   customerName?: string;
   customerPhone?: string;
@@ -79,11 +80,12 @@ export type CreateOrderInput = {
 };
 
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
-  const { idempotencyKey, ...body } = input;
+  const { idempotencyKey, qrToken, ...body } = input;
   const response = await fetch("/api/v1/orders", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(qrToken ? { "X-Command-QR-Token": qrToken } : authHeaders()),
       ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: JSON.stringify(body),

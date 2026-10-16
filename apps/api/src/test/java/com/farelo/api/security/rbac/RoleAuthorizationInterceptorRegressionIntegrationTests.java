@@ -74,12 +74,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * — the actual point of a regression suite — is that FARELO-124's blast
  * radius stopped exactly where the ticket intended: the public "Cardápio
  * QR" dependencies ({@link #commandLookupStillWorksWithNoAuthorizationHeader()},
- * {@link #orderCreationStillWorksWithNoAuthorizationHeader()}) and the Edge
+ * {@link #orderCreationWithQrProofWorksWithoutStaffLogin()}) and the Edge
  * Agent machine endpoints ({@link #pendingPrintJobsStillWorkWithNoAuthorizationHeader()},
  * {@link #markPrintedStillWorksWithNoAuthorizationHeader()},
  * {@link #markFailedStillWorksWithNoAuthorizationHeader()}) still work with
- * no token at all, exactly as documented in {@code CommandController}/
- * {@code OrderController}/{@code PrintJobController}'s javadocs.
+ * no staff login; order creation now carries the current visit's QR proof.
+ * Edge Agent endpoints remain without token, as documented in their
+ * controller.
  *
  * <h2>FARELO-127 — the first (and only) two {@code inventory} write
  * endpoints to gain {@code @RequireRole}</h2>
@@ -146,7 +147,7 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
     @Autowired
     private IngredientRepository ingredientRepository;
 
-    // orderCreationStillWorksWithNoAuthorizationHeader() below creates a
+    // orderCreationWithQrProofWorksWithoutStaffLogin() below creates a
     // Category/Product/Order/OrderItem (and, once its OrderCreated outbox
     // event is drained, a PrintJob) — all cleaned up here so nothing
     // lingers to trip a FK violation in some other test class sharing the
@@ -317,11 +318,11 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
 
     // FARELO-124: OrderController#create is deliberately left WITHOUT
     // @RequireRole — it's the endpoint the "Cardápio QR" checkout flow
-    // posts to directly, with no login of any kind (see that method's
+    // posts to directly, with a QR possession proof instead of login (see that method's
     // javadoc). Uses COMMAND_NUMBER (95), this class's own dedicated seeded
     // number.
     @Test
-    void orderCreationStillWorksWithNoAuthorizationHeader() throws Exception {
+    void orderCreationWithQrProofWorksWithoutStaffLogin() throws Exception {
         Category category = categoryRepository.save(new Category("Regressão FARELO-124"));
         Product product = productRepository.save(new Product("Item de Teste", new BigDecimal("5.00"), category));
         createdCategoryId = category.getId();
@@ -335,6 +336,7 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
                 """.formatted(COMMAND_NUMBER, product.getId());
 
         MvcResult result = mockMvc.perform(post("/api/v1/orders")
+                        .header("X-Command-QR-Token", commandRepository.findByNumber(COMMAND_NUMBER).orElseThrow().getQrToken().toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())

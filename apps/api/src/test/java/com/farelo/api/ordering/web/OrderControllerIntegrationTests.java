@@ -35,6 +35,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -62,11 +63,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@code OrderItemRepositoryIntegrationTests}: 9) — and resets them back to
  * {@code AVAILABLE} in {@code @AfterEach}.
  *
- * <p><b>FARELO-124</b>: every method here except {@code create} now
- * requires a caller role (see {@code OrderController}'s javadoc for exactly
- * which). {@code POST /api/v1/orders} itself stays <b>without</b> a header
- * anywhere in this class — it's the public "Cardápio QR" checkout
- * dependency (see the controller's javadoc). Every call to
+ * <p>Order creation in this class uses a cashier token, while the dedicated
+ * QR test covers public checkout. Every call to
  * {@code /preparing}/{@code /ready}/{@code /deliver}/{@code /cancel} below
  * uses a {@code CASHIER} token (the one role allowed on all four — see
  * {@code OrderController}'s javadoc), minted via {@link #tokenFor}, same
@@ -185,8 +183,33 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
     // Creates a real order (status CREATED) through the actual creation
     // endpoint, so its first OrderStatusHistory entry (FARELO-056) is
     // written the normal way — used as setup for the FARELO-057/058
-    // transition tests below. POST /api/v1/orders stays unprotected
-    // (FARELO-124), so no Authorization header here.
+    // transition tests below.
+    private MockHttpServletRequestBuilder postOrder() {
+        return post("/api/v1/orders").header("Authorization", "Bearer " + cashierToken());
+    }
+
+    @Test
+    void publicOrderRequiresCurrentVisitQrProof() throws Exception {
+        Product product = createActiveProduct(new BigDecimal("5.00"));
+        String body = """
+                {"commandNumber": %d, "items": [{"productId": "%s", "quantity": 1}]}
+                """.formatted(COMMAND_AVAILABLE, product.getId());
+        String qrToken = commandRepository.findByNumber(COMMAND_AVAILABLE).orElseThrow()
+                .getQrToken().toString();
+
+        mockMvc.perform(post("/api/v1/orders")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/orders")
+                        .header("X-Command-QR-Token", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/orders")
+                        .header("X-Command-QR-Token", qrToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+    }
+
     private UUID createOrder(Product product) throws Exception {
         String body = """
                 {
@@ -195,7 +218,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, product.getId());
 
-        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+        MvcResult result = mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -219,7 +242,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, espresso.getId(), suco.getId());
 
-        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+        MvcResult result = mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -276,7 +299,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, espresso.getId());
 
-        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+        MvcResult result = mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -315,7 +338,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_OPEN, espresso.getId());
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -337,7 +360,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(espresso.getId());
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isNotFound())
@@ -356,7 +379,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_CLOSED, espresso.getId());
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isConflict())
@@ -376,7 +399,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, missingProductId);
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isNotFound())
@@ -397,7 +420,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, inactiveProduct.getId());
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isConflict())
@@ -415,7 +438,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE);
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -435,7 +458,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, espresso.getId());
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -452,7 +475,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(espresso.getId());
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -470,7 +493,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, espresso.getId());
 
-        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+        MvcResult result = mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -505,7 +528,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, espresso.getId());
 
-        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+        MvcResult result = mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -1582,7 +1605,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, espresso.getId());
 
-        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+        MvcResult result = mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -1606,7 +1629,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, espresso.getId());
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -1626,7 +1649,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, espresso.getId(), tooLong);
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -1723,7 +1746,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, espresso.getId());
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -1742,7 +1765,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 }
                 """.formatted(COMMAND_AVAILABLE, espresso.getId());
 
-        MvcResult result = mockMvc.perform(post("/api/v1/orders")
+        MvcResult result = mockMvc.perform(postOrder()
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())

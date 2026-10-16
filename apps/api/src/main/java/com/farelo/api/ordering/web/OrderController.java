@@ -26,18 +26,8 @@ import java.util.UUID;
  * requires a staff role as of FARELO-124; see each method's javadoc for
  * exactly which role(s) and why.
  *
- * <p><b>{@link #create} stays deliberately unprotected</b> — it's the
- * single most important public dependency in this whole ticket's scope:
- * the customer-facing "Cardápio QR" checkout
- * ({@code apps/web/src/app/c/[commandNumber]/menu.tsx}, no login of any
- * kind — prompt mestre seção 6, "Confirma → Order criado") calls exactly
- * this endpoint to place an order. Protecting it would break the product's
- * entire ordering flow, not narrow it to a more appropriate staff role —
- * the same "public dependency, don't lock it down" reasoning FARELO-123
- * used for {@code GET /api/v1/categories}/{@code GET /api/v1/products},
- * just on a {@code POST} instead of a {@code GET} this time (verified
- * against the actual frontend call site, not assumed from the endpoint's
- * HTTP method alone).
+ * <p>{@link #create} accepts either a staff Bearer token or the current
+ * visit's QR possession token. A command number alone cannot create an order.
  */
 @RestController
 @RequestMapping("/api/v1/orders")
@@ -54,8 +44,11 @@ public class OrderController {
     @PostMapping
     public ResponseEntity<OrderResponse> create(
             @Valid @RequestBody CreateOrderRequest request,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        OrderResponse result = creationIdempotencyService.create(request, idempotencyKey);
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = "X-Command-QR-Token", required = false) String qrToken,
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        OrderResponse result = creationIdempotencyService.create(request, idempotencyKey,
+                qrToken, authorization);
 
         // No GET /api/v1/orders/{id} yet (future ticket) — the Location
         // header still names the resource's URI, which is correct even

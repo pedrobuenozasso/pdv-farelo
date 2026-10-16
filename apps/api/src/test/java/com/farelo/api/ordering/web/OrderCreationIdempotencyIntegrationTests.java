@@ -101,6 +101,10 @@ class OrderCreationIdempotencyIntegrationTests extends AbstractIntegrationTest {
                 .header("Idempotency-Key", key);
         if (authorization != null) {
             request.header("Authorization", "Bearer " + authorization);
+        } else if ("/api/v1/orders".equals(path)) {
+            int number = objectMapper.readTree(body).get("commandNumber").asInt();
+            commandRepository.findByNumber(number).ifPresent(command ->
+                    request.header("X-Command-QR-Token", command.getQrToken().toString()));
         }
         return mockMvc.perform(request).andExpect(status().isCreated()).andReturn();
     }
@@ -162,6 +166,7 @@ class OrderCreationIdempotencyIntegrationTests extends AbstractIntegrationTest {
         submit("/api/v1/orders", commandBody(product, 1), key, null);
 
         mockMvc.perform(post("/api/v1/orders")
+                        .header("X-Command-QR-Token", commandRepository.findByNumber(commandNumber).orElseThrow().getQrToken().toString())
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(commandBody(product, 2)))
@@ -184,6 +189,7 @@ class OrderCreationIdempotencyIntegrationTests extends AbstractIntegrationTest {
     void invalidKeyIsBadRequest() throws Exception {
         Product product = productWithRecipe();
         mockMvc.perform(post("/api/v1/orders")
+                        .header("X-Command-QR-Token", commandRepository.findByNumber(commandNumber).orElseThrow().getQrToken().toString())
                         .header("Idempotency-Key", "not-a-uuid")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(commandBody(product, 1)))
@@ -201,6 +207,7 @@ class OrderCreationIdempotencyIntegrationTests extends AbstractIntegrationTest {
         String key = UUID.randomUUID().toString();
 
         mockMvc.perform(post("/api/v1/orders")
+                        .header("X-Command-QR-Token", commandRepository.findByNumber(commandNumber).orElseThrow().getQrToken().toString())
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -226,6 +233,7 @@ class OrderCreationIdempotencyIntegrationTests extends AbstractIntegrationTest {
         assertThat(retry.getResponse().getContentAsString()).isEqualTo(first.getResponse().getContentAsString());
 
         mockMvc.perform(post("/api/v1/orders")
+                        .header("X-Command-QR-Token", commandRepository.findByNumber(commandNumber).orElseThrow().getQrToken().toString())
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(commandBody(product, 1)))

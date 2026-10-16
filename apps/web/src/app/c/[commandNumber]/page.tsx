@@ -2,8 +2,8 @@ import { LogoBadge } from "@/components/logo-badge";
 import { ApiError } from "@/lib/api/client";
 import { listCategories } from "@/lib/api/categories";
 import {
-  getCommand,
-  type Command,
+  getPublicCommand,
+  type PublicCommand,
   type CommandStatus,
 } from "@/lib/api/commands";
 import { listProducts } from "@/lib/api/products";
@@ -39,7 +39,7 @@ const STATUS_LABEL: Record<CommandStatus, string> = {
 const MENU_VISIBLE_STATUSES = new Set<CommandStatus>(["AVAILABLE", "OPEN"]);
 
 type CommandLookupResult =
-  | { outcome: "found"; command: Command }
+  | { outcome: "found"; command: PublicCommand }
   | { outcome: "not-found" }
   | { outcome: "error" };
 
@@ -50,7 +50,7 @@ type CommandLookupResult =
 // from this function's plain return value.
 async function lookupCommand(number: number): Promise<CommandLookupResult> {
   try {
-    const command = await getCommand(number);
+    const command = await getPublicCommand(number);
     return { outcome: "found", command };
   } catch (error) {
     if (error instanceof ApiError && error.code === "COMMAND_NOT_FOUND") {
@@ -151,7 +151,7 @@ function GenericErrorMessage() {
   );
 }
 
-function CommandPill({ command }: { command: Command }) {
+function CommandPill({ command }: { command: PublicCommand }) {
   return (
     <div className="border-line bg-surface relative mx-5 -mt-5 flex items-center justify-between rounded-2xl border px-4 py-3.5 shadow-[0_10px_24px_oklch(30%_0.05_45_/_12%)]">
       <div>
@@ -171,7 +171,7 @@ function CommandPill({ command }: { command: Command }) {
 
 // Comanda encontrada, mas num status onde o cardápio não se aplica
 // (fechando a conta, encerrada, bloqueada) — só a confirmação/status.
-function CommandStatusOnly({ command }: { command: Command }) {
+function CommandStatusOnly({ command }: { command: PublicCommand }) {
   return (
     <main className="bg-bg flex min-h-screen flex-col">
       <BrandHeader />
@@ -201,9 +201,11 @@ function EmptyMenuMessage() {
 function CommandWithMenu({
   command,
   menu,
+  qrToken,
 }: {
-  command: Command;
+  command: PublicCommand;
   menu: MenuLookupResult;
+  qrToken: string | null;
 }) {
   return (
     <main className="bg-bg mx-auto flex min-h-screen w-full max-w-md flex-col">
@@ -215,7 +217,11 @@ function CommandWithMenu({
         ) : menu.sections.length === 0 ? (
           <EmptyMenuMessage />
         ) : (
-          <Menu sections={menu.sections} commandNumber={command.number} />
+          <Menu
+            sections={menu.sections}
+            commandNumber={command.number}
+            qrToken={qrToken}
+          />
         )}
       </div>
     </main>
@@ -224,8 +230,11 @@ function CommandWithMenu({
 
 export default async function CommandPage({
   params,
+  searchParams,
 }: PageProps<"/c/[commandNumber]">) {
   const { commandNumber } = await params;
+  const qr = (await searchParams).qr;
+  const qrToken = typeof qr === "string" ? qr : null;
 
   // Route params always arrive as a string — validate/convert before
   // hitting the API. A non-numeric or out-of-range value gets the same
@@ -254,8 +263,18 @@ export default async function CommandPage({
       if (!MENU_VISIBLE_STATUSES.has(command.status)) {
         return <CommandStatusOnly command={command} />;
       }
+      if (!qrToken) {
+        return (
+          <CenteredMessage
+            title="Acesse pelo QR da comanda"
+            message="Leia o QR atualizado da sua comanda ou peça ajuda no balcão."
+          />
+        );
+      }
       const menu = await loadMenu();
-      return <CommandWithMenu command={command} menu={menu} />;
+      return (
+        <CommandWithMenu command={command} menu={menu} qrToken={qrToken} />
+      );
     }
   }
 }

@@ -166,6 +166,7 @@ class OrderInventoryConsumptionIntegrationTests extends AbstractIntegrationTest 
                 """.formatted(commandNumber, product.getId(), quantity);
 
         MvcResult result = mockMvc.perform(post("/api/v1/orders")
+                        .header("X-Command-QR-Token", commandRepository.findByNumber(commandNumber).orElseThrow().getQrToken().toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
@@ -250,6 +251,7 @@ class OrderInventoryConsumptionIntegrationTests extends AbstractIntegrationTest 
                 """.formatted(COMMAND_WITH_RECIPE, latte.getId(), toast.getId(), water.getId());
 
         MvcResult result = mockMvc.perform(post("/api/v1/orders")
+                        .header("X-Command-QR-Token", commandRepository.findByNumber(COMMAND_WITH_RECIPE).orElseThrow().getQrToken().toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())

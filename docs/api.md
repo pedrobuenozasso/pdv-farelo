@@ -392,15 +392,13 @@ sem login algum), que valida o número da comanda através deste endpoint.
 Ver a subseção FARELO-124 de `docs/domain-model.md` para o raciocínio
 completo.
 
-**Response — `200 OK`**
+**Response — `200 OK`**: somente os campos necessários ao cardápio QR. Dados
+de cliente, mesa, UUID interno e histórico não são públicos.
 
 ```json
 {
-  "id": "c1d2e3f4-5678-90ab-cdef-1234567890ab",
   "number": 1,
-  "status": "AVAILABLE",
-  "createdAt": "2026-09-01T13:00:00Z",
-  "updatedAt": "2026-09-01T13:00:00Z"
+  "status": "AVAILABLE"
 }
 ```
 
@@ -418,6 +416,18 @@ completo.
     "correlationId": "..."
   }
   ```
+
+### `GET /api/v1/commands/{number}/details`
+
+Retorna a visita atual com os campos completos de `CommandResponse`, incluindo
+cliente e mesa. Requer `ADMIN`, `MANAGER`, `CASHIER` ou `ATTENDANT`. O PDV usa
+esta rota em lugar da consulta pública resumida.
+
+### `GET /api/v1/commands/qr`
+
+Lista `{number, qrToken}` da visita atual de cada comanda para impressão dos
+QRs pelo painel administrativo. Requer `ADMIN` ou `MANAGER`; a resposta usa
+`Cache-Control: no-store`. Os tokens não aparecem nas consultas públicas.
 
 ### `GET /api/v1/commands/{number}/visits`
 
@@ -564,14 +574,11 @@ Ainda não há endpoint para transição a `PAYMENT_REQUESTED` nem para
 Cria um pedido, com snapshot de preço, dentro de uma comanda.
 (FARELO-052/053)
 
-**Sem marca "Requer"** (FARELO-124) — deliberadamente público: é o
-endpoint que o checkout do Cardápio QR
-(`apps/web/src/app/c/[commandNumber]/menu.tsx`, sem login algum) chama
-diretamente para finalizar o pedido do cliente (prompt mestre seção 6).
-Verificado contra o código-fonte do front, não assumido a partir do método
-HTTP — protegê-lo quebraria o fluxo de pedido do cliente por completo. Ver
-a subseção FARELO-124 de `docs/domain-model.md` para o raciocínio
-completo.
+**Prova de acesso obrigatória**: funcionário `ADMIN`, `MANAGER`, `CASHIER` ou
+`ATTENDANT` envia `Authorization: Bearer <JWT>`. O Cardápio QR, sem login,
+envia `X-Command-QR-Token: <UUID>` do QR da visita atual. Apenas conhecer o
+número da comanda não autoriza criar pedido (`401`). O token muda quando a
+comanda é reaberta; QR impresso para visita anterior precisa ser reimpresso.
 
 **Idempotência de criação**: clientes QR e PDV devem enviar o header
 `Idempotency-Key: <UUID>` gerado uma vez por intenção de pedido e reutilizar
@@ -583,6 +590,9 @@ chave com conteúdo diferente, inclusive entre COMANDA e BALCAO, devolve
 `400 INVALID_IDEMPOTENCY_KEY`. A reserva e o resultado são persistidos na
 mesma transação que o pedido. O header permanece opcional para clientes
 legados, que não recebem essa garantia até passarem a enviá-lo.
+
+O fingerprint idempotente inclui o UUID da visita. A repetição com a mesma
+chave em outra visita não reaproveita o pedido anterior.
 
 **Nome/telefone do cliente**: aceita `customerName`/`customerPhone`
 opcionais no corpo, persistidos como snapshot simples no próprio pedido
@@ -2142,6 +2152,12 @@ de manuseio de caixa, mesma lista de papéis que `POST
 parecida (ver acima); ver a seção "Autenticação/RBAC" no topo deste
 documento para o formato do header e das respostas `401`/`403`, e a
 subseção FARELO-141 de `docs/domain-model.md` para o raciocínio completo.
+
+**Idempotência de pagamento**: `Idempotency-Key: <UUID>` é opcional para
+clientes legados, mas o PDV envia uma chave por intenção e a reutiliza ao
+tentar novamente a mesma cobrança após falha de rede. Repetição válida
+retorna o mesmo pagamento sem nova escrita no ledger; a mesma chave com
+outro operador, corpo ou visita devolve `409 IDEMPOTENCY_KEY_REUSED`.
 
 Não soma pagamentos já registrados contra a comanda nem valida um total
 pago antes de fechar — a soma agora existe (`GET
