@@ -53,9 +53,10 @@ function LoginForm() {
           : role === "KITCHEN"
             ? "/kds"
             : "/pdv";
-      const redirect = requested && /^\/(admin|pdv|kds)(\/|$)/.test(requested)
-        ? requested
-        : landing;
+      const redirect =
+        requested && /^\/(admin|pdv|kds)(\/|$)/.test(requested)
+          ? requested
+          : landing;
       router.push(redirect);
     } catch (error) {
       setError("root", {

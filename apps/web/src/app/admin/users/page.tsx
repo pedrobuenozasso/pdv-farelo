@@ -177,7 +177,7 @@ export default function UsersAdminPage() {
                       ? "Verificando se o login do Caixa já existe..."
                       : usersQuery.isError
                         ? "Não foi possível verificar o cadastro do Caixa. Tente recarregar a página."
-                      : `Prepare @${CASHIER_USERNAME} com papel Caixa. A conta só será criada após preencher e confirmar a senha aqui e clicar em Adicionar; não envie a senha por chat.`}
+                        : `Prepare @${CASHIER_USERNAME} com papel Caixa. A conta só será criada após preencher e confirmar a senha aqui e clicar em Adicionar; não envie a senha por chat.`}
                 </p>
               </div>
               {!cashierUser && usersQuery.isSuccess ? (
