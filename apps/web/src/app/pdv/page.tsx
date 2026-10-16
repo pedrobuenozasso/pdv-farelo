@@ -17,7 +17,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
@@ -66,7 +66,9 @@ import {
 } from "@/lib/api/discounts";
 import {
   getPaymentBalance,
+  paymentIntentFor,
   recordPayment,
+  type PaymentIntent,
   type PaymentMethod,
 } from "@/lib/api/payments";
 import { printConference } from "@/lib/api/print-jobs";
@@ -1350,6 +1352,7 @@ function PaymentPanel({
   // backend — persists past the form closing/resetting, since that's the
   // number the cashier still needs to hand back to the customer.
   const [lastChangeGiven, setLastChangeGiven] = useState<number | null>(null);
+  const paymentIntent = useRef<PaymentIntent | null>(null);
 
   const paymentFormSchema = z
     .object({
@@ -1403,6 +1406,9 @@ function PaymentPanel({
   // yet) and only increments from CommandDetail, so the first render
   // never matches this branch.
   const [seenOpenSignal, setSeenOpenSignal] = useState(openSignal);
+  useEffect(() => {
+    paymentIntent.current = null;
+  }, [openSignal]);
   if (openSignal !== seenOpenSignal) {
     setSeenOpenSignal(openSignal);
     reset({
@@ -1439,7 +1445,7 @@ function PaymentPanel({
       if (!selectedCashSession) {
         throw new Error("Abra ou selecione um caixa antes de receber.");
       }
-      return recordPayment(commandNumber, {
+      const input = {
         amount: Number(values.amount),
         method: values.method,
         cashSessionId: selectedCashSession.id,
@@ -1447,9 +1453,16 @@ function PaymentPanel({
           values.method === "CASH" && values.amountReceived
             ? Number(values.amountReceived)
             : undefined,
-      });
+      };
+      paymentIntent.current = paymentIntentFor(
+        commandNumber,
+        input,
+        paymentIntent.current,
+      );
+      return recordPayment(commandNumber, input, paymentIntent.current.key);
     },
     onSuccess: (result) => {
+      paymentIntent.current = null;
       reset();
       setFormOpen(false);
       setLastChangeGiven(result.changeGiven > 0 ? result.changeGiven : null);
@@ -1649,7 +1662,10 @@ function PaymentPanel({
             <Button
               type="button"
               variant="outline"
-              onClick={() => setFormOpen(false)}
+              onClick={() => {
+                paymentIntent.current = null;
+                setFormOpen(false);
+              }}
             >
               Cancelar
             </Button>

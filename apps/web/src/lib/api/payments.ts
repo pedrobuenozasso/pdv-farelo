@@ -50,6 +50,21 @@ export type RecordPaymentInput = {
 // business received — see PaymentRequest's javadoc on the backend).
 export type RecordPaymentResult = Payment & { changeGiven: number };
 
+export type PaymentIntent = { payload: string; key: string };
+
+// An unchanged draft keeps its UUID after a network error. Changing any
+// payment field or the command number starts a new intent.
+export function paymentIntentFor(
+  commandNumber: number,
+  input: RecordPaymentInput,
+  previous: PaymentIntent | null,
+): PaymentIntent {
+  const payload = JSON.stringify({ commandNumber, ...input });
+  return previous?.payload === payload
+    ? previous
+    : { payload, key: crypto.randomUUID() };
+}
+
 export async function getTotalPaid(commandNumber: number): Promise<TotalPaid> {
   const response = await fetch(
     `/api/v1/commands/${commandNumber}/payments/total`,
@@ -71,10 +86,15 @@ export async function getPaymentBalance(
 export async function recordPayment(
   commandNumber: number,
   input: RecordPaymentInput,
+  idempotencyKey?: string,
 ): Promise<RecordPaymentResult> {
   const response = await fetch(`/api/v1/commands/${commandNumber}/payments`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
     body: JSON.stringify(input),
   });
   return parseResponse<RecordPaymentResult>(response);

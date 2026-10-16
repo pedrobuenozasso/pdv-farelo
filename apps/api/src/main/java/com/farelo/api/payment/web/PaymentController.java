@@ -2,7 +2,6 @@ package com.farelo.api.payment.web;
 
 import com.farelo.api.command.Command;
 import com.farelo.api.command.web.CommandResponse;
-import com.farelo.api.payment.Payment;
 import com.farelo.api.payment.PaymentBalance;
 import com.farelo.api.payment.PaymentService;
 import com.farelo.api.security.UserRole;
@@ -14,9 +13,9 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import java.math.BigDecimal;
 import java.net.URI;
@@ -97,9 +96,12 @@ import java.util.List;
 public class PaymentController {
 
     private final PaymentService paymentService;
+    private final PaymentRecordIdempotencyService recordIdempotencyService;
 
-    public PaymentController(PaymentService paymentService) {
+    public PaymentController(PaymentService paymentService,
+                             PaymentRecordIdempotencyService recordIdempotencyService) {
         this.paymentService = paymentService;
+        this.recordIdempotencyService = recordIdempotencyService;
     }
 
     // {number} is the command's business identifier, same convention as
@@ -133,22 +135,12 @@ public class PaymentController {
     public ResponseEntity<PaymentRecordResponse> record(
             @PathVariable int number,
             @Valid @RequestBody PaymentRequest request,
-            AuthenticatedPrincipal principal,
-            UriComponentsBuilder uriComponentsBuilder) {
-        Payment payment = paymentService.record(
-                number, request.amount(), request.method(), request.cashSessionId(),
-                principal.userId(), principal.role());
-
-        BigDecimal changeGiven = request.amountReceived() != null
-                ? request.amountReceived().subtract(request.amount())
-                : BigDecimal.ZERO;
-
-        URI location = uriComponentsBuilder
-                .path("/api/v1/commands/{number}/payments/{id}")
-                .buildAndExpand(number, payment.getId())
-                .toUri();
-
-        return ResponseEntity.created(location).body(PaymentRecordResponse.from(payment, changeGiven));
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            AuthenticatedPrincipal principal) {
+        PaymentRecordResponse response = recordIdempotencyService.record(
+                number, request, principal.userId(), principal.role(), idempotencyKey);
+        URI location = URI.create("/api/v1/commands/" + number + "/payments/" + response.id());
+        return ResponseEntity.created(location).body(response);
     }
 
     // FARELO-142 ("Permitir múltiplos pagamentos por comanda"). A separate
