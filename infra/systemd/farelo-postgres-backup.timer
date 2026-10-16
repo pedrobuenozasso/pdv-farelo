@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Farelo OS encrypted offsite PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 06:15:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=farelo-postgres-backup.service
+
+[Install]
+WantedBy=timers.target

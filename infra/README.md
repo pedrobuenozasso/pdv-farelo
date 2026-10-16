@@ -169,12 +169,20 @@ tags base móveis, adequado apenas como preparação revisável.
 
 ### Backup externo e teste de restauração
 
+**FARELO-330 (requisito da seção 33 do roadmap):** automatiza a execução
+diária do backup já existente. O ticket foi aberto para cobrir a lacuna de
+agendamento na implantação privada, sem alterar a VPS automaticamente.
+
 O backup lógico usa `pg_dump -Fc`, via `infra/backup-postgres.sh`, e envia o
 stream diretamente ao [restic](https://restic.readthedocs.io/en/stable/040_backup.html)
 (`--stdin-from-command` cancela o snapshot se o dump falhar) para um
 repositório externo criptografado. Não substitui uma cópia física/PITR caso o RPO exigido seja
 menor que o intervalo entre dumps. Contratar/configurar o destino externo
 (por exemplo, bucket S3 compatível com credenciais próprias) antes de rodar.
+Na VPS privada auditada, `restic` ainda não está instalado e só existem dumps
+locais; instalar o cliente restic a partir do repositório oficial do sistema e
+validar `restic version` antes do primeiro teste. Criar o bucket externo com
+credenciais restritas a ele, sem colocá-las no Git.
 Criar `/etc/farelo/backup.env` (`chmod 600`), contendo por exemplo:
 
 ```dotenv
@@ -182,6 +190,10 @@ RESTIC_REPOSITORY=s3:https://storage.example.com/farelo-backup
 RESTIC_PASSWORD_FILE=/etc/farelo/restic-password
 AWS_ACCESS_KEY_ID=preencher-fora-do-git
 AWS_SECRET_ACCESS_KEY=preencher-fora-do-git
+# Na implantação privada atual (deploy/compose.yml); omitir somente ao usar
+# infra/compose.production.yml, cujo serviço PostgreSQL se chama postgres.
+FARELO_COMPOSE_FILE=/opt/farelo-os/current/deploy/compose.yml
+FARELO_DB_SERVICE=db
 ```
 
 O arquivo `/etc/farelo/restic-password` também deve ter modo `600` e sua senha
@@ -191,14 +203,39 @@ recuperado. Inicializar o repositório uma vez e fazer backup manual de teste:
 ```bash
 set -a; . /etc/farelo/backup.env; set +a
 restic init
-infra/backup-postgres.sh /etc/farelo/production.env /etc/farelo/backup.env
+/opt/farelo-os/current/infra/backup-postgres.sh \
+  /opt/farelo-os/shared/.env /etc/farelo/backup.env
 restic snapshots --tag farelo-db
 ```
 
-Depois de validar, agendar o script diariamente em systemd timer (usuário
-com acesso a Docker e aos arquivos de configuração), monitorar falhas e
-definir retenção conforme requisitos fiscais/contábeis. Sem destino, senha,
-agendamento, alerta de falha e teste de restauração, backup ainda não existe.
+Para a configuração preparada em `infra/compose.production.yml`, remover
+`FARELO_COMPOSE_FILE`/`FARELO_DB_SERVICE` do `backup.env` e passar
+`/etc/farelo/production.env` como primeiro argumento. Confirmar por
+`docker compose ... ps` qual serviço é o banco **antes** de agendar.
+
+Depois de um backup manual concluído e de um restore em staging, instalar
+o timer da implantação privada como root:
+
+```bash
+install -m 644 /opt/farelo-os/current/infra/systemd/farelo-postgres-backup.service \
+  /etc/systemd/system/farelo-postgres-backup.service
+install -m 644 /opt/farelo-os/current/infra/systemd/farelo-postgres-backup.timer \
+  /etc/systemd/system/farelo-postgres-backup.timer
+systemctl daemon-reload
+systemctl enable --now farelo-postgres-backup.timer
+systemctl list-timers farelo-postgres-backup.timer
+systemctl start farelo-postgres-backup.service
+systemctl status farelo-postgres-backup.service
+```
+
+O agendamento é diário às 06:15 UTC, com até 15 minutos de atraso aleatório;
+`Persistent=true` executa após a VPS voltar caso tenha perdido a janela.
+Checar `systemctl --failed`, `journalctl -u farelo-postgres-backup.service`
+e o último `restic snapshots --tag farelo-db` diariamente até haver alerta
+externo configurado. **Timer ativo não comprova backup restaurável**. Definir
+retenção conforme necessidades fiscais/contábeis e monitorar falhas por um
+canal externo antes de depender deste sistema em vendas reais. Sem destino,
+senha, agendamento, alerta de falha e teste de restauração, backup ainda não existe.
 Não usar snapshot da VPS como única cópia.
 
 Teste de recuperação **em staging isolado**, com mesma versão do PostgreSQL:

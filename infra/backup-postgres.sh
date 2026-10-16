@@ -35,11 +35,24 @@ if [[ ! -r "$RESTIC_PASSWORD_FILE" ]]; then
   exit 1
 fi
 
-compose=(docker compose --env-file "$production_env" -f "$script_dir/compose.production.yml")
+# A instalação privada atual usa deploy/compose.yml e serviço "db"; o
+# compose de produção preparado em infra/ usa "postgres". A escolha é
+# explícita no backup.env para evitar salvar o banco de outro projeto.
+compose_file="${FARELO_COMPOSE_FILE:-$script_dir/compose.production.yml}"
+db_service="${FARELO_DB_SERVICE:-postgres}"
+if [[ ! -r "$compose_file" ]]; then
+  printf 'Compose do backup não encontrado ou ilegível: %s\n' "$compose_file" >&2
+  exit 1
+fi
+if [[ ! "$db_service" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
+  printf 'Nome de serviço PostgreSQL inválido.\n' >&2
+  exit 1
+fi
+compose=(docker compose --env-file "$production_env" -f "$compose_file")
 # --stdin-from-command cancela o snapshot se pg_dump falhar. Um pipe para
 # `restic backup --stdin` poderia registrar um dump truncado como válido.
 restic backup --stdin-from-command --stdin-filename farelo-postgres.dump --tag farelo-db \
-  -- "${compose[@]}" exec -T postgres sh -c \
+  -- "${compose[@]}" exec -T "$db_service" sh -c \
   'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner --no-acl'
 
 # Confirma que o repositório externo recebeu um snapshot. A validação de
