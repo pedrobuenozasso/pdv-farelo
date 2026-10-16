@@ -49,12 +49,20 @@ class RoleAuthorizationInterceptorTests {
     }
 
     @Test
-    void passesThroughWhenNeitherMethodNorClassIsAnnotated() throws Exception {
+    void rejectsHandlerWithoutAnExplicitPolicy() throws Exception {
         HandlerMethod handlerMethod = handlerMethodFor(Unprotected.class, "handle");
 
-        boolean result = interceptor.preHandle(request, response, handlerMethod);
+        assertThatThrownBy(() -> interceptor.preHandle(request, response, handlerMethod))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("missing @RequireRole or @PublicEndpoint");
+        verifyNoInteractions(jwtTokenService);
+    }
 
-        assertThat(result).isTrue();
+    @Test
+    void allowsOnlyExplicitlyPublicHandlerWithoutToken() throws Exception {
+        HandlerMethod handlerMethod = handlerMethodFor(PublicHandler.class, "handle");
+
+        assertThat(interceptor.preHandle(request, response, handlerMethod)).isTrue();
         verifyNoInteractions(jwtTokenService);
     }
 
@@ -135,6 +143,12 @@ class RoleAuthorizationInterceptorTests {
     }
 
     static class Unprotected {
+        public void handle() {
+        }
+    }
+
+    static class PublicHandler {
+        @PublicEndpoint
         public void handle() {
         }
     }

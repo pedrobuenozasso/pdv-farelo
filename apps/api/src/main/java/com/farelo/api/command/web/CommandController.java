@@ -4,6 +4,7 @@ import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandService;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.rbac.RequireRole;
+import com.farelo.api.security.rbac.PublicEndpoint;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -73,6 +74,7 @@ public class CommandController {
     // reasoning FARELO-123 already applied to
     // GET /api/v1/categories/GET /api/v1/products.
     @GetMapping("/{number}")
+    @PublicEndpoint
     public CommandPublicResponse findByNumber(@PathVariable int number) {
         Command command = commandService.findByNumber(number);
         return CommandPublicResponse.from(command);

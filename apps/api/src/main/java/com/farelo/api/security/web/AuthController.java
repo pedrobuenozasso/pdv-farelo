@@ -2,6 +2,7 @@ package com.farelo.api.security.web;
 
 import com.farelo.api.security.AuthenticationService;
 import com.farelo.api.security.auth.IssuedToken;
+import com.farelo.api.security.rbac.PublicEndpoint;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -28,6 +29,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
+    @PublicEndpoint
     public LoginResponse login(@Valid @RequestBody LoginRequest request) {
         IssuedToken issuedToken = authenticationService.login(request.email(), request.password());
         return LoginResponse.from(issuedToken);

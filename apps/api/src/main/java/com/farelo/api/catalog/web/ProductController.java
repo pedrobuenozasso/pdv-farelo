@@ -5,6 +5,7 @@ import com.farelo.api.catalog.ProductService;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.auth.AuthenticatedPrincipal;
 import com.farelo.api.security.rbac.RequireRole;
+import com.farelo.api.security.rbac.PublicEndpoint;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -90,6 +91,7 @@ public class ProductController {
     // (FARELO-043), which has no login of any kind. The Admin surface for
     // products is authoring them (create()/update()), not reading them.
     @GetMapping
+    @PublicEndpoint
     public List<ProductResponse> list() {
         return productService.listAll().stream()
                 .map(ProductResponse::from)

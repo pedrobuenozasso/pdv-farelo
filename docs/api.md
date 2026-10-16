@@ -18,57 +18,18 @@ Este documento é preenchido conforme cada endpoint é criado.
 
 ### Autenticação/RBAC (FARELO-121/122/123/124/127)
 
-A maioria dos endpoints abaixo não exige nenhuma autenticação — esse é o
-padrão do projeto até aqui (ver `docs/domain-model.md`, seção `security`).
-Um endpoint marcado **"Requer: `<PAPEL>`"** abaixo é a exceção: precisa de
-um header `Authorization: Bearer <token>` (token emitido por
-`POST /api/v1/auth/login`) cujo usuário tenha um dos papéis listados
-(`ADMIN`/`MANAGER`/`CASHIER`/`KITCHEN`/`ATTENDANT`, ver seção 26 do prompt
-mestre). Quando um endpoint marcado assim é chamado:
+A API usa negação por padrão: cada handler declara `@RequireRole` ou
+`@PublicEndpoint`. A ausência das duas políticas falha fechada. Endpoints
+protegidos exigem `Authorization: Bearer <token>` obtido em
+`POST /api/v1/auth/login`. Sem token válido retornam `401 UNAUTHENTICATED`;
+com papel insuficiente, `403 FORBIDDEN`.
 
-- **Sem header `Authorization` (ou malformado/token inválido/expirado)** —
-  `401 Unauthorized`:
-
-  ```json
-  {
-    "code": "UNAUTHENTICATED",
-    "message": "...",
-    "correlationId": "..."
-  }
-  ```
-
-- **Header presente e token válido, mas o papel do usuário não está na
-  lista exigida** — `403 Forbidden`:
-
-  ```json
-  {
-    "code": "FORBIDDEN",
-    "message": "...",
-    "correlationId": "..."
-  }
-  ```
-
-Um endpoint **sem** a marca "Requer" continua acessível sem nenhum header,
-exatamente como sempre foi — inclusive depois do FARELO-123 (que adicionou
-a marca a alguns endpoints de `categories`/`products`/`users`), do
-FARELO-124 (que adicionou a marca a alguns endpoints de `commands`/
-`orders`/`print-jobs` — a superfície PDV/cozinha), do FARELO-127 (que
-adicionou a marca a exatamente dois endpoints de `ingredients`) e do
-FARELO-141 (que adicionou a marca ao `POST` de `payments`) — ver essas
-seções abaixo e o raciocínio completo em `docs/domain-model.md`,
-subseções FARELO-123, FARELO-124, FARELO-127 e FARELO-141. Dois casos
-seguem deliberadamente sem a marca mesmo depois do FARELO-124: os dois
-endpoints que o Cardápio QR
-(cliente anônimo, sem login) depende diretamente
-(`GET /api/v1/commands/{number}`, `POST /api/v1/orders`), e três dos quatro
-endpoints de `print-jobs`, que são chamados só pelo Farelo Edge Agent — uma
-máquina, não uma pessoa logada (ver a subseção FARELO-124 de
-`docs/domain-model.md` para o porquê de RBAC não se aplicar a um endpoint
-machine-to-machine). O restante de `ingredients` (todo `GET`, `POST`/`PUT`
-de ingredientes em si) e todo `recipes` seguem sem a marca mesmo depois do
-FARELO-127 — ver a subseção FARELO-127 de `docs/domain-model.md` para por
-que esse ticket protegeu só dois endpoints, não a superfície de estoque
-inteira.
+As exceções públicas explícitas são login, leitura do catálogo, status mínimo
+da comanda, criação de pedido com prova do QR da visita atual e as três rotas
+do Edge Agent (`GET /print-jobs`, `POST /print-jobs/{id}/printed` e
+`POST /print-jobs/{id}/failed`). As rotas do Edge Agent ainda precisam de
+autenticação máquina-a-máquina antes de publicar a API. Leituras de saldo e
+movimentações de estoque exigem `ADMIN` ou `MANAGER`.
 
 ## Endpoints
 

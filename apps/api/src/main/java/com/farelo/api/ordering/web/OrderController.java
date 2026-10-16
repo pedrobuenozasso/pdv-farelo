@@ -6,6 +6,7 @@ import com.farelo.api.ordering.OrderWithItems;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.auth.AuthenticatedPrincipal;
 import com.farelo.api.security.rbac.RequireRole;
+import com.farelo.api.security.rbac.PublicEndpoint;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,6 +43,7 @@ public class OrderController {
     }
 
     @PostMapping
+    @PublicEndpoint
     public ResponseEntity<OrderResponse> create(
             @Valid @RequestBody CreateOrderRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,

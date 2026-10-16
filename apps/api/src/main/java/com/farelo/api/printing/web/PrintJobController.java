@@ -4,6 +4,7 @@ import com.farelo.api.printing.PrintJob;
 import com.farelo.api.printing.PrintJobService;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.rbac.RequireRole;
+import com.farelo.api.security.rbac.PublicEndpoint;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -92,6 +93,7 @@ public class PrintJobController {
     // FARELO-124: deliberately left WITHOUT @RequireRole — Edge Agent
     // machine endpoint, see class javadoc.
     @GetMapping
+    @PublicEndpoint
     public List<PrintJobResponse> pending() {
         return printJobService.listPending().stream()
                 .map(job -> PrintJobResponse.from(job, objectMapper))
@@ -107,6 +109,7 @@ public class PrintJobController {
     // FARELO-124: deliberately left WITHOUT @RequireRole — Edge Agent
     // machine endpoint, see class javadoc.
     @PostMapping("/{id}/printed")
+    @PublicEndpoint
     public PrintJobResponse markPrinted(@PathVariable UUID id) {
         PrintJob job = printJobService.markPrinted(id);
         return PrintJobResponse.from(job, objectMapper);
@@ -120,6 +123,7 @@ public class PrintJobController {
     // FARELO-124: deliberately left WITHOUT @RequireRole — Edge Agent
     // machine endpoint, see class javadoc.
     @PostMapping("/{id}/failed")
+    @PublicEndpoint
     public PrintJobResponse markFailed(@PathVariable UUID id) {
         PrintJob job = printJobService.markFailed(id);
         return PrintJobResponse.from(job, objectMapper);

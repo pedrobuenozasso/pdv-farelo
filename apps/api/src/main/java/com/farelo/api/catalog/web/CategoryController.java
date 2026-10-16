@@ -4,6 +4,7 @@ import com.farelo.api.catalog.Category;
 import com.farelo.api.catalog.CategoryService;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.rbac.RequireRole;
+import com.farelo.api.security.rbac.PublicEndpoint;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -64,6 +65,7 @@ public class CategoryController {
     // read access, FARELO-124's concern, not decided here). The Admin
     // surface for categories is authoring them (create()), not reading them.
     @GetMapping
+    @PublicEndpoint
     public List<CategoryResponse> list() {
         return categoryService.listAll().stream()
                 .map(CategoryResponse::from)

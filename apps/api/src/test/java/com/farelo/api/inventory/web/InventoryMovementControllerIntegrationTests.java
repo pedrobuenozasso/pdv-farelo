@@ -65,9 +65,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * a real token via {@link #tokenFor}/{@link #userAndTokenFor} and sends it
  * as {@code Authorization: Bearer <token>} — same pattern {@code
  * ProductControllerIntegrationTests} established for FARELO-123/126. {@code
- * GET .../movements}/{@code GET .../balance} are deliberately left with
- * <b>no</b> header anywhere in this class — see the controller javadoc for
- * why they stay unprotected. The {@code *RecordsAuditLog*}/{@code
+ * GET .../movements}/{@code GET .../balance} also require a management
+ * role because they reveal internal stock quantities. The {@code *RecordsAuditLog*}/{@code
  * *401*}/{@code *403*} tests below are new for FARELO-127; every
  * pre-existing {@code POST .../movements}/{@code POST .../losses} test was
  * updated in place to send a token, without otherwise changing what it
@@ -261,17 +260,30 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
     void returnsEmptyListWhenIngredientHasNoMovements() throws Exception {
         Ingredient ingredient = createIngredient("Canela", IngredientUnit.GRAM);
 
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/movements", ingredient.getId()))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/movements", ingredient.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
     }
 
     @Test
+    void stockReadsRejectUnauthenticatedAndCashierCallers() throws Exception {
+        Ingredient ingredient = createIngredient("Estoque privado", IngredientUnit.GRAM);
+
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/movements", ingredient.getId()))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", ingredient.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void returnsIngredientNotFoundWhenListingMovementsOfUnknownIngredient() throws Exception {
         UUID missingIngredientId = UUID.randomUUID();
 
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/movements", missingIngredientId))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/movements", missingIngredientId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("INGREDIENT_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -292,7 +304,8 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
         inventoryMovementRepository.save(
                 new InventoryMovement(sugar, new BigDecimal("2000"), InventoryMovementType.PURCHASE));
 
-        MvcResult result = mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/movements", flour.getId()))
+        MvcResult result = mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/movements", flour.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[0].id").value(purchase.getId().toString()))
@@ -318,7 +331,8 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
     void returnsZeroBalanceWhenIngredientHasNoMovements() throws Exception {
         Ingredient ingredient = createIngredient("Cardamomo", IngredientUnit.GRAM);
 
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", ingredient.getId()))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", ingredient.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.ingredientId").value(ingredient.getId().toString()))
                 .andExpect(jsonPath("$.balance").value(0))
@@ -342,7 +356,8 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                 new InventoryMovement(vanilla, new BigDecimal("1000"), InventoryMovementType.PURCHASE));
 
         // 2000 + 500 - 300 = 2200
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", cocoa.getId()))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", cocoa.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.ingredientId").value(cocoa.getId().toString()))
                 .andExpect(jsonPath("$.balance").value(2200))
@@ -353,7 +368,8 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
     void returnsIngredientNotFoundWhenGettingBalanceOfUnknownIngredient() throws Exception {
         UUID missingIngredientId = UUID.randomUUID();
 
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", missingIngredientId))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", missingIngredientId)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("INGREDIENT_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").exists())
@@ -373,7 +389,8 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                 new InventoryMovement(coffee, new BigDecimal("400"), InventoryMovementType.PURCHASE));
 
         // balance (400) < minimumStock (1000) -> below.
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", coffee.getId()))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", coffee.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.balance").value(400))
                 .andExpect(jsonPath("$.belowMinimum").value(true));
@@ -388,7 +405,8 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                 new InventoryMovement(coffee, new BigDecimal("1000"), InventoryMovementType.PURCHASE));
 
         // balance (1000) == minimumStock (1000) -> at threshold, not below it.
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", coffee.getId()))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", coffee.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.balance").value(1000))
                 .andExpect(jsonPath("$.belowMinimum").value(false));
@@ -403,7 +421,8 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                 new InventoryMovement(coffee, new BigDecimal("5000"), InventoryMovementType.PURCHASE));
 
         // balance (5000) > minimumStock (1000) -> above.
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", coffee.getId()))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", coffee.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.balance").value(5000))
                 .andExpect(jsonPath("$.belowMinimum").value(false));
@@ -425,7 +444,8 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                 noThreshold, new BigDecimal("-300"), InventoryMovementType.ORDER_CONSUMPTION, orderId));
 
         // balance = 100 - 300 = -200, and minimumStock is null.
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", noThreshold.getId()))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", noThreshold.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.balance").value(-200))
                 .andExpect(jsonPath("$.belowMinimum").value(false));
@@ -435,7 +455,8 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
     void returnsZeroBalanceWithBelowMinimumFalseWhenNoThresholdConfiguredAndNoMovements() throws Exception {
         Ingredient ingredient = createIngredient("Erva-doce (FARELO-099)", IngredientUnit.GRAM);
 
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", ingredient.getId()))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", ingredient.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.balance").value(0))
                 .andExpect(jsonPath("$.belowMinimum").value(false));
@@ -562,7 +583,8 @@ class InventoryMovementControllerIntegrationTests extends AbstractIntegrationTes
                 .andExpect(status().isCreated());
 
         // 5000 - 800 = 4200
-        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", sugar.getId()))
+        mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", sugar.getId())
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.ingredientId").value(sugar.getId().toString()))
                 .andExpect(jsonPath("$.balance").value(4200))

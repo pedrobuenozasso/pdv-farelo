@@ -247,25 +247,23 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
                 .andExpect(status().isUnauthorized());
     }
 
-    // FARELO-127: GET .../movements/GET .../balance on the very same
-    // controller as the two now-protected writes stay deliberately
-    // unannotated — see InventoryMovementController's javadoc.
+    // Stock movements and balances are internal management data.
     @Test
-    void inventoryMovementListingStillWorksWithNoAuthorizationHeader() throws Exception {
+    void inventoryMovementListingRequiresAuthentication() throws Exception {
         Ingredient ingredient = ingredientRepository.save(
                 new Ingredient("Ingrediente Regressão FARELO-127 (movements)", IngredientUnit.GRAM));
 
         mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/movements", ingredient.getId()))
-                .andExpect(status().isOk());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
-    void inventoryMovementBalanceStillWorksWithNoAuthorizationHeader() throws Exception {
+    void inventoryMovementBalanceRequiresAuthentication() throws Exception {
         Ingredient ingredient = ingredientRepository.save(
                 new Ingredient("Ingrediente Regressão FARELO-127 (balance)", IngredientUnit.GRAM));
 
         mockMvc.perform(get("/api/v1/ingredients/{ingredientId}/balance", ingredient.getId()))
-                .andExpect(status().isOk());
+                .andExpect(status().isUnauthorized());
     }
 
     // FARELO-127: the new boundary itself — POST .../movements now requires

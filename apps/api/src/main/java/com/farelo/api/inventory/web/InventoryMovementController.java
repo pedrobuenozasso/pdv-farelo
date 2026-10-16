@@ -50,9 +50,9 @@ import java.util.UUID;
  * the full three-option writeup (why a client-supplied actor id was
  * rejected, and why this is scoped to exactly these two endpoints, not the
  * whole controller or the sibling {@code Ingredient}/{@code Recipe}
- * controllers). {@link #list}/{@link #getBalance} below stay deliberately
- * <b>unannotated</b> — read access to the ledger/balance carries none of
- * this ticket's actor-attribution requirement and was never in scope.
+ * controllers). {@link #list}/{@link #getBalance} were later restricted
+ * to ADMIN/MANAGER because stock quantities and movement history are
+ * internal operational data.
  *
  * <p><b>{@code GET .../balance} (FARELO-095)</b>: class-level {@code
  * @RequestMapping} was widened from {@code .../movements} to just {@code
@@ -121,6 +121,7 @@ public class InventoryMovementController {
     }
 
     @GetMapping("/movements")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
     public List<InventoryMovementResponse> list(@PathVariable UUID ingredientId) {
         return inventoryMovementService.listByIngredient(ingredientId).stream()
                 .map(InventoryMovementResponse::from)
@@ -131,6 +132,7 @@ public class InventoryMovementController {
     // enforced inside InventoryMovementService#getBalance, same order as
     // create()/list() above — before the balance is ever computed.
     @GetMapping("/balance")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
     public IngredientBalanceResponse getBalance(@PathVariable UUID ingredientId) {
         return IngredientBalanceResponse.from(inventoryMovementService.getBalance(ingredientId));
     }

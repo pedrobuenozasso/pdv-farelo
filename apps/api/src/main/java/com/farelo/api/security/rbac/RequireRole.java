@@ -14,6 +14,9 @@ import java.lang.annotation.Target;
  * of {@link #value()}. Enforced by {@link RoleAuthorizationInterceptor} —
  * this annotation by itself does nothing; see that class's javadoc for the
  * full request pipeline (FARELO-122).
+ * Handlers without this annotation must declare {@link PublicEndpoint};
+ * otherwise the request fails closed. The historical notes below describe
+ * when role checks were first introduced, not the current default policy.
  *
  * <p><b>Method-level wins over class-level</b>: if a class is annotated
  * (e.g. "every endpoint in this controller needs {@code ADMIN}") and one of
