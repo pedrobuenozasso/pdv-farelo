@@ -32,6 +32,7 @@ import { apiErrorMessage } from "@/lib/api/client";
 import {
   closeCommand,
   getCommand,
+  listCommandVisits,
   listCommands,
   openCommand,
   updateCommandCustomer,
@@ -329,6 +330,11 @@ function CommandDetail({
     queryFn: () => getCommand(number),
   });
 
+  const visitsQuery = useQuery({
+    queryKey: ["pdv", "command", number, "visits"],
+    queryFn: () => listCommandVisits(number),
+  });
+
   const ordersQuery = useQuery({
     queryKey: ["pdv", "command", number, "orders"],
     queryFn: () => listCommandOrders(number),
@@ -355,7 +361,8 @@ function CommandDetail({
   });
 
   const command = commandQuery.data;
-  const canOpen = command?.status === "AVAILABLE";
+  const canOpen =
+    command?.status === "AVAILABLE" || command?.status === "CLOSED";
   const canClose =
     command?.status === "OPEN" || command?.status === "PAYMENT_REQUESTED";
 
@@ -387,6 +394,11 @@ function CommandDetail({
               {STATUS_LABEL[command.status]}
             </Badge>
           ) : null}
+          {command ? (
+            <span className="text-ink-faint text-xs">
+              Visita {command.cycleNumber}
+            </span>
+          ) : null}
         </div>
         <button
           type="button"
@@ -412,7 +424,11 @@ function CommandDetail({
               disabled={!canOpen || openMutation.isPending}
               onClick={() => openMutation.mutate()}
             >
-              {openMutation.isPending ? "Abrindo..." : "Abrir comanda"}
+              {openMutation.isPending
+                ? "Abrindo..."
+                : command.status === "CLOSED"
+                  ? "Iniciar nova visita"
+                  : "Abrir comanda"}
             </Button>
             <Button
               variant="outline"
@@ -433,6 +449,20 @@ function CommandDetail({
           {closeErrorMessage ? (
             <p className="text-red text-sm">{closeErrorMessage}</p>
           ) : null}
+        </div>
+      ) : null}
+
+      {(visitsQuery.data?.length ?? 0) > 1 ? (
+        <div className="border-line border-t pt-3 text-sm">
+          <p className="text-ink-soft font-semibold">Histórico de visitas</p>
+          <ul className="text-ink-faint mt-2 flex flex-wrap gap-3">
+            {visitsQuery.data?.map((visit) => (
+              <li key={visit.id}>
+                Visita {visit.cycleNumber} · {STATUS_LABEL[visit.status]} ·{" "}
+                {dateTimeFormatter.format(new Date(visit.createdAt))}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

@@ -25,6 +25,7 @@ export type CommandStatus =
 export type Command = {
   id: string;
   number: number;
+  cycleNumber: number;
   status: CommandStatus;
   // FARELO-190/191 — the comanda's single central customer record, kept
   // in sync with whichever of PDV/QR last supplied a name/phone (see
@@ -39,7 +40,10 @@ export type Command = {
   updatedAt: string;
 };
 
-export type CommandSummary = Pick<Command, "number" | "status" | "tableNumber">;
+export type CommandSummary = Pick<
+  Command,
+  "number" | "cycleNumber" | "status" | "tableNumber"
+>;
 
 export async function listCommands(): Promise<CommandSummary[]> {
   const response = await fetch(COMMANDS_URL, {
@@ -61,6 +65,14 @@ export async function getCommand(number: number): Promise<Command> {
     cache: "no-store",
   });
   return parseResponse<Command>(response);
+}
+
+export async function listCommandVisits(number: number): Promise<Command[]> {
+  const response = await fetch(`${COMMANDS_URL}/${number}/visits`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  return parseResponse<Command[]>(response);
 }
 
 export async function openCommand(number: number): Promise<Command> {

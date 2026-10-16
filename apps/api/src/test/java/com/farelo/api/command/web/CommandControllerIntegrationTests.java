@@ -169,6 +169,17 @@ class CommandControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void listsVisitHistoryOnlyForStaff() throws Exception {
+        mockMvc.perform(get("/api/v1/commands/{number}/visits", 1))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/commands/{number}/visits", 1)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].number").value(1))
+                .andExpect(jsonPath("$[0].cycleNumber").value(1));
+    }
+
+    @Test
     void opensAvailableCommand() throws Exception {
         mockMvc.perform(post("/api/v1/commands/{number}/open", OPEN_TEST_NUMBER)
                         .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))

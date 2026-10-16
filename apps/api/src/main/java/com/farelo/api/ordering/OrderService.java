@@ -538,6 +538,7 @@ public class OrderService {
             UUID actorId) {
         Order order = getById(orderId);
         OrderItem item = getItem(orderId, itemId);
+        requireActiveVisit(order);
 
         if (ITEM_CANCELLATION_BLOCKED_STATUSES.contains(order.getStatus())) {
             throw new OrderItemCancellationNotAllowedException(orderId, itemId, order.getStatus());
@@ -607,6 +608,7 @@ public class OrderService {
     @Transactional
     public OrderItem duplicateItem(UUID orderId, UUID itemId) {
         Order order = getById(orderId);
+        requireActiveVisit(order);
         if (ITEM_CANCELLATION_BLOCKED_STATUSES.contains(order.getStatus())) {
             throw new OrderNotModifiableException(orderId, order.getStatus());
         }
@@ -637,6 +639,7 @@ public class OrderService {
     @Transactional
     public OrderWithItems assignWaiter(UUID orderId, UUID userId) {
         Order order = getById(orderId);
+        requireActiveVisit(order);
         User waiter = userService.getById(userId);
         order.assignWaiter(waiter.getId(), waiter.getName());
         return withItems(orderRepository.save(order));
@@ -654,6 +657,7 @@ public class OrderService {
     @Transactional
     public OrderWithItems unassignWaiter(UUID orderId) {
         Order order = getById(orderId);
+        requireActiveVisit(order);
         order.unassignWaiter();
         return withItems(orderRepository.save(order));
     }
@@ -690,6 +694,7 @@ public class OrderService {
     // (membership check instead of equality) actually lives.
     private OrderWithItems transition(UUID orderId, Set<OrderStatus> validCurrentStatuses, OrderStatus targetStatus) {
         Order order = getById(orderId);
+        requireActiveVisit(order);
         OrderStatus currentStatus = order.getStatus();
 
         if (!validCurrentStatuses.contains(currentStatus)) {
@@ -702,6 +707,12 @@ public class OrderService {
 
         List<OrderItem> items = orderItemRepository.findByOrder(saved);
         return new OrderWithItems(saved, items);
+    }
+
+    private void requireActiveVisit(Order order) {
+        if (order.getCommand() != null) {
+            commandService.requireActiveVisit(order.getCommand());
+        }
     }
 
 }

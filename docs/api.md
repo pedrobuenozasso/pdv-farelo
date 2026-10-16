@@ -419,10 +419,22 @@ completo.
   }
   ```
 
+### `GET /api/v1/commands/{number}/visits`
+
+Lista as visitas do número físico em ordem decrescente de `cycleNumber`.
+Requer `ADMIN`, `MANAGER`, `CASHIER` ou `ATTENDANT`. Cada visita retorna
+`CommandResponse` com UUID, número, ciclo, status, cliente, mesa e datas.
+O endpoint público `GET /api/v1/commands/{number}` mostra somente a visita
+mais recente; os agregados operacionais de pedidos, pagamentos e descontos
+também usam exclusivamente essa visita. Um número desconhecido retorna
+`404 COMMAND_NOT_FOUND`.
+
 ### `POST /api/v1/commands/{number}/open`
 
-Abre uma comanda: transição de status `AVAILABLE` → `OPEN`, quando um
-cliente começa a usá-la. (FARELO-033)
+Abre uma comanda: transição de status `AVAILABLE` → `OPEN` no primeiro ciclo.
+Se o ciclo atual está `CLOSED`, cria uma nova visita `OPEN`, com novo UUID e
+`cycleNumber` incrementado; os pedidos e pagamentos anteriores continuam
+ligados ao ciclo fechado. (FARELO-033/V53)
 
 **Requer: `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT`** (FARELO-124) — ação
 de frente de loja sem implicação de dinheiro ainda; ver a seção
@@ -446,8 +458,7 @@ recebe corpo algum.
 
 - `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
   `code: "COMMAND_NOT_FOUND"` (mesmo formato do `GET`).
-- `409 Conflict` — a comanda existe mas não está `AVAILABLE` (já está
-  `OPEN`, `PAYMENT_REQUESTED`, `CLOSED` ou `BLOCKED`):
+- `409 Conflict` — a comanda já está `OPEN`, `PAYMENT_REQUESTED` ou `BLOCKED`:
 
   ```json
   {

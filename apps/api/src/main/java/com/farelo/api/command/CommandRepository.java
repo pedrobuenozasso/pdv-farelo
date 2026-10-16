@@ -1,6 +1,7 @@
 package com.farelo.api.command;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -8,10 +9,23 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import jakarta.persistence.LockModeType;
 
 public interface CommandRepository extends JpaRepository<Command, UUID> {
 
-    Optional<Command> findByNumber(int number);
+    @Query("SELECT c FROM Command c WHERE c.number = :number AND c.cycleNumber = "
+            + "(SELECT MAX(c2.cycleNumber) FROM Command c2 WHERE c2.number = :number)")
+    Optional<Command> findByNumber(@Param("number") int number);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<Command> findFirstByNumberOrderByCycleNumberDesc(int number);
+
+    List<Command> findByNumberOrderByCycleNumberDesc(int number);
+
+    @Query("SELECT c FROM Command c WHERE c.cycleNumber = "
+            + "(SELECT MAX(c2.cycleNumber) FROM Command c2 WHERE c2.number = c.number) "
+            + "ORDER BY c.number")
+    List<Command> findCurrentByOrderByNumberAsc();
 
     List<Command> findAllByOrderByNumberAsc();
 

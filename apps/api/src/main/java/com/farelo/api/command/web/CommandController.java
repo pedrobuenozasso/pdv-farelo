@@ -78,6 +78,12 @@ public class CommandController {
         return CommandResponse.from(command);
     }
 
+    @GetMapping("/{number}/visits")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
+    public List<CommandResponse> listVisits(@PathVariable int number) {
+        return commandService.listVisits(number).stream().map(CommandResponse::from).toList();
+    }
+
     // POST, not PATCH: /open is an action ("open this command"), not a
     // partial update of the resource's representation — a pragmatic REST
     // convention for state-transition endpoints (verb suffix + POST), and

@@ -13,6 +13,7 @@ import java.util.UUID;
 public record CommandResponse(
         UUID id,
         int number,
+        int cycleNumber,
         CommandStatus status,
         String customerName,
         String customerPhone,
@@ -28,6 +29,7 @@ public record CommandResponse(
         return new CommandResponse(
                 command.getId(),
                 command.getNumber(),
+                command.getCycleNumber(),
                 command.getStatus(),
                 command.getCustomerName(),
                 command.getCustomerPhone(),

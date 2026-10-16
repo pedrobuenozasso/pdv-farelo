@@ -16,6 +16,7 @@ import com.farelo.api.command.CommandCannotBeClosedException;
 import com.farelo.api.command.CommandNotAvailableException;
 import com.farelo.api.command.CommandNotFoundException;
 import com.farelo.api.command.CommandNotFullyPaidException;
+import com.farelo.api.command.CommandVisitNotCurrentException;
 import com.farelo.api.discount.ItemDiscountNotSupportedException;
 import com.farelo.api.fiscal.CompanyFiscalConfigurationNotFoundException;
 import com.farelo.api.fiscal.FiscalDocumentInvalidTransitionException;
@@ -147,6 +148,12 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleCommandCannotAcceptPayments(CommandCannotAcceptPaymentsException ex) {
         return new ErrorResponse("COMMAND_CANNOT_ACCEPT_PAYMENTS", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(CommandVisitNotCurrentException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleCommandVisitNotCurrent(CommandVisitNotCurrentException ex) {
+        return new ErrorResponse("COMMAND_VISIT_NOT_CURRENT", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     // 409 Conflict: the product exists but is currently not sellable.

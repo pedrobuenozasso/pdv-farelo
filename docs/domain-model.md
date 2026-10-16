@@ -260,14 +260,20 @@ Pacote: `com.farelo.api.command`.
   `@Enumerated(EnumType.STRING)`, nunca `ORDINAL`, para não quebrar se a
   ordem dos valores do enum mudar; default `AVAILABLE`),
   `createdAt`/`updatedAt` (UTC, mesmo padrão dos demais domínios). Tabela
-  criada pela migration `V5__create_command_table.sql`, com `number` `UNIQUE
-  NOT NULL` e `status` como `VARCHAR` + `CHECK` constraint (rigidez extra no
+  criada pela migration `V5__create_command_table.sql`, inicialmente com `number` `UNIQUE
+  NOT NULL`, e `status` como `VARCHAR` + `CHECK` constraint (rigidez extra no
   banco, espelhando os valores do enum Java — trade-off: um novo valor de
   `CommandStatus` no futuro exige uma migration para estender o `CHECK`).
-  Comandas nunca são apagadas — cada ciclo operacional (visita de um
-  cliente) deixa um registro histórico; reabertura/histórico por `number`
-  fica para tickets futuros. `CommandRepository` expõe `findByNumber(int)`,
-  já pensando no FARELO-032.
+  Comandas nunca são apagadas. A migration `V53` adiciona `cycle_number` e
+  substitui a unicidade de `number` por `(number, cycle_number)`, com índice
+  parcial que permite apenas uma visita não fechada por número físico.
+  Assim, cada linha `Command` representa uma visita com UUID próprio; pedidos,
+  pagamentos, descontos e documentos fiscais já apontam para esse UUID e
+  permanecem ligados à visita antiga depois da reabertura. As consultas por
+  número usam o maior `cycle_number`; a lista do PDV traz apenas o ciclo
+  atual. `POST /{number}/open` sobre `CLOSED` cria o próximo ciclo `OPEN`
+  somente para a equipe autenticada, sem herdar cliente, mesa ou saldo.
+  Pedido QR continua incapaz de reabrir sozinho uma comanda fechada.
 - **Seed 1-100** (FARELO-031): migration `V6__seed_commands_1_to_100.sql`
   insere as 100 comandas físicas do estabelecimento (`INSERT INTO command
   (number) SELECT generate_series(1, 100)`), todas com `status` `AVAILABLE`

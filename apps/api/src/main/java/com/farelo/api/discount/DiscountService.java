@@ -220,7 +220,8 @@ public class DiscountService {
         if (order.getCommand() == null) {
             throw new ItemDiscountNotSupportedException(orderId);
         }
-        return commandService.findForPayment(order.getCommand().getNumber());
+        Command current = commandService.requireActiveVisit(order.getCommand());
+        return commandService.findForPayment(current.getNumber());
     }
 
     // Shared by applyFixedAmountToItem/applyPercentageToItem above — the

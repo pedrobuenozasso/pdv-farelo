@@ -19,7 +19,7 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
- * A "comanda" (tab) that tracks a customer's order cycle. Part of the
+ * One visit on a numbered physical "comanda" (tab). Part of the
  * {@code command} domain (see docs/domain-model.md).
  *
  * <p>{@code number} (1-100, see FARELO-031 for the seed) is the
@@ -28,10 +28,11 @@ import java.util.UUID;
  * which is a technical identifier and is never exposed as the public
  * business identifier (prompt mestre seções 7-8).
  *
- * <p>Commands are never deleted — each operational cycle (a customer's
- * visit) leaves a historical record. Reopening/history handling for a
- * number's past cycles is out of scope here and left for future tickets;
- * this entity only models the current row for a given {@code number}.
+ * <p>The same physical number may have several rows, distinguished by
+ * {@code cycleNumber}. Each row has its own UUID, so existing order,
+ * payment, discount and fiscal foreign keys remain attached to the visit
+ * where they happened. The latest cycle is the operational one; earlier
+ * cycles are retained as history.
  *
  * <p>Id generation follows the same strategy as {@link
  * com.farelo.api.catalog.Category} — see its javadoc for why {@code RANDOM}
@@ -79,8 +80,11 @@ public class Command {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
-    @Column(name = "number", nullable = false, unique = true)
+    @Column(name = "number", nullable = false)
     private int number;
+
+    @Column(name = "cycle_number", nullable = false, updatable = false)
+    private int cycleNumber = 1;
 
     // EnumType.STRING, never ORDINAL — storing the ordinal would silently
     // corrupt data if CommandStatus's declaration order ever changes.
@@ -118,6 +122,11 @@ public class Command {
         this.number = number;
     }
 
+    public Command(int number, int cycleNumber) {
+        this.number = number;
+        this.cycleNumber = cycleNumber;
+    }
+
     @PrePersist
     protected void onCreate() {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -136,6 +145,10 @@ public class Command {
 
     public int getNumber() {
         return number;
+    }
+
+    public int getCycleNumber() {
+        return cycleNumber;
     }
 
     public void setNumber(int number) {

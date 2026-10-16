@@ -74,18 +74,45 @@ public class CommandService {
 
     @Transactional(readOnly = true)
     public List<Command> listAll() {
-        return commandRepository.findAllByOrderByNumberAsc();
+        return commandRepository.findCurrentByOrderByNumberAsc();
     }
 
-    // Note: read-check-write without a locking strategy — two near-
-    // simultaneous requests could both read AVAILABLE and both succeed in
-    // opening the same command. Out of scope for this ticket (not
-    // requested); worth revisiting (e.g. @Version optimistic locking) if
-    // concurrent opens on the same number become a real concern.
+    @Transactional(readOnly = true)
+    public List<Command> listVisits(int number) {
+        List<Command> visits = commandRepository.findByNumberOrderByCycleNumberDesc(number);
+        if (visits.isEmpty()) {
+            throw new CommandNotFoundException(number);
+        }
+        return visits;
+    }
+
+    private Command findCurrentForUpdate(int number) {
+        while (true) {
+            Command locked = commandRepository.findFirstByNumberOrderByCycleNumberDesc(number)
+                    .orElseThrow(() -> new CommandNotFoundException(number));
+            // A concurrent reopen can insert the next cycle while this
+            // request waits on the former latest row. Re-read, then lock
+            // again if a newer row appeared instead of returning it unlocked.
+            Command latest = findByNumber(number);
+            if (latest.getId().equals(locked.getId())) {
+                return locked;
+            }
+        }
+    }
+
+    // Lock the current visit before changing it; the database also enforces
+    // one active cycle and one row per (number, cycleNumber).
     @Transactional
     public Command open(int number) {
-        Command command = findByNumber(number);
+        Command command = findCurrentForUpdate(number);
 
+        if (command.getStatus() == CommandStatus.CLOSED) {
+            // A new UUID keeps every existing order/payment/discount/fiscal FK
+            // bound to the closed visit; the new visit starts with no bill.
+            Command next = new Command(number, command.getCycleNumber() + 1);
+            next.setStatus(CommandStatus.OPEN);
+            return commandRepository.saveAndFlush(next);
+        }
         if (command.getStatus() != CommandStatus.AVAILABLE) {
             throw new CommandNotAvailableException(number, command.getStatus());
         }
@@ -94,7 +121,7 @@ public class CommandService {
         return commandRepository.save(command);
     }
 
-    // Same read-check-write caveat as open() above.
+    // The row lock serializes close against new orders and payments.
     @Transactional
     public Command close(int number) {
         Command command = findClosable(number);
@@ -128,8 +155,9 @@ public class CommandService {
      * @throws CommandCannotBeClosedException the comanda exists but its
      *     status isn't in {@link #CLOSABLE_STATUSES}.
      */
+    @Transactional
     public Command findClosable(int number) {
-        Command command = findByNumber(number);
+        Command command = findCurrentForUpdate(number);
 
         if (!CLOSABLE_STATUSES.contains(command.getStatus())) {
             throw new CommandCannotBeClosedException(number, command.getStatus());
@@ -154,10 +182,13 @@ public class CommandService {
      */
     @Transactional
     public Command openForOrdering(int number) {
-        Command command = findByNumber(number);
+        Command command = findCurrentForUpdate(number);
 
         return switch (command.getStatus()) {
-            case AVAILABLE -> open(number);
+            case AVAILABLE -> {
+                command.setStatus(CommandStatus.OPEN);
+                yield commandRepository.save(command);
+            }
             case OPEN -> command;
             case PAYMENT_REQUESTED, CLOSED, BLOCKED ->
                     throw new CommandCannotAcceptOrdersException(number, command.getStatus());
@@ -179,8 +210,9 @@ public class CommandService {
      *     status isn't in {@link #PAYABLE_STATUSES} — see that constant's
      *     comment for the full reasoning.
      */
+    @Transactional
     public Command findForPayment(int number) {
-        Command command = findByNumber(number);
+        Command command = findCurrentForUpdate(number);
 
         if (!PAYABLE_STATUSES.contains(command.getStatus())) {
             throw new CommandCannotAcceptPaymentsException(number, command.getStatus());
@@ -189,13 +221,21 @@ public class CommandService {
         return command;
     }
 
+    /** Locks the physical number and rejects writes through an older visit's UUID. */
+    @Transactional
+    public Command requireActiveVisit(Command original) {
+        Command current = findCurrentForUpdate(original.getNumber());
+        if (!current.getId().equals(original.getId()) || current.getStatus() == CommandStatus.CLOSED) {
+            throw new CommandVisitNotCurrentException(original.getNumber(), original.getCycleNumber());
+        }
+        return current;
+    }
+
     /**
      * Staff-facing edit of a comanda's central customer record
      * (FARELO-190/191, {@code PATCH /api/v1/commands/{number}/customer}).
-     * No status precondition — unlike {@link #open}/{@link #close}, this
-     * isn't a {@code Command} state transition and doesn't need the
-     * comanda to be in any particular status; a cashier can correct a
-     * customer's name/phone at any point in the comanda's lifecycle.
+     * The visit must still be current and not closed, so a correction
+     * cannot rewrite customer data in the historical record.
      *
      * <p>Full replace, same convention as every other {@code PUT}/{@code
      * PATCH} in this codebase that isn't itself a state transition:
@@ -205,7 +245,7 @@ public class CommandService {
      */
     @Transactional
     public Command updateCustomer(int number, String customerName, String customerPhone) {
-        Command command = findByNumber(number);
+        Command command = requireActiveVisit(findByNumber(number));
         applyCustomerInfo(command, customerName, customerPhone);
         return commandRepository.save(command);
     }
@@ -271,10 +311,8 @@ public class CommandService {
 
     /**
      * Staff-facing link/unlink of a comanda's optional {@link DiningTable}
-     * (FARELO-315, {@code PATCH /api/v1/commands/{number}/table}). No
-     * status precondition, same reasoning as {@link #updateCustomer} —
-     * this isn't a {@code Command} state transition, so a cashier can
-     * associate or clear a table at any point in the comanda's lifecycle.
+     * (FARELO-315, {@code PATCH /api/v1/commands/{number}/table}). The
+     * visit must still be current and not closed, like customer edits.
      *
      * <p>Full-replace semantics, same convention as {@link #updateCustomer}:
      * {@code tableNumber == null} clears the association ({@code
@@ -289,7 +327,7 @@ public class CommandService {
      */
     @Transactional
     public Command updateTable(int number, Integer tableNumber) {
-        Command command = findByNumber(number);
+        Command command = requireActiveVisit(findByNumber(number));
         DiningTable table = tableNumber == null ? null : diningTableService.findByNumber(tableNumber);
         command.setTable(table);
         return commandRepository.save(command);
