@@ -166,15 +166,34 @@ class ProductStepControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
-    void requiresAdminOrManagerForReadAndWrite() throws Exception {
+    void staffCanReadButOnlyAdminOrManagerCanWrite() throws Exception {
         Product parent = product("Chá", "13.00");
         Product option = product("Camomila", "0.00");
+        String admin = token(UserRole.ADMIN);
+        mvc.perform(put(path(parent)).header("Authorization", admin)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body(option.getId(), 0, 1, 0, "0.00")))
+                .andExpect(status().isOk());
+
         mvc.perform(get(path(parent))).andExpect(status().isUnauthorized());
         mvc.perform(get(path(parent)).header("Authorization", token(UserRole.CASHIER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].options[0].optionName").value("Camomila"));
+        mvc.perform(get(path(parent)).header("Authorization", token(UserRole.ATTENDANT)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].options[0].price").value(0.00));
+        mvc.perform(get(path(parent)).header("Authorization", token(UserRole.KITCHEN)))
                 .andExpect(status().isForbidden());
         mvc.perform(put(path(parent)).header("Authorization", token(UserRole.CASHIER))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body(option.getId(), 0, 1, 0, "0.00")))
                 .andExpect(status().isForbidden());
+        mvc.perform(put(path(parent)).header("Authorization", token(UserRole.ATTENDANT))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body(option.getId(), 0, 1, 0, "0.00")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get(path(parent)).header("Authorization", admin))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].options[0].optionName").value("Camomila"));
     }
 }

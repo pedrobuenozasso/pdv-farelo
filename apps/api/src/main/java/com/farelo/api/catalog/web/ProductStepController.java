@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.UUID;
 
-/** Separate admin endpoint; public product responses do not include draft steps. */
+/** Staff configuration read for PDV; only Admin/Manager may replace draft steps. */
 @RestController
 @RequestMapping("/api/v1/products/{productId}/steps")
 @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
@@ -28,6 +28,7 @@ public class ProductStepController {
     }
 
     @GetMapping
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.ATTENDANT})
     public List<StepResponse> list(@PathVariable UUID productId) {
         return service.list(productId);
     }

@@ -3147,6 +3147,11 @@ papéis recebem `403 FORBIDDEN`.
 _(demais endpoints a preencher conforme implementados)_
 # Opções configuráveis no pedido (FARELO-323)
 
+`GET /api/v1/products/{productId}/steps` permite leitura autenticada a
+`ADMIN`, `MANAGER`, `CASHIER` e `ATTENDANT` para montagem no PDV. `PUT` no
+mesmo caminho continua restrito a `ADMIN` e `MANAGER`. O endpoint não é
+público; a publicação para o cardápio QR terá uma representação própria.
+
 `POST /api/v1/orders` e `POST /api/v1/orders/balcao` aceitam, em cada item,
 `options: [{"stepId":"uuid","optionId":"uuid","quantity":1}]`. O campo é
 opcional para produtos sem etapas. Para produtos com etapas, o servidor exige
