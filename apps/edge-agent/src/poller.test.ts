@@ -16,6 +16,8 @@ import assert from "node:assert/strict";
 import { pollOnce, type PollerDeps } from "./poller.js";
 import type { PrintJob } from "./printJobsClient.js";
 
+const deviceKey = "test-device-key-32-bytes-long-value";
+
 function makeJob(overrides: Partial<PrintJob> = {}): PrintJob {
   return {
     id: "job-1",
@@ -76,11 +78,15 @@ describe("pollOnce", () => {
   it("imprime via TCP e reporta PRINTED quando a impressão é bem-sucedida", async () => {
     const job = makeJob();
     const printedCalls: string[] = [];
+    const passedKeys: string[] = [];
     const printOverTcpCalls: { host: string; port: number; ticket: Buffer }[] =
       [];
 
     const deps: PollerDeps = {
-      fetchPendingPrintJobs: async () => [job],
+      fetchPendingPrintJobs: async (_apiBaseUrl, key) => {
+        passedKeys.push(key);
+        return [job];
+      },
       resolvePrinterAddress: () => ({ host: "192.168.0.10", port: 9100 }),
       buildEscPosTicket: () => Buffer.from("ticket-bytes"),
       buildCommandCheckEscPosTicket: neverCalled(
@@ -89,15 +95,17 @@ describe("pollOnce", () => {
       printOverTcp: async (host, port, ticket) => {
         printOverTcpCalls.push({ host, port, ticket });
       },
-      reportPrintJobPrinted: async (_apiBaseUrl, jobId) => {
+      reportPrintJobPrinted: async (_apiBaseUrl, jobId, key) => {
         printedCalls.push(jobId);
+        passedKeys.push(key);
       },
       reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
     };
 
-    await pollOnce("http://localhost:8080", deps);
+    await pollOnce("http://localhost:8080", deviceKey, deps);
 
     assert.deepEqual(printedCalls, ["job-1"]);
+    assert.deepEqual(passedKeys, [deviceKey, deviceKey]);
     assert.equal(printOverTcpCalls.length, 1);
     assert.equal(printOverTcpCalls[0]?.host, "192.168.0.10");
     assert.equal(printOverTcpCalls[0]?.port, 9100);
@@ -107,9 +115,13 @@ describe("pollOnce", () => {
   it("reporta FAILED quando nenhum endereço de impressora está configurado para a estação", async () => {
     const job = makeJob();
     const failedCalls: string[] = [];
+    const passedKeys: string[] = [];
 
     const deps: PollerDeps = {
-      fetchPendingPrintJobs: async () => [job],
+      fetchPendingPrintJobs: async (_apiBaseUrl, key) => {
+        passedKeys.push(key);
+        return [job];
+      },
       resolvePrinterAddress: () => null,
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
       buildCommandCheckEscPosTicket: neverCalled(
@@ -117,14 +129,16 @@ describe("pollOnce", () => {
       ),
       printOverTcp: neverCalled("printOverTcp"),
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
-      reportPrintJobFailed: async (_apiBaseUrl, jobId) => {
+      reportPrintJobFailed: async (_apiBaseUrl, jobId, key) => {
         failedCalls.push(jobId);
+        passedKeys.push(key);
       },
     };
 
-    await pollOnce("http://localhost:8080", deps);
+    await pollOnce("http://localhost:8080", deviceKey, deps);
 
     assert.deepEqual(failedCalls, ["job-1"]);
+    assert.deepEqual(passedKeys, [deviceKey, deviceKey]);
   });
 
   it("reporta FAILED quando a impressão via TCP falha (impressora offline/timeout)", async () => {
@@ -147,7 +161,7 @@ describe("pollOnce", () => {
       },
     };
 
-    await pollOnce("http://localhost:8080", deps);
+    await pollOnce("http://localhost:8080", deviceKey, deps);
 
     assert.deepEqual(failedCalls, ["job-1"]);
   });
@@ -170,7 +184,7 @@ describe("pollOnce", () => {
     };
 
     // Não deve lançar/rejeitar — a falha de report é só logada.
-    await pollOnce("http://localhost:8080", deps);
+    await pollOnce("http://localhost:8080", deviceKey, deps);
   });
 
   it("não derruba o processo quando fetchPendingPrintJobs falha (rede/API indisponível)", async () => {
@@ -188,7 +202,7 @@ describe("pollOnce", () => {
       reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
     };
 
-    await pollOnce("http://localhost:8080", deps);
+    await pollOnce("http://localhost:8080", deviceKey, deps);
   });
 
   it("processa múltiplos jobs pendentes de forma independente (um falha, outro é impresso)", async () => {
@@ -235,7 +249,7 @@ describe("pollOnce", () => {
       },
     };
 
-    await pollOnce("http://localhost:8080", deps);
+    await pollOnce("http://localhost:8080", deviceKey, deps);
 
     assert.deepEqual(printedCalls, ["job-ok"]);
     assert.deepEqual(failedCalls, ["job-fail"]);
@@ -270,7 +284,7 @@ describe("pollOnce", () => {
       reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
     };
 
-    await pollOnce("http://localhost:8080", deps);
+    await pollOnce("http://localhost:8080", deviceKey, deps);
 
     assert.deepEqual(printedCalls, ["job-conference-1"]);
     assert.deepEqual(resolveCalls, ["CONFERENCE"]);

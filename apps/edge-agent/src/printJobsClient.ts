@@ -371,8 +371,11 @@ export function formatPrintJobLog(job: PrintJob): string {
  */
 export async function fetchPendingPrintJobs(
   apiBaseUrl: string,
+  deviceKey: string,
 ): Promise<PrintJob[]> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/print-jobs`);
+  const response = await fetch(`${apiBaseUrl}/api/v1/print-jobs`, {
+    headers: { "X-Farelo-Device-Key": deviceKey },
+  });
 
   if (!response.ok) {
     throw new Error(
@@ -395,9 +398,13 @@ async function reportPrintJobOutcome(
   apiBaseUrl: string,
   jobId: string,
   outcome: "printed" | "failed",
+  deviceKey: string,
 ): Promise<void> {
   const path = `/api/v1/print-jobs/${jobId}/${outcome}`;
-  const response = await fetch(`${apiBaseUrl}${path}`, { method: "POST" });
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: "POST",
+    headers: { "X-Farelo-Device-Key": deviceKey },
+  });
 
   if (!response.ok) {
     throw new Error(`POST ${path} falhou com status ${response.status}`);
@@ -408,14 +415,16 @@ async function reportPrintJobOutcome(
 export function reportPrintJobPrinted(
   apiBaseUrl: string,
   jobId: string,
+  deviceKey: string,
 ): Promise<void> {
-  return reportPrintJobOutcome(apiBaseUrl, jobId, "printed");
+  return reportPrintJobOutcome(apiBaseUrl, jobId, "printed", deviceKey);
 }
 
 /** Reporta o `PrintJob` `jobId` como `FAILED`. Ver `reportPrintJobOutcome`. */
 export function reportPrintJobFailed(
   apiBaseUrl: string,
   jobId: string,
+  deviceKey: string,
 ): Promise<void> {
-  return reportPrintJobOutcome(apiBaseUrl, jobId, "failed");
+  return reportPrintJobOutcome(apiBaseUrl, jobId, "failed", deviceKey);
 }

@@ -76,12 +76,19 @@ ESC/POS maduras disponíveis, leve o suficiente para um mini PC dedicado).
 
 ## Configuração
 
-Variáveis de ambiente (nenhuma obrigatória, exceto para imprimir de verdade — ver abaixo):
+Variáveis de ambiente (a chave de dispositivo é obrigatória):
 
 | Variável                             | Default                 | Descrição                                                                                                                                                                  |
 | ------------------------------------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `FARELO_API_BASE_URL`                | `http://localhost:8080` | URL base da API (`apps/api`). Aponte para o backend rodando nativamente (`./mvnw spring-boot:run`) ou via `infra/docker-compose.dev.yml` (porta `8080` publicada no host). |
 | `FARELO_EDGE_AGENT_POLL_INTERVAL_MS` | `5000`                  | Intervalo, em milissegundos, entre consultas a `GET /api/v1/print-jobs`.                                                                                                   |
+| `FARELO_PRINT_DEVICE_KEY`            | sem default             | Chave privada de pelo menos 32 bytes, enviada em `X-Farelo-Device-Key` no GET e nos POST de confirmação/falha. Deve corresponder à configuração privada da API.            |
+
+O agente falha ao iniciar se a chave estiver ausente ou curta. Gere uma chave
+aleatória e guarde-a somente no arquivo privado de ambiente do mini PC,
+protegido com permissão `600`; configure o mesmo valor na API. Não inclua a
+chave em comandos de exemplo, logs ou Git. Ao conectar o mini PC a uma API
+remota, use HTTPS ou túnel privado, pois o cabeçalho autentica a impressora.
 
 ### Endereços de impressora por estação (FARELO-078)
 
@@ -137,6 +144,8 @@ novo a cada ciclo, sem crashar.
 ```bash
 cd apps/edge-agent
 npm install
+
+# Carregue FARELO_PRINT_DEVICE_KEY de um arquivo privado antes de iniciar.
 
 # desenvolvimento (recarrega a cada mudança, via tsx)
 npm run dev

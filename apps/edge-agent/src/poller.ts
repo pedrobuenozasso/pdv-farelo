@@ -65,6 +65,7 @@ const CONFERENCE_STATION_KEY = "CONFERENCE";
 export type PollerOptions = {
   apiBaseUrl: string;
   pollIntervalMs: number;
+  deviceKey: string;
 };
 
 export type PollerDeps = {
@@ -102,6 +103,7 @@ async function printJob(
   apiBaseUrl: string,
   job: PrintJob,
   deps: PollerDeps,
+  deviceKey: string,
 ): Promise<void> {
   try {
     // FARELO-210/211: qual estação resolve o endereço da impressora, e qual
@@ -127,7 +129,7 @@ async function printJob(
         : deps.buildEscPosTicket(job.content!);
     await deps.printOverTcp(address.host, address.port, ticket);
 
-    await deps.reportPrintJobPrinted(apiBaseUrl, job.id);
+    await deps.reportPrintJobPrinted(apiBaseUrl, job.id, deviceKey);
     console.log(
       `  → PrintJob ${job.id} impresso em ${address.host}:${address.port} ` +
         `e reportado como PRINTED.`,
@@ -137,7 +139,7 @@ async function printJob(
     console.error(`  → Falha ao imprimir PrintJob ${job.id}: ${reason}`);
 
     try {
-      await deps.reportPrintJobFailed(apiBaseUrl, job.id);
+      await deps.reportPrintJobFailed(apiBaseUrl, job.id, deviceKey);
       console.log(`  → PrintJob ${job.id} reportado como FAILED.`);
     } catch (reportError) {
       console.error(
@@ -152,10 +154,11 @@ async function printJob(
 /** Um ciclo de polling: busca jobs pendentes e tenta imprimir/reportar cada um. Exportado para teste (ver `poller.test.ts`). */
 export async function pollOnce(
   apiBaseUrl: string,
+  deviceKey: string,
   deps: PollerDeps = defaultDeps,
 ): Promise<void> {
   try {
-    const jobs = await deps.fetchPendingPrintJobs(apiBaseUrl);
+    const jobs = await deps.fetchPendingPrintJobs(apiBaseUrl, deviceKey);
 
     if (jobs.length === 0) {
       console.log("Nenhum PrintJob pendente.");
@@ -165,7 +168,7 @@ export async function pollOnce(
     console.log(`${jobs.length} PrintJob(s) pendente(s):`);
     for (const job of jobs) {
       console.log(`  ${formatPrintJobLog(job)}`);
-      await printJob(apiBaseUrl, job, deps);
+      await printJob(apiBaseUrl, job, deps, deviceKey);
     }
   } catch (error) {
     // Rede indisponível, API fora do ar ou resposta malformada: loga e
@@ -187,9 +190,9 @@ export function startPolling(
   options: PollerOptions,
   deps: PollerDeps = defaultDeps,
 ): () => void {
-  void pollOnce(options.apiBaseUrl, deps);
+  void pollOnce(options.apiBaseUrl, options.deviceKey, deps);
   const timer = setInterval(
-    () => void pollOnce(options.apiBaseUrl, deps),
+    () => void pollOnce(options.apiBaseUrl, options.deviceKey, deps),
     options.pollIntervalMs,
   );
   return () => clearInterval(timer);

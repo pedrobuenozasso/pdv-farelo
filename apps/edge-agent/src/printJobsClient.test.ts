@@ -27,9 +27,12 @@ import assert from "node:assert/strict";
 import {
   parsePrintJobs,
   formatPrintJobLog,
+  fetchPendingPrintJobs,
   reportPrintJobPrinted,
   reportPrintJobFailed,
 } from "./printJobsClient.js";
+
+const deviceKey = "test-device-key-32-bytes-long-value";
 
 // Fixture: exatamente o JSON de exemplo do contrato do endpoint
 // (docs/PROMPT_MESTRE.md / ticket FARELO-076; type/commandNumber/
@@ -281,7 +284,7 @@ describe("reportPrintJobPrinted / reportPrintJobFailed", () => {
   it("reportPrintJobPrinted faz POST em /print-jobs/{id}/printed sem corpo", async () => {
     stubFetch(200);
 
-    await reportPrintJobPrinted("http://localhost:8080", "job-1");
+    await reportPrintJobPrinted("http://localhost:8080", "job-1", deviceKey);
 
     assert.equal(calls.length, 1);
     assert.equal(
@@ -290,12 +293,16 @@ describe("reportPrintJobPrinted / reportPrintJobFailed", () => {
     );
     assert.equal(calls[0]?.init?.method, "POST");
     assert.equal(calls[0]?.init?.body, undefined);
+    assert.equal(
+      new Headers(calls[0]?.init?.headers).get("X-Farelo-Device-Key"),
+      deviceKey,
+    );
   });
 
   it("reportPrintJobFailed faz POST em /print-jobs/{id}/failed sem corpo", async () => {
     stubFetch(200);
 
-    await reportPrintJobFailed("http://localhost:8080", "job-2");
+    await reportPrintJobFailed("http://localhost:8080", "job-2", deviceKey);
 
     assert.equal(calls.length, 1);
     assert.equal(
@@ -303,14 +310,46 @@ describe("reportPrintJobPrinted / reportPrintJobFailed", () => {
       "http://localhost:8080/api/v1/print-jobs/job-2/failed",
     );
     assert.equal(calls[0]?.init?.method, "POST");
+    assert.equal(
+      new Headers(calls[0]?.init?.headers).get("X-Farelo-Device-Key"),
+      deviceKey,
+    );
   });
 
   it("lança um erro quando a resposta não é 2xx", async () => {
     stubFetch(500);
 
     await assert.rejects(
-      () => reportPrintJobPrinted("http://localhost:8080", "job-3"),
+      () => reportPrintJobPrinted("http://localhost:8080", "job-3", deviceKey),
       /falhou com status 500/,
+    );
+  });
+});
+
+describe("fetchPendingPrintJobs device key", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("envia a credencial na consulta de jobs", async () => {
+    let capturedHeaders: RequestInit["headers"];
+    global.fetch = (async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      capturedHeaders = init?.headers;
+      return Response.json([]);
+    }) as typeof fetch;
+
+    assert.deepEqual(
+      await fetchPendingPrintJobs("http://localhost:8080", deviceKey),
+      [],
+    );
+    assert.equal(
+      new Headers(capturedHeaders).get("X-Farelo-Device-Key"),
+      deviceKey,
     );
   });
 });

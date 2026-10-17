@@ -8,7 +8,21 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { resolvePrinterAddress } from "./config.js";
+import { loadConfig, resolvePrinterAddress } from "./config.js";
+
+describe("loadConfig device key", () => {
+  it("exige uma chave de dispositivo com pelo menos 32 bytes", () => {
+    assert.throws(() => loadConfig({}), /FARELO_PRINT_DEVICE_KEY/);
+    assert.throws(
+      () => loadConfig({ FARELO_PRINT_DEVICE_KEY: "short" }),
+      /32 bytes/,
+    );
+    assert.equal(
+      loadConfig({ FARELO_PRINT_DEVICE_KEY: "a".repeat(32) }).deviceKey,
+      "a".repeat(32),
+    );
+  });
+});
 
 describe("resolvePrinterAddress", () => {
   it("resolve o endereço específico da estação quando configurado", () => {

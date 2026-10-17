@@ -61,6 +61,7 @@
 export type Config = {
   apiBaseUrl: string;
   pollIntervalMs: number;
+  deviceKey: string;
 };
 
 export type PrinterAddress = {
@@ -75,6 +76,10 @@ const PRINTER_ENV_PREFIX = "FARELO_PRINTER_";
 const DEFAULT_STATION_ENV_KEY = "DEFAULT";
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const deviceKey = env.FARELO_PRINT_DEVICE_KEY;
+  if (!deviceKey || Buffer.byteLength(deviceKey, "utf8") < 32) {
+    throw new Error("FARELO_PRINT_DEVICE_KEY deve ter no mínimo 32 bytes.");
+  }
   const rawApiBaseUrl = env.FARELO_API_BASE_URL?.trim();
   const apiBaseUrl =
     rawApiBaseUrl && rawApiBaseUrl.length > 0
@@ -88,7 +93,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ? parsedPollInterval
       : DEFAULT_POLL_INTERVAL_MS;
 
-  return { apiBaseUrl, pollIntervalMs };
+  return { apiBaseUrl, pollIntervalMs, deviceKey };
 }
 
 /**
