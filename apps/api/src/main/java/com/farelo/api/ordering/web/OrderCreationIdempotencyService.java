@@ -3,6 +3,7 @@ package com.farelo.api.ordering.web;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandService;
 import com.farelo.api.ordering.NewOrderItem;
+import com.farelo.api.ordering.NewOrderOption;
 import com.farelo.api.ordering.OrderService;
 import com.farelo.api.ordering.OrderWithItems;
 import com.farelo.api.security.UserRole;
@@ -53,7 +54,7 @@ public class OrderCreationIdempotencyService {
                 request.customerPhone(), request.note(), request.printOnConfirmOrDefault(),
                 visit.getId(), keyHeader, () -> {
             List<NewOrderItem> items = request.items().stream()
-                    .map(item -> new NewOrderItem(item.productId(), item.quantity()))
+                    .map(this::toNewOrderItem)
                     .toList();
             return orderService.create(request.commandNumber(), items, request.customerName(),
                     request.customerPhone(), request.note(), request.printOnConfirmOrDefault());
@@ -66,7 +67,7 @@ public class OrderCreationIdempotencyService {
                 request.customerPhone(), request.note(), request.printOnConfirmOrDefault(),
                 null, keyHeader, () -> {
             List<NewOrderItem> items = request.items().stream()
-                    .map(item -> new NewOrderItem(item.productId(), item.quantity()))
+                    .map(this::toNewOrderItem)
                     .toList();
             return orderService.createBalcao(items, request.customerName(), request.customerPhone(),
                     request.note(), request.printOnConfirmOrDefault());
@@ -111,6 +112,14 @@ public class OrderCreationIdempotencyService {
                 WHERE idempotency_key = ?
                 """, response.id(), serialize(response), key);
         return response;
+    }
+
+    private NewOrderItem toNewOrderItem(OrderItemRequest item) {
+        return new NewOrderItem(item.productId(), item.quantity(),
+                item.options() == null ? List.of() : item.options().stream()
+                        .map(option -> new NewOrderOption(option.stepId(), option.optionId(),
+                                option.quantity()))
+                        .toList());
     }
 
     private UUID parseKey(String header) {

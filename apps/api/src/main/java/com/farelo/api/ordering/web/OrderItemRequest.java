@@ -1,8 +1,11 @@
 package com.farelo.api.ordering.web;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -17,5 +20,7 @@ import java.util.UUID;
  */
 public record OrderItemRequest(
         @NotNull UUID productId,
-        @Positive int quantity) {
+        @Positive int quantity,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        List<@NotNull @Valid OrderOptionRequest> options) {
 }

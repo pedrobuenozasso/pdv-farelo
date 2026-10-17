@@ -6,6 +6,7 @@ import com.farelo.api.ordering.OrderItemCancelReason;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import java.util.List;
 
 /**
  * Response body for one order line item — the JPA entity is never exposed
@@ -34,7 +35,8 @@ public record OrderItemResponse(
         OffsetDateTime cancelledAt,
         String cancelledByUserName,
         OrderItemCancelReason cancelReason,
-        String cancelDescription) {
+        String cancelDescription,
+        List<OrderOptionResponse> options) {
 
     public static OrderItemResponse from(OrderItem orderItem) {
         return new OrderItemResponse(
@@ -47,7 +49,8 @@ public record OrderItemResponse(
                 orderItem.getCancelledAt(),
                 orderItem.getCancelledByUserName(),
                 orderItem.getCancelReason(),
-                orderItem.getCancelDescription());
+                orderItem.getCancelDescription(),
+                orderItem.getOptions().stream().map(OrderOptionResponse::from).toList());
     }
 
 }

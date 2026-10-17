@@ -1,6 +1,7 @@
 package com.farelo.api.ordering;
 
 import java.util.UUID;
+import java.util.List;
 
 /**
  * Service-layer input for one line item when creating an {@link Order} —
@@ -9,5 +10,12 @@ import java.util.UUID;
  * than {@code @Valid}-annotated request DTOs (see {@code ProductService},
  * {@code CommandService}).
  */
-public record NewOrderItem(UUID productId, int quantity) {
+public record NewOrderItem(UUID productId, int quantity, List<NewOrderOption> options) {
+    public NewOrderItem(UUID productId, int quantity) {
+        this(productId, quantity, List.of());
+    }
+
+    public NewOrderItem {
+        options = options == null ? List.of() : List.copyOf(options);
+    }
 }

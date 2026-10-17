@@ -5989,3 +5989,13 @@ indireção. Revisitar com um registro de handlers quando um **terceiro**
 consumidor real aparecer (`inventory` reagindo a `OrderCreated`, ou
 `STOCK_LOW`/`STOCK_CRITICAL`/`OUT_OF_STOCK` alimentando `notification` —
 FARELO-113 e além).
+# Snapshot de opções do pedido (FARELO-323)
+
+`order_item_option` armazena uma linha por opção selecionada, vinculada ao
+`order_item`, com IDs e nomes da etapa e da opção, ID do produto da opção,
+quantidade e preço unitário congelados. Não mantém chaves estrangeiras para
+as tabelas atuais do catálogo, de modo que edições posteriores não alterem
+o histórico da venda. `order_item.unit_price` contém o preço-base somado aos
+adicionais por unidade do item; os cálculos de cobrança existentes usam esse
+snapshot. A duplicação de item configurável replica preço e opções históricos;
+itens simples preservam o comportamento anterior de preço atual.

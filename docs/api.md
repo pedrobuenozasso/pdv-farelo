@@ -3145,3 +3145,16 @@ aplicar descontos. Sem token válido retorna `401 UNAUTHENTICATED`; outros
 papéis recebem `403 FORBIDDEN`.
 
 _(demais endpoints a preencher conforme implementados)_
+# Opções configuráveis no pedido (FARELO-323)
+
+`POST /api/v1/orders` e `POST /api/v1/orders/balcao` aceitam, em cada item,
+`options: [{"stepId":"uuid","optionId":"uuid","quantity":1}]`. O campo é
+opcional para produtos sem etapas. Para produtos com etapas, o servidor exige
+os mínimos e máximos de cada etapa, rejeita opções repetidas, opções de outro
+produto e opções ligadas a produtos inativos (`400 ORDER_OPTION_INVALID`).
+O preço unitário congelado do item é o preço-base do produto somado ao preço
+do vínculo de cada opção multiplicado pela quantidade da opção. A quantidade
+do item multiplica esse preço unitário no total da comanda. A resposta inclui
+`items[].options[]` com IDs, nomes, quantidades e preços congelados; alterar o
+catálogo depois não altera pedidos anteriores. A chave de idempotência também
+identifica as escolhas: reutilizá-la com opções diferentes retorna conflito.

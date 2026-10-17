@@ -11,6 +11,7 @@ import com.farelo.api.catalog.CategoryNotFoundException;
 import com.farelo.api.catalog.ProductNotAvailableException;
 import com.farelo.api.catalog.ProductNotFoundException;
 import com.farelo.api.catalog.ProductStepConfigurationException;
+import com.farelo.api.ordering.OrderOptionInvalidException;
 import com.farelo.api.command.CommandCannotAcceptOrdersException;
 import com.farelo.api.command.CommandCannotAcceptPaymentsException;
 import com.farelo.api.command.CommandCannotBeClosedException;
@@ -107,6 +108,12 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ErrorResponse handleProductStepConfiguration(ProductStepConfigurationException ex) {
         return new ErrorResponse("PRODUCT_STEP_INVALID", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(OrderOptionInvalidException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleOrderOptionInvalid(OrderOptionInvalidException ex) {
+        return new ErrorResponse("ORDER_OPTION_INVALID", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     @ExceptionHandler(CommandNotFoundException.class)

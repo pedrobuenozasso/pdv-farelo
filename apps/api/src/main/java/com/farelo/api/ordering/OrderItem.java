@@ -2,6 +2,7 @@ package com.farelo.api.ordering;
 
 import com.farelo.api.catalog.Product;
 import jakarta.persistence.Column;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -9,6 +10,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.UuidGenerator;
@@ -17,6 +19,8 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A line item within an {@link Order}: a quantity of a {@link Product} sold
@@ -80,6 +84,9 @@ public class OrderItem {
     // Frozen at sale time — never product.getPrice(). See class javadoc.
     @Column(name = "unit_price", nullable = false, precision = 10, scale = 2)
     private BigDecimal unitPrice;
+
+    @OneToMany(mappedBy = "orderItem", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+    private List<OrderItemOption> options = new ArrayList<>();
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -146,6 +153,20 @@ public class OrderItem {
 
     public BigDecimal getUnitPrice() {
         return unitPrice;
+    }
+
+    public List<OrderItemOption> getOptions() {
+        return List.copyOf(options);
+    }
+
+    public void addOption(com.farelo.api.catalog.ProductStepOption option, int quantity) {
+        options.add(new OrderItemOption(this, option, quantity));
+    }
+
+    public void copyOptionsFrom(OrderItem source) {
+        for (OrderItemOption option : source.getOptions()) {
+            options.add(new OrderItemOption(this, option));
+        }
     }
 
     public void setUnitPrice(BigDecimal unitPrice) {

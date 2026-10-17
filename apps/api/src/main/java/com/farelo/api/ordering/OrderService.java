@@ -4,6 +4,10 @@ import com.farelo.api.audit.AuditLogService;
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductNotAvailableException;
 import com.farelo.api.catalog.ProductService;
+import com.farelo.api.catalog.ProductStep;
+import com.farelo.api.catalog.ProductStepOption;
+import com.farelo.api.catalog.ProductStepOptionRepository;
+import com.farelo.api.catalog.ProductStepRepository;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandService;
 import com.farelo.api.inventory.InventoryMovementService;
@@ -18,7 +22,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -63,6 +70,8 @@ public class OrderService {
     private final OrderStatusHistoryRepository orderStatusHistoryRepository;
     private final CommandService commandService;
     private final ProductService productService;
+    private final ProductStepRepository productStepRepository;
+    private final ProductStepOptionRepository productStepOptionRepository;
     private final OutboxPublisher outboxPublisher;
     private final InventoryMovementService inventoryMovementService;
     private final UserService userService;
@@ -75,6 +84,8 @@ public class OrderService {
             OrderStatusHistoryRepository orderStatusHistoryRepository,
             CommandService commandService,
             ProductService productService,
+            ProductStepRepository productStepRepository,
+            ProductStepOptionRepository productStepOptionRepository,
             OutboxPublisher outboxPublisher,
             InventoryMovementService inventoryMovementService,
             UserService userService,
@@ -85,6 +96,8 @@ public class OrderService {
         this.orderStatusHistoryRepository = orderStatusHistoryRepository;
         this.commandService = commandService;
         this.productService = productService;
+        this.productStepRepository = productStepRepository;
+        this.productStepOptionRepository = productStepOptionRepository;
         this.outboxPublisher = outboxPublisher;
         this.inventoryMovementService = inventoryMovementService;
         this.userService = userService;
@@ -237,11 +250,18 @@ public class OrderService {
                 throw new ProductNotAvailableException(product.getId());
             }
 
-            // Price snapshot: unitPrice is frozen from product.getPrice()
-            // at this exact moment — never a live reference to Product. If
-            // the product's price changes later, this OrderItem keeps the
-            // price captured here (AGENTS.md price-snapshot convention).
-            OrderItem item = new OrderItem(order, product, newItem.quantity(), product.getPrice());
+            // Price snapshot: base price plus selected link prices. Both are
+            // frozen now, never read from the catalog for this sale again.
+            List<ProductStepOption> selected = validateAndResolveOptions(product, newItem.options());
+            BigDecimal unitPrice = product.getPrice();
+            for (int index = 0; index < selected.size(); index++) {
+                unitPrice = unitPrice.add(selected.get(index).getPrice()
+                        .multiply(BigDecimal.valueOf(newItem.options().get(index).quantity())));
+            }
+            OrderItem item = new OrderItem(order, product, newItem.quantity(), unitPrice);
+            for (int index = 0; index < selected.size(); index++) {
+                item.addOption(selected.get(index), newItem.options().get(index).quantity());
+            }
             items.add(orderItemRepository.save(item));
         }
 
@@ -258,6 +278,50 @@ public class OrderService {
         outboxPublisher.publish("Order", order.getId(), "OrderCreated", OrderCreatedEvent.from(result));
 
         return result;
+    }
+
+    private List<ProductStepOption> validateAndResolveOptions(Product product, List<NewOrderOption> choices) {
+        List<ProductStep> steps = productStepRepository.findByProductIdOrderByDisplayOrderAsc(product.getId());
+        Map<UUID, ProductStep> byStepId = new HashMap<>();
+        Map<UUID, ProductStepOption> byOptionId = new HashMap<>();
+        for (ProductStep step : steps) {
+            byStepId.put(step.getId(), step);
+            for (ProductStepOption option : productStepOptionRepository.findByStepIdOrderByDisplayOrderAsc(step.getId())) {
+                byOptionId.put(option.getId(), option);
+            }
+        }
+
+        Map<UUID, Integer> counts = new HashMap<>();
+        HashSet<UUID> seenOptions = new HashSet<>();
+        List<ProductStepOption> selected = new ArrayList<>();
+        for (NewOrderOption choice : choices) {
+            if (choice == null || choice.stepId() == null || choice.optionId() == null
+                    || choice.quantity() <= 0 || !seenOptions.add(choice.optionId())) {
+                throw new OrderOptionInvalidException("Opção repetida ou inválida");
+            }
+            ProductStep step = byStepId.get(choice.stepId());
+            ProductStepOption option = byOptionId.get(choice.optionId());
+            if (step == null || option == null || !option.getStep().getId().equals(step.getId())) {
+                throw new OrderOptionInvalidException("Opção não pertence a uma etapa deste produto");
+            }
+            if (!option.getOptionProduct().isActive()) {
+                throw new OrderOptionInvalidException("Opção indisponível: " + option.getOptionProduct().getName());
+            }
+            int total = counts.getOrDefault(step.getId(), 0);
+            if (choice.quantity() > step.getMaxChoices() - total) {
+                throw new OrderOptionInvalidException("Limite de escolhas excedido na etapa '" + step.getLabel() + "'");
+            }
+            counts.put(step.getId(), total + choice.quantity());
+            selected.add(option);
+        }
+        for (ProductStep step : steps) {
+            int count = counts.getOrDefault(step.getId(), 0);
+            if (count < step.getMinChoices() || count > step.getMaxChoices()) {
+                throw new OrderOptionInvalidException("Etapa '" + step.getLabel()
+                        + "' exige entre " + step.getMinChoices() + " e " + step.getMaxChoices() + " escolhas");
+            }
+        }
+        return selected;
     }
 
     /**
@@ -619,7 +683,11 @@ public class OrderService {
             throw new ProductNotAvailableException(product.getId());
         }
 
-        OrderItem duplicate = new OrderItem(order, product, original.getQuantity(), product.getPrice());
+        // Duplicate the full historical choice/price snapshot. Repricing only the
+        // parent would otherwise silently drop configured options from the line.
+        OrderItem duplicate = new OrderItem(order, product, original.getQuantity(),
+                original.getOptions().isEmpty() ? product.getPrice() : original.getUnitPrice());
+        duplicate.copyOptionsFrom(original);
         return orderItemRepository.save(duplicate);
     }
 
