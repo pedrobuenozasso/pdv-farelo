@@ -18,17 +18,19 @@ Este documento é preenchido conforme cada endpoint é criado.
 
 ### Autenticação/RBAC (FARELO-121/122/123/124/127)
 
-A API usa negação por padrão: cada handler declara `@RequireRole` ou
-`@PublicEndpoint`. A ausência das duas políticas falha fechada. Endpoints
+A API usa negação por padrão: cada handler declara `@RequireRole`,
+`@RequireDeviceKey` ou `@PublicEndpoint`. A ausência de política falha fechada. Endpoints
 protegidos exigem `Authorization: Bearer <token>` obtido em
 `POST /api/v1/auth/login`. Sem token válido retornam `401 UNAUTHENTICATED`;
 com papel insuficiente, `403 FORBIDDEN`.
 
 As exceções públicas explícitas são login, leitura do catálogo, status mínimo
-da comanda, criação de pedido com prova do QR da visita atual e as três rotas
-do Edge Agent (`GET /print-jobs`, `POST /print-jobs/{id}/printed` e
-`POST /print-jobs/{id}/failed`). As rotas do Edge Agent ainda precisam de
-autenticação máquina-a-máquina antes de publicar a API. Leituras de saldo e
+da comanda e criação de pedido com prova do QR da visita atual. As rotas do
+Edge Agent (`GET /print-jobs`, `POST /print-jobs/{id}/printed` e
+`POST /print-jobs/{id}/failed`) exigem `X-Farelo-Device-Key` com o segredo
+`FARELO_PRINT_DEVICE_KEY` configurado no servidor (mínimo 32 bytes). Sem
+configuração ou com chave incorreta, retornam `401 UNAUTHENTICATED`. O token
+JWT de um operador não substitui a chave do dispositivo. Leituras de saldo e
 movimentações de estoque exigem `ADMIN` ou `MANAGER`.
 
 ## Endpoints
@@ -961,12 +963,9 @@ Farelo Edge Agent (FARELO-075, `apps/edge-agent`) para saber o que ainda
 precisa ser impresso: `Order criado → PrintJob PENDING → Edge Agent →
 impressora → PRINTED` (prompt mestre seção 10).
 
-**Sem marca "Requer"** (FARELO-124) — deliberadamente sem RBAC: chamado
-exclusivamente pelo Farelo Edge Agent, um processo de máquina sem login
-(verificado contra `apps/edge-agent/src/printJobsClient.ts`), nunca por
-uma pessoa. Ver a subseção FARELO-124 de `docs/domain-model.md` para o
-raciocínio completo sobre por que RBAC não se aplica a um endpoint
-machine-to-machine.
+**Requer chave de dispositivo** no header `X-Farelo-Device-Key` (FARELO-076/077).
+O Edge Agent deve receber o mesmo segredo por configuração privada, fora do Git.
+Sem chave válida, retorna `401 UNAUTHENTICATED`.
 
 Sem query param de status: mesma lógica de `GET /api/v1/orders` (a fila da
 cozinha) — o propósito inteiro deste endpoint já é "o que está pendente",
@@ -1014,6 +1013,13 @@ Lista vazia (`[]`) quando não há `PrintJob`s pendentes.
 Sem erros específicos — sempre `200 OK` (lista, potencialmente vazia; sem
 parâmetro de path para validar), mesmo formato de `GET /api/v1/orders`.
 
+### `GET /api/v1/print-jobs/staff`
+
+Retorna a mesma fila pendente para o painel administrativo de impressoras.
+**Requer `Authorization: Bearer <token>` de `ADMIN` ou `MANAGER`**; a chave
+do dispositivo sozinha não autoriza esta rota. O painel Admin deve chamar
+esta rota em vez do endpoint de máquina acima.
+
 ### `POST /api/v1/print-jobs/{id}/printed`
 
 Reporta que o Edge Agent imprimiu o ticket com sucesso: transição de status
@@ -1023,9 +1029,8 @@ Fecha o ciclo aberto pelo FARELO-076 (`GET /api/v1/print-jobs`): o Edge
 Agent consultava os `PrintJob`s pendentes, mas nunca reportava de volta o
 resultado — os jobs ficavam `PENDING` para sempre.
 
-**Sem marca "Requer"** (FARELO-124) — mesmo raciocínio de
-`GET /api/v1/print-jobs` acima: endpoint machine-to-machine chamado só
-pelo Edge Agent.
+**Requer `X-Farelo-Device-Key`** — a mesma credencial de dispositivo
+do `GET /api/v1/print-jobs`; uma credencial ausente ou incorreta recebe `401`.
 
 Mesma razão para `POST` em vez de `PATCH` dos demais endpoints de ação
 deste projeto (ex: `/api/v1/orders/{id}/deliver`/`/cancel`): é uma ação,
@@ -1059,9 +1064,8 @@ com `status: "PRINTED"`.
 Reporta que o Edge Agent falhou ao imprimir o ticket: transição de status
 `PENDING` → `FAILED`. (FARELO-077)
 
-**Sem marca "Requer"** (FARELO-124) — mesmo raciocínio de
-`GET /api/v1/print-jobs`/`.../printed` acima: endpoint machine-to-machine
-chamado só pelo Edge Agent.
+**Requer `X-Farelo-Device-Key`** — a mesma credencial de dispositivo
+do `GET /api/v1/print-jobs`; uma credencial ausente ou incorreta recebe `401`.
 
 Mesma razão para `POST` em vez de `PATCH`, e mesmo formato de resposta/erros
 de `/printed` acima. Sem corpo de requisição: nenhum motivo estruturado da

@@ -13,7 +13,7 @@ import java.util.Arrays;
 
 /**
  * Enforces the explicit access policy of each Spring MVC API handler.
- * A handler must have {@link RequireRole} or {@link PublicEndpoint};
+ * A handler must have {@link RequireRole}, {@link RequireDeviceKey}, or {@link PublicEndpoint};
  * an unclassified handler fails closed. Role-protected handlers validate
  * the Bearer token and expose the verified principal to argument resolvers.
  * Non-{@link HandlerMethod} infrastructure handlers pass through.
@@ -32,11 +32,15 @@ public class RoleAuthorizationInterceptor implements HandlerInterceptor {
 
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
+    private static final String DEVICE_KEY_HEADER = "X-Farelo-Device-Key";
 
     private final JwtTokenService jwtTokenService;
+    private final PrintingDeviceKeyVerifier printingDeviceKeyVerifier;
 
-    public RoleAuthorizationInterceptor(JwtTokenService jwtTokenService) {
+    public RoleAuthorizationInterceptor(JwtTokenService jwtTokenService,
+                                        PrintingDeviceKeyVerifier printingDeviceKeyVerifier) {
         this.jwtTokenService = jwtTokenService;
+        this.printingDeviceKeyVerifier = printingDeviceKeyVerifier;
     }
 
     @Override
@@ -47,6 +51,11 @@ public class RoleAuthorizationInterceptor implements HandlerInterceptor {
 
         RequireRole requireRole = resolveRequireRole(handlerMethod);
         if (requireRole == null) {
+            if (handlerMethod.hasMethodAnnotation(RequireDeviceKey.class)
+                    || handlerMethod.getBeanType().isAnnotationPresent(RequireDeviceKey.class)) {
+                printingDeviceKeyVerifier.verify(request.getHeader(DEVICE_KEY_HEADER));
+                return true;
+            }
             if (handlerMethod.hasMethodAnnotation(PublicEndpoint.class)
                     || handlerMethod.getBeanType().isAnnotationPresent(PublicEndpoint.class)) {
                 return true;

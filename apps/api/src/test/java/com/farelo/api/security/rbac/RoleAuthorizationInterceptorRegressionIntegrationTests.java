@@ -71,16 +71,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@code OrderController}'s javadoc) and has been replaced below by
  * {@link #kitchenQueueNowRequiresAuthentication()}, proving the new
  * boundary instead of the old absence of one. What this class still proves
- * — the actual point of a regression suite — is that FARELO-124's blast
- * radius stopped exactly where the ticket intended: the public "Cardápio
- * QR" dependencies ({@link #commandLookupStillWorksWithNoAuthorizationHeader()},
- * {@link #orderCreationWithQrProofWorksWithoutStaffLogin()}) and the Edge
- * Agent machine endpoints ({@link #pendingPrintJobsStillWorkWithNoAuthorizationHeader()},
- * {@link #markPrintedStillWorksWithNoAuthorizationHeader()},
- * {@link #markFailedStillWorksWithNoAuthorizationHeader()}) still work with
- * no staff login; order creation now carries the current visit's QR proof.
- * Edge Agent endpoints remain without token, as documented in their
- * controller.
+ * — the actual point of a regression suite — is that public Cardápio QR
+ * dependencies still work without staff login, while machine print-job
+ * endpoints reject calls without their separate device credential.
  *
  * <h2>FARELO-127 — the first (and only) two {@code inventory} write
  * endpoints to gain {@code @RequireRole}</h2>
@@ -366,32 +359,26 @@ class RoleAuthorizationInterceptorRegressionIntegrationTests extends AbstractInt
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
 
-    // FARELO-124: PrintJobController#pending/markPrinted/markFailed are
-    // deliberately left WITHOUT @RequireRole — called exclusively by the
-    // Farelo Edge Agent, a machine with no user login (see
-    // PrintJobController's javadoc). Only #retry, a human-triggered
-    // action, requires a role.
+    // Device endpoints fail closed even if an unknown print-job id is supplied.
     @Test
-    void pendingPrintJobsStillWorkWithNoAuthorizationHeader() throws Exception {
+    void pendingPrintJobsRejectRequestsWithoutDeviceKey() throws Exception {
         mockMvc.perform(get("/api/v1/print-jobs"))
-                .andExpect(status().isOk());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
-    void markPrintedStillWorksWithNoAuthorizationHeader() throws Exception {
-        // Unknown id -> 404, not 401/403 — proves the request reached the
-        // handler (and therefore skipped RBAC entirely) rather than merely
-        // returning "some 4xx".
+    void markPrintedRejectsRequestsWithoutDeviceKey() throws Exception {
+        // Authentication runs before lookup of the unknown job id.
         mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", UUID.randomUUID()))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("PRINT_JOB_NOT_FOUND"));
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
 
     @Test
-    void markFailedStillWorksWithNoAuthorizationHeader() throws Exception {
+    void markFailedRejectsRequestsWithoutDeviceKey() throws Exception {
         mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", UUID.randomUUID()))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("PRINT_JOB_NOT_FOUND"));
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
 
 }

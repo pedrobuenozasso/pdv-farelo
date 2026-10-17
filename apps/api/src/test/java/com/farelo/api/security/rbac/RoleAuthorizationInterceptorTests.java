@@ -33,7 +33,7 @@ import static org.mockito.Mockito.when;
 class RoleAuthorizationInterceptorTests {
 
     private final JwtTokenService jwtTokenService = mock(JwtTokenService.class);
-    private final RoleAuthorizationInterceptor interceptor = new RoleAuthorizationInterceptor(jwtTokenService);
+    private final RoleAuthorizationInterceptor interceptor = new RoleAuthorizationInterceptor(jwtTokenService, mock(PrintingDeviceKeyVerifier.class));
 
     private final HttpServletRequest request = mock(HttpServletRequest.class);
     private final HttpServletResponse response = mock(HttpServletResponse.class);

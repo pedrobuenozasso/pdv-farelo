@@ -3067,9 +3067,10 @@ uma leitura literal do ticket sugeriria.
 | `POST /api/v1/orders/{id}/deliver` | `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT` | Ação de frente de loja (entregar ao cliente); `KITCHEN` fora, oposto de `preparing`/`ready` |
 | `POST /api/v1/orders/{id}/cancel` | `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT` | Mesma tela/persona de `deliver` (`apps/web/src/app/pdv/page.tsx`, `OrderCard`) |
 | `GET /api/v1/commands/{number}/orders` | `ADMIN`, `MANAGER`, `CASHIER`, `ATTENDANT` | Único consumidor real é `/pdv` (ver acima); `KITCHEN` fora — a cozinha tem sua própria fila |
-| `GET /api/v1/print-jobs` | *(nenhum — máquina)* | Endpoint do Edge Agent, ver abaixo |
-| `POST /api/v1/print-jobs/{id}/printed` | *(nenhum — máquina)* | Endpoint do Edge Agent, ver abaixo |
-| `POST /api/v1/print-jobs/{id}/failed` | *(nenhum — máquina)* | Endpoint do Edge Agent, ver abaixo |
+| `GET /api/v1/print-jobs` | Chave de dispositivo | Endpoint do Edge Agent; `X-Farelo-Device-Key` |
+| `GET /api/v1/print-jobs/staff` | `ADMIN`, `MANAGER` | Fila no painel de impressoras, com JWT humano |
+| `POST /api/v1/print-jobs/{id}/printed` | Chave de dispositivo | Endpoint do Edge Agent; `X-Farelo-Device-Key` |
+| `POST /api/v1/print-jobs/{id}/failed` | Chave de dispositivo | Endpoint do Edge Agent; `X-Farelo-Device-Key` |
 | `POST /api/v1/print-jobs/{id}/retry` | `ADMIN`, `MANAGER`, `CASHIER`, `KITCHEN`, `ATTENDANT` (todos os cinco) | Ação humana, ver abaixo |
 
 **`CommandController#open`/`#close` — papéis diferentes, não a mesma
@@ -3101,27 +3102,15 @@ há hoje nenhuma tela de frente de loja consumindo essa fila; alargar um
 endpoint de leitura "só por precaução" sem consumidor real seria adivinhar
 uma necessidade, não documentar uma real.
 
-**`PrintJobController` — só `retry()` ganha `@RequireRole`; `pending()`/
-`markPrinted()`/`markFailed()` continuam sem nenhum**: verificado contra o
-código-fonte do `apps/edge-agent` (`src/printJobsClient.ts`), esses três
-endpoints são chamados **exclusivamente** pelo Farelo Edge Agent — um
-processo de máquina rodando num mini PC no Farelo (prompt mestre seção
-11), nunca por uma pessoa logada. `@RequireRole` autentica um `User` com
-`UserRole` — alguém que fez login via `POST /api/v1/auth/login`
-(FARELO-121). O Edge Agent não tem esse tipo de conta e nunca deveria ter:
-a seção 11 do prompt mestre é explícita que "o Edge Agent nunca deve
-possuir regra de negócio de pedidos — é apenas infraestrutura de
-dispositivos", e dar a ele um login no formato humano (uma linha `User`,
-um `UserRole`, credenciais para guardar no mini PC) seria exatamente esse
-tipo de vazamento de responsabilidade para dentro do que deveria
-permanecer "só um dispositivo". Uma credencial real de
-máquina-para-máquina (ex: uma API key/mecanismo de service-account por
-dispositivo, verificado por um caminho de verificação próprio e distinto)
-é uma necessidade futura legítima, mas é um mecanismo de autenticação novo
-a desenhar, não um papel para encaixar à força no RBAC construído para
-humanos — decidir esse desenho não foi adivinhado aqui, mesma contenção
-que FARELO-120/121/122 já aplicaram para não pré-decidir o mecanismo de um
-ticket futuro.
+**`PrintJobController` — identidade de máquina separada do login humano**:
+`pending()`/`markPrinted()`/`markFailed()` exigem `X-Farelo-Device-Key`
+com o segredo `FARELO_PRINT_DEVICE_KEY` configurado fora do Git. Se o
+segredo estiver ausente (ou tiver menos de 32 bytes), a API recusa todas
+as chamadas desses endpoints. A comparação da chave usa tempo constante.
+Um JWT de `ADMIN` não concede acesso a essas rotas: o Edge Agent não
+recebe uma linha `User` nem um `UserRole`. O agente atual ainda precisa
+ser atualizado para enviar o header em cada polling e callback antes de
+ativar a impressão física.
 
 `retry()`, ao contrário, é uma chamada genuinamente diferente: por seu
 próprio javadoc/pela entrada FARELO-079 deste documento, é um endpoint
@@ -3150,11 +3139,9 @@ motivo para restringir além de "qualquer funcionário autenticado".
 bate num endpoint agora protegido passou a mintar um token real
 (`JwtTokenService#issue`, mesmo padrão do FARELO-122/123) e enviá-lo via
 `Authorization: Bearer <token>`; `GET /api/v1/commands/{number}`,
-`POST /api/v1/orders`, `GET /api/v1/print-jobs`,
-`POST /api/v1/print-jobs/{id}/printed` e
-`POST /api/v1/print-jobs/{id}/failed` continuam sem header nenhum em todo
-lugar, provando que essas dependências públicas/de máquina de fato ficaram
-de fora. Cada endpoint protegido ganhou testes dedicados: sem header →
+`POST /api/v1/orders` continua sem header de funcionário. As três rotas
+de impressão agora exigem uma chave de dispositivo separada do JWT humano;
+a integração do Edge Agent precisa enviar `X-Farelo-Device-Key`. Cada endpoint protegido ganhou testes dedicados: sem header →
 `401`/`UNAUTHENTICATED`; papel errado (escolhido especificamente por
 excluir aquele papel do endpoint em questão, ex: `KITCHEN` em `open()`/
 `close()`, `ATTENDANT` em `preparing()`/`ready()`, `KITCHEN` em

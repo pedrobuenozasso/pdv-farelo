@@ -56,7 +56,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>Same role list as {@code CommandController}'s {@code open}/{@code
  * close}: {@code ADMIN}/{@code MANAGER}/{@code CASHIER}/{@code ATTENDANT}.
  */
-@SpringBootTest
+@SpringBootTest(properties = "security.printing.device-key=test-print-device-key-32-bytes-minimum")
 @AutoConfigureMockMvc
 class CommandPrintConferenceControllerIntegrationTests extends AbstractIntegrationTest {
 
@@ -215,7 +215,8 @@ class CommandPrintConferenceControllerIntegrationTests extends AbstractIntegrati
         PrintJobResponse created = objectMapper.readValue(
                 printResult.getResponse().getContentAsString(), PrintJobResponse.class);
 
-        MvcResult pendingResult = mockMvc.perform(get("/api/v1/print-jobs"))
+        MvcResult pendingResult = mockMvc.perform(get("/api/v1/print-jobs")
+                        .header("X-Farelo-Device-Key", "test-print-device-key-32-bytes-minimum"))
                 .andExpect(status().isOk())
                 .andReturn();
         List<PrintJobResponse> pending = objectMapper.readValue(

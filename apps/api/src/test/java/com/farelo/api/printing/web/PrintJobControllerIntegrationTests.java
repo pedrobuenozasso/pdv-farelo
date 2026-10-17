@@ -70,23 +70,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * every one already reserved elsewhere (see {@code
  * PrintJobServiceIntegrationTests}' javadoc: 1-19, 101, 999 already taken).
  *
- * <p><b>FARELO-124</b>: only {@code POST .../retry} now requires a caller
- * role (see {@code PrintJobController}'s javadoc for why {@code GET} and
- * {@code .../printed}/{@code .../failed} stay unprotected — Edge Agent
- * machine endpoints) — so only the {@code .../retry} calls below mint a
- * token via {@link #tokenFor} and send it as
- * {@code Authorization: Bearer <token>}, same pattern
- * {@code ProductControllerIntegrationTests} established at FARELO-123.
- * Every {@code GET}/{@code .../printed}/{@code .../failed} call keeps
- * <b>no</b> header, exactly as before this ticket.
+ * <p>Machine calls use {@code X-Farelo-Device-Key}; manual retry uses
+ * a staff JWT. They are separate identities.
  */
-@SpringBootTest
+@SpringBootTest(properties = "security.printing.device-key=test-print-device-key-32-bytes-minimum")
 @AutoConfigureMockMvc
 class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
 
     private static final int COMMAND_NUMBER = 20;
 
     private static final String PASSWORD = "senha-forte-123";
+    private static final String DEVICE_KEY = "test-print-device-key-32-bytes-minimum";
 
     @Autowired
     private MockMvc mockMvc;
@@ -194,7 +188,7 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     private List<PrintJobResponse> listPrintJobs() throws Exception {
-        MvcResult result = mockMvc.perform(get("/api/v1/print-jobs"))
+        MvcResult result = mockMvc.perform(get("/api/v1/print-jobs").header("X-Farelo-Device-Key", DEVICE_KEY))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -203,9 +197,42 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
                 objectMapper.getTypeFactory().constructCollectionType(List.class, PrintJobResponse.class));
     }
 
+
+    @Test
+    void machineEndpointsRejectMissingWrongAndHumanCredentials() throws Exception {
+        mockMvc.perform(get("/api/v1/print-jobs"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/print-jobs")
+                        .header("X-Farelo-Device-Key", "incorrect-device-key"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/print-jobs")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", UUID.randomUUID()))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", UUID.randomUUID()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void staffQueueRequiresStaffJwtAndDoesNotAcceptDeviceKeyAlone() throws Exception {
+        mockMvc.perform(get("/api/v1/print-jobs/staff"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/print-jobs/staff")
+                        .header("X-Farelo-Device-Key", DEVICE_KEY))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/print-jobs/staff")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.CASHIER)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/print-jobs/staff")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
     @Test
     void returnsEmptyListWhenNoPendingPrintJobsExist() throws Exception {
-        mockMvc.perform(get("/api/v1/print-jobs"))
+        mockMvc.perform(get("/api/v1/print-jobs").header("X-Farelo-Device-Key", DEVICE_KEY))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$", hasSize(0)));
@@ -304,7 +331,7 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
         UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
 
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", printJobId))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", printJobId).header("X-Farelo-Device-Key", DEVICE_KEY))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(printJobId.toString()))
                 .andExpect(jsonPath("$.status").value("PRINTED"));
@@ -319,7 +346,7 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         Order order = createOrderWithPendingPrintJobs(new NewOrderItem(espresso.getId(), 1));
         UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
 
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", printJobId))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", printJobId).header("X-Farelo-Device-Key", DEVICE_KEY))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(printJobId.toString()))
                 .andExpect(jsonPath("$.status").value("FAILED"));
@@ -335,7 +362,7 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
         markStatus(order, PrintJobStatus.PRINTED);
 
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", printJobId))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", printJobId).header("X-Farelo-Device-Key", DEVICE_KEY))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PRINT_JOB_INVALID_TRANSITION"))
                 .andExpect(jsonPath("$.message").exists())
@@ -349,7 +376,7 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
         markStatus(order, PrintJobStatus.FAILED);
 
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", printJobId))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", printJobId).header("X-Farelo-Device-Key", DEVICE_KEY))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PRINT_JOB_INVALID_TRANSITION"))
                 .andExpect(jsonPath("$.message").exists())
@@ -363,7 +390,7 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
         UUID printJobId = printJobRepository.findByOrder(order).get(0).getId();
         markStatus(order, PrintJobStatus.PRINTED);
 
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", printJobId))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", printJobId).header("X-Farelo-Device-Key", DEVICE_KEY))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PRINT_JOB_INVALID_TRANSITION"))
                 .andExpect(jsonPath("$.message").exists())
@@ -372,14 +399,14 @@ class PrintJobControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Test
     void returnsNotFoundWhenMarkingUnknownPrintJobAsPrinted() throws Exception {
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", UUID.randomUUID()))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/printed", UUID.randomUUID()).header("X-Farelo-Device-Key", DEVICE_KEY))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PRINT_JOB_NOT_FOUND"));
     }
 
     @Test
     void returnsNotFoundWhenMarkingUnknownPrintJobAsFailed() throws Exception {
-        mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", UUID.randomUUID()))
+        mockMvc.perform(post("/api/v1/print-jobs/{id}/failed", UUID.randomUUID()).header("X-Farelo-Device-Key", DEVICE_KEY))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PRINT_JOB_NOT_FOUND"));
     }

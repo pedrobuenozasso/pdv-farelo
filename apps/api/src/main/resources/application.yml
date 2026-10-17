@@ -49,6 +49,10 @@ outbox:
 # HS256's minimum key-length check so the app still boots in dev/test
 # without a real secret configured.
 security:
+  printing:
+    # Mandatory for Edge Agent routes; an empty value denies every machine request.
+    # Generate a random 32+ byte secret outside Git and share only with the device.
+    device-key: ${FARELO_PRINT_DEVICE_KEY:}
   jwt:
     secret: ${JWT_SECRET:dev-only-insecure-jwt-secret-change-me-before-any-real-deploy}
     expiration-minutes: ${JWT_EXPIRATION_MINUTES:480}
