@@ -547,6 +547,12 @@ export default function ProductsAdminPage() {
                             </Badge>
                           </td>
                           <td className="px-5 py-3.5 text-right">
+                            <Link
+                              href={`/admin/products/${product.id}/steps`}
+                              className="text-primary mr-4 text-xs font-semibold"
+                            >
+                              Passos
+                            </Link>
                             <button
                               type="button"
                               onClick={() => setEditingProductId(product.id)}
