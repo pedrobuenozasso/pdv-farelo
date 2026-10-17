@@ -31,7 +31,9 @@ class ControllerAccessPolicyIntegrationTests extends AbstractIntegrationTest {
                     || handler.getBeanType().isAnnotationPresent(RequireRole.class);
             boolean publicEndpoint = handler.hasMethodAnnotation(PublicEndpoint.class)
                     || handler.getBeanType().isAnnotationPresent(PublicEndpoint.class);
-            if (role == publicEndpoint) {
+            boolean deviceKey = handler.hasMethodAnnotation(RequireDeviceKey.class)
+                    || handler.getBeanType().isAnnotationPresent(RequireDeviceKey.class);
+            if ((role ? 1 : 0) + (publicEndpoint ? 1 : 0) + (deviceKey ? 1 : 0) != 1) {
                 unclassified.add(mapping + " -> " + handler);
             }
         });
