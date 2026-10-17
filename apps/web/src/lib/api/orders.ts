@@ -71,12 +71,18 @@ export type Order = {
 export type CreateOrderInput = {
   commandNumber: number;
   qrToken?: string | null;
-  items: { productId: string; quantity: number }[];
+  items: CreateOrderItemInput[];
   customerName?: string;
   customerPhone?: string;
   note?: string;
   printOnConfirm?: boolean;
   idempotencyKey?: string;
+};
+
+export type CreateOrderItemInput = {
+  productId: string;
+  quantity: number;
+  options?: { stepId: string; optionId: string; quantity: number }[];
 };
 
 export async function createOrder(input: CreateOrderInput): Promise<Order> {

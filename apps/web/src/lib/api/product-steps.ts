@@ -6,7 +6,9 @@ export type ProductStepOption = {
   optionName: string;
   optionActive: boolean;
   displayOrder: number;
-  price: string;
+  // Jackson serializes BigDecimal as a JSON number. Accept a string as well
+  // for clients/tests that preserve its decimal representation explicitly.
+  price: number | string;
 };
 
 export type ProductStep = {

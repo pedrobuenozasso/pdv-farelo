@@ -57,6 +57,7 @@ import {
   type OrderItem,
   type OrderItemCancelReason,
   type OrderStatus,
+  type CreateOrderItemInput,
 } from "@/lib/api/orders";
 import { listUsers } from "@/lib/api/users";
 import {
@@ -73,6 +74,7 @@ import {
 } from "@/lib/api/payments";
 import { printConference } from "@/lib/api/print-jobs";
 import { listProducts, type Product } from "@/lib/api/products";
+import { listProductSteps, type ProductStep } from "@/lib/api/product-steps";
 import { getTableOccupancy, listTables } from "@/lib/api/tables";
 import { cn } from "@/lib/cn";
 import { decodeUserId } from "@/lib/auth";
@@ -610,6 +612,22 @@ function TableAssociation({ command }: { command: Command }) {
 // The comanda operator builds one multi-item order locally before sending it
 // to the existing POST /api/v1/orders endpoint. Selecting a product never
 // writes to the server; Confirmar and Receber are the commit points.
+type DraftCartItem = CreateOrderItemInput & {
+  lineId: string;
+  unitPriceCents: number;
+  optionLabels: string[];
+};
+
+function selectedOptionCount(
+  step: ProductStep,
+  quantities: Record<string, number>,
+) {
+  return step.options.reduce(
+    (total, option) => total + (quantities[option.id] ?? 0),
+    0,
+  );
+}
+
 function AddItemPanel({
   commandNumber,
   onAdded,
@@ -630,9 +648,10 @@ function AddItemPanel({
     null,
   );
   const [quantity, setQuantity] = useState(1);
-  const [cart, setCart] = useState<{ productId: string; quantity: number }[]>(
-    [],
-  );
+  const [optionQuantities, setOptionQuantities] = useState<
+    Record<string, number>
+  >({});
+  const [cart, setCart] = useState<DraftCartItem[]>([]);
   // FARELO-316: "Observação geral do pedido" applies to the draft order,
   // not to the comanda as a whole.
   const [note, setNote] = useState("");
@@ -655,12 +674,22 @@ function AddItemPanel({
     queryKey: ["pdv", "categories"],
     queryFn: listCategories,
   });
+  const stepsQuery = useQuery({
+    queryKey: ["pdv", "product-steps", selectedProductId],
+    queryFn: () => listProductSteps(selectedProductId!),
+    enabled: selectedProductId !== null,
+    staleTime: 0,
+  });
 
   const addItemMutation = useMutation({
     mutationFn: () => {
       const draft = {
         commandNumber,
-        items: cart,
+        items: cart.map(({ productId, quantity, options }) => ({
+          productId,
+          quantity,
+          ...(options?.length ? { options } : {}),
+        })),
         note: note.trim() || undefined,
         printOnConfirm,
       };
@@ -671,6 +700,7 @@ function AddItemPanel({
       orderIntent.current = null;
       setSelectedProductId(null);
       setQuantity(1);
+      setOptionQuantities({});
       setCart([]);
       setNote("");
       setPrintOnConfirm(true);
@@ -719,32 +749,99 @@ function AddItemPanel({
   const productById = new Map(
     (productsQuery.data ?? []).map((product) => [product.id, product]),
   );
-  const cartTotalCents = cart.reduce((total, item) => {
-    const price = productById.get(item.productId)?.price;
-    if (price === undefined) return total;
-    const [whole, decimals = ""] = String(price).split(".");
+  const cartTotalCents = cart.reduce(
+    (total, item) => total + item.unitPriceCents * item.quantity,
+    0,
+  );
+  const selectedSteps = stepsQuery.data ?? [];
+  const selectedBaseCents = selectedProduct
+    ? parseMoneyCents(String(selectedProduct.price))
+    : null;
+  const choicesValid = selectedSteps.every((step) => {
+    const count = selectedOptionCount(step, optionQuantities);
     return (
-      total +
-      (Number(whole) * 100 + Number(decimals.padEnd(2, "0"))) * item.quantity
+      count >= step.minChoices &&
+      count <= step.maxChoices &&
+      step.options.every(
+        (option) => option.optionActive || !optionQuantities[option.id],
+      )
     );
-  }, 0);
+  });
+  const selectedOptions = selectedSteps.flatMap((step) =>
+    step.options
+      .filter((option) => (optionQuantities[option.id] ?? 0) > 0)
+      .map((option) => ({
+        step,
+        option,
+        quantity: optionQuantities[option.id],
+      })),
+  );
+  const selectedOptionCents = selectedOptions.reduce<number | null>(
+    (total, choice) => {
+      const cents = parseMoneyCents(String(choice.option.price));
+      return total === null || cents === null
+        ? null
+        : total + cents * choice.quantity;
+    },
+    0,
+  );
+  const selectedUnitCents =
+    selectedBaseCents === null || selectedOptionCents === null
+      ? null
+      : selectedBaseCents + selectedOptionCents;
+  // A base-zero item with missing/invalid steps must never be placed into
+  // the draft as a free sale. Server validation remains authoritative.
+  const canAddSelected =
+    !!selectedProduct &&
+    stepsQuery.isSuccess &&
+    !stepsQuery.isFetching &&
+    choicesValid &&
+    selectedUnitCents !== null &&
+    selectedUnitCents > 0 &&
+    Number.isSafeInteger(cartTotalCents + selectedUnitCents * quantity) &&
+    !addItemMutation.isPending;
 
   function addSelectedProduct() {
-    if (!selectedProduct || addItemMutation.isPending) return;
+    if (!selectedProduct || !canAddSelected || selectedUnitCents === null)
+      return;
+    const choices = selectedOptions.map(
+      ({ step, option, quantity: choiceQuantity }) => ({
+        stepId: step.id,
+        optionId: option.id,
+        quantity: choiceQuantity,
+      }),
+    );
     setCart((current) => {
-      const existing = current.find(
-        (item) => item.productId === selectedProduct.id,
-      );
+      const existing =
+        choices.length === 0 &&
+        current.find(
+          (item) =>
+            item.productId === selectedProduct.id && !item.options?.length,
+        );
       return existing
         ? current.map((item) =>
-            item.productId === selectedProduct.id
+            item.lineId === existing.lineId
               ? { ...item, quantity: item.quantity + quantity }
               : item,
           )
-        : [...current, { productId: selectedProduct.id, quantity }];
+        : [
+            ...current,
+            {
+              lineId: crypto.randomUUID(),
+              productId: selectedProduct.id,
+              quantity,
+              unitPriceCents: selectedUnitCents,
+              optionLabels: selectedOptions.map(
+                ({ option, quantity: count }) =>
+                  `${count} × ${option.optionName}`,
+              ),
+              ...(choices.length ? { options: choices } : {}),
+            },
+          ];
     });
     setSelectedProductId(null);
     setQuantity(1);
+    setOptionQuantities({});
   }
 
   return (
@@ -811,7 +908,11 @@ function AddItemPanel({
               <button
                 key={product.id}
                 type="button"
-                onClick={() => setSelectedProductId(product.id)}
+                onClick={() => {
+                  setSelectedProductId(product.id);
+                  setOptionQuantities({});
+                  setQuantity(1);
+                }}
                 className={cn(
                   "flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
                   selectedProductId === product.id
@@ -831,6 +932,98 @@ function AddItemPanel({
 
       {selectedProduct ? (
         <div className="border-line flex flex-col gap-2 border-t pt-3">
+          {stepsQuery.isPending ? (
+            <p className="text-ink-faint text-sm">Carregando escolhas...</p>
+          ) : null}
+          {stepsQuery.isError ? (
+            <p className="text-red text-sm">
+              Não foi possível consultar as escolhas deste produto. Tente
+              selecioná-lo novamente.
+            </p>
+          ) : null}
+          {selectedSteps.map((step) => {
+            const count = selectedOptionCount(step, optionQuantities);
+            return (
+              <fieldset
+                key={step.id}
+                className="border-line rounded-xl border p-3"
+              >
+                <legend className="px-1 text-sm font-semibold">
+                  {step.label}
+                </legend>
+                <p className="text-ink-soft mb-2 text-xs">
+                  Escolha de {step.minChoices} a {step.maxChoices} · {count}{" "}
+                  selecionada(s)
+                </p>
+                {step.options.map((option) => {
+                  const chosen = optionQuantities[option.id] ?? 0;
+                  const optionCents = parseMoneyCents(String(option.price));
+                  return (
+                    <div
+                      key={option.id}
+                      className="flex items-center justify-between gap-2 py-1 text-sm"
+                    >
+                      <span>
+                        {option.optionName} ·{" "}
+                        {optionCents === null
+                          ? "Preço inválido"
+                          : `+ ${currencyFormatter.format(optionCents / 100)}`}
+                        {!option.optionActive ? (
+                          <span className="text-red ml-2 text-xs">
+                            Indisponível
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          aria-label={`Diminuir ${option.optionName}`}
+                          disabled={chosen === 0 || addItemMutation.isPending}
+                          onClick={() =>
+                            setOptionQuantities((current) => ({
+                              ...current,
+                              [option.id]: Math.max(
+                                0,
+                                (current[option.id] ?? 0) - 1,
+                              ),
+                            }))
+                          }
+                          className="border-line h-7 w-7 rounded-full border disabled:opacity-40"
+                        >
+                          −
+                        </button>
+                        <span className="w-5 text-center">{chosen}</span>
+                        <button
+                          type="button"
+                          aria-label={`Aumentar ${option.optionName}`}
+                          disabled={
+                            !option.optionActive ||
+                            optionCents === null ||
+                            count >= step.maxChoices ||
+                            addItemMutation.isPending
+                          }
+                          onClick={() =>
+                            setOptionQuantities((current) => ({
+                              ...current,
+                              [option.id]: (current[option.id] ?? 0) + 1,
+                            }))
+                          }
+                          className="border-line h-7 w-7 rounded-full border disabled:opacity-40"
+                        >
+                          +
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+                {count < step.minChoices ? (
+                  <p className="text-red mt-1 text-xs" role="status">
+                    Faltam {step.minChoices - count} escolha(s) nesta etapa.
+                  </p>
+                ) : null}
+              </fieldset>
+            );
+          })}
           <div className="flex items-center gap-3">
             <span className="flex-1 text-sm font-semibold">
               {selectedProduct.name}
@@ -858,13 +1051,28 @@ function AddItemPanel({
             </div>
             <Button
               variant="outline"
-              disabled={addItemMutation.isPending}
+              disabled={!canAddSelected}
               onClick={addSelectedProduct}
               className="px-4 py-2 text-[13px]"
             >
               Adicionar ao pedido
             </Button>
           </div>
+          {stepsQuery.isSuccess ? (
+            <p className="text-right text-sm font-semibold">
+              Total deste item:{" "}
+              {selectedUnitCents === null
+                ? "Preço indisponível"
+                : currencyFormatter.format(
+                    (selectedUnitCents * quantity) / 100,
+                  )}
+              {selectedUnitCents === 0 ? (
+                <span className="text-red block text-xs">
+                  Valor zero: confira o cadastro antes de vender.
+                </span>
+              ) : null}
+            </p>
+          ) : null}
         </div>
       ) : null}
       {cart.length > 0 ? (
@@ -874,19 +1082,28 @@ function AddItemPanel({
             const product = productById.get(item.productId);
             return (
               <div
-                key={item.productId}
+                key={item.lineId}
                 className="flex items-center justify-between gap-3 text-sm"
               >
-                <span>
-                  {item.quantity} × {product?.name ?? "Produto indisponível"}
+                <span className="flex flex-col">
+                  <span>
+                    {item.quantity} × {product?.name ?? "Produto indisponível"}{" "}
+                    ·{" "}
+                    {currencyFormatter.format(
+                      (item.unitPriceCents * item.quantity) / 100,
+                    )}
+                  </span>
+                  {item.optionLabels.length ? (
+                    <span className="text-ink-soft text-xs">
+                      {item.optionLabels.join(", ")}
+                    </span>
+                  ) : null}
                 </span>
                 <button
                   type="button"
                   onClick={() =>
                     setCart((current) =>
-                      current.filter(
-                        (entry) => entry.productId !== item.productId,
-                      ),
+                      current.filter((entry) => entry.lineId !== item.lineId),
                     )
                   }
                   disabled={addItemMutation.isPending}
