@@ -553,6 +553,19 @@ Somente iniciar após validação contábil.
 - **FARELO-177**: Implementar cancelamento.
 - **FARELO-178**: Implementar contingência.
 
+### EPIC 13 — Produtos com passos para migração Sischef
+
+O inventário real de 17/10/2026 está em `../../sischef-extraction/configurable-products-20261017.md` e nos dois TSVs vinculados ali. Há 20 produtos ativos com um passo cada, 58 vínculos de opções e preço de vínculo diferente do cadastro simples em 30 casos. Não publicar produtos incompletos; preservar um único `Product` por ID de origem. A regra de preço final deve ser conferida no PDV antes da carga de produção.
+
+- **FARELO-321**: Criar no catálogo a estrutura persistente de passo e vínculo de opção por `Product`, com ordem, mínimo/máximo, nível, tipo de cobrança e preço próprio do vínculo. Migration, entidades/repositórios e testes de restrições; sem alterar os endpoints ou o cálculo do pedido.
+- **FARELO-322**: Expor leitura e edição administrativa dos passos/opções com validação de limites, IDs existentes, ordem e permissões; manter o catálogo público limitado a produtos publicáveis.
+- **FARELO-323**: Permitir seleção de opções no pedido, validar obrigatoriedade/limites/disponibilidade e congelar IDs, descrições, quantidades e preços da escolha junto ao `OrderItem`. Calcular total com `BigDecimal` e idempotência; testar com base zero e positiva.
+- **FARELO-324**: Criar editor de passos/opções no Admin, com prévia do preço por vínculo e avisos para opção inativa.
+- **FARELO-325**: Adicionar escolhas à tela de comanda/mesa do PDV, exibir total antes de confirmar e enviar snapshot ao backend.
+- **FARELO-326**: Adicionar as mesmas escolhas ao cardápio QR, com validação de mínimo/máximo e total visível.
+- **FARELO-327**: Levar as opções escolhidas para conferência do caixa, KDS, impressão de produção e representação fiscal do item; comparar casos de homologação com o documento autorizado.
+- **FARELO-328**: Preparar carga de ensaio idempotente do catálogo por ID Sischef, com relatório de diferenças e publicação bloqueada para preço/visibilidade/regra fiscal não conferidos.
+
 ---
 
 ## 48. Primeira entrega funcional
