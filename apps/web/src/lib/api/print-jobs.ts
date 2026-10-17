@@ -1,5 +1,6 @@
-// Thin client for /api/v1/print-jobs (see docs/api.md, Epic 6).
+// Thin client for the staff print-job view (see docs/api.md, Epic 6).
 // Client-only — called from app/admin/print-jobs/page.tsx.
+// The root GET /api/v1/print-jobs is reserved for the Edge Agent.
 //
 // GET only ever returns PENDING jobs (the backend has no listing for
 // FAILED ones — see PrintJobRepository, which only backs a "findByStatus
@@ -52,7 +53,7 @@ export type PrintJob = {
 };
 
 export async function listPendingPrintJobs(): Promise<PrintJob[]> {
-  const response = await fetch("/api/v1/print-jobs", {
+  const response = await fetch("/api/v1/print-jobs/staff", {
     cache: "no-store",
     headers: authHeaders(),
   });
