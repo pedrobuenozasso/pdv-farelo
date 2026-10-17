@@ -65,6 +65,13 @@ function nonNegativeInteger(value: string): boolean {
   return /^(0|[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value));
 }
 
+function nextDisplayOrder(items: { displayOrder: string }[]): string {
+  const used = new Set(items.map((item) => item.displayOrder));
+  let order = 0;
+  while (used.has(String(order))) order += 1;
+  return String(order);
+}
+
 function validateDraft(steps: DraftStep[], products: Product[]): string | null {
   const ids = new Set(products.map((product) => product.id));
   const stepOrders = new Set<string>();
@@ -347,7 +354,7 @@ function StepsEditor({
                     {
                       key: crypto.randomUUID(),
                       optionProductId: "",
-                      displayOrder: String(step.options.length),
+                      displayOrder: nextDisplayOrder(step.options),
                       price: "0.00",
                     },
                   ],
@@ -465,7 +472,7 @@ function StepsEditor({
                 label: "",
                 minChoices: "0",
                 maxChoices: "1",
-                displayOrder: String(current.length),
+                displayOrder: nextDisplayOrder(current),
                 level: "",
                 chargeType: "",
                 options: [],
