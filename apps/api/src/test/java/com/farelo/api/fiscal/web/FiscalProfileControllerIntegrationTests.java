@@ -2,6 +2,8 @@ package com.farelo.api.fiscal.web;
 
 import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.catalog.ProductRepository;
+import com.farelo.api.catalog.ProductStepOptionRepository;
+import com.farelo.api.catalog.ProductStepRepository;
 import com.farelo.api.fiscal.FiscalProfile;
 import com.farelo.api.fiscal.FiscalProfileRepository;
 import com.farelo.api.inventory.RecipeItemRepository;
@@ -88,6 +90,9 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private ProductRepository productRepository;
 
+    @Autowired private ProductStepOptionRepository productStepOptionRepository;
+    @Autowired private ProductStepRepository productStepRepository;
+
     @Autowired
     private OrderItemRepository orderItemRepository;
 
@@ -118,6 +123,8 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
         orderItemRepository.deleteAll();
         recipeItemRepository.deleteAll();
         recipeRepository.deleteAll();
+        productStepOptionRepository.deleteAllInBatch();
+        productStepRepository.deleteAllInBatch();
         productRepository.deleteAll();
         fiscalProfileRepository.deleteAll();
         adminToken = tokenFor(UserRole.ADMIN);

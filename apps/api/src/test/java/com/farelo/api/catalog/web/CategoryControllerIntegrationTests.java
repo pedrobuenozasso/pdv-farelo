@@ -4,6 +4,8 @@ import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.catalog.Category;
 import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.ProductRepository;
+import com.farelo.api.catalog.ProductStepOptionRepository;
+import com.farelo.api.catalog.ProductStepRepository;
 import com.farelo.api.inventory.RecipeItemRepository;
 import com.farelo.api.inventory.RecipeRepository;
 import com.farelo.api.ordering.OrderItemRepository;
@@ -73,6 +75,9 @@ class CategoryControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private ProductRepository productRepository;
 
+    @Autowired private ProductStepOptionRepository productStepOptionRepository;
+    @Autowired private ProductStepRepository productStepRepository;
+
     @Autowired
     private UserRepository userRepository;
 
@@ -107,6 +112,8 @@ class CategoryControllerIntegrationTests extends AbstractIntegrationTest {
         orderItemRepository.deleteAll();
         recipeItemRepository.deleteAll();
         recipeRepository.deleteAll();
+        productStepOptionRepository.deleteAllInBatch();
+        productStepRepository.deleteAllInBatch();
         productRepository.deleteAll();
         categoryRepository.deleteAll();
     }

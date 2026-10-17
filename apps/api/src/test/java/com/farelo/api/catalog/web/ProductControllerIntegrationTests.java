@@ -7,6 +7,8 @@ import com.farelo.api.catalog.Category;
 import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductRepository;
+import com.farelo.api.catalog.ProductStepOptionRepository;
+import com.farelo.api.catalog.ProductStepRepository;
 import com.farelo.api.catalog.ProductionStation;
 import com.farelo.api.fiscal.FiscalProfile;
 import com.farelo.api.fiscal.FiscalProfileRepository;
@@ -83,6 +85,9 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private ProductRepository productRepository;
 
+    @Autowired private ProductStepOptionRepository productStepOptionRepository;
+    @Autowired private ProductStepRepository productStepRepository;
+
     @Autowired
     private FiscalProfileRepository fiscalProfileRepository;
 
@@ -124,6 +129,8 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
         orderItemRepository.deleteAll();
         recipeItemRepository.deleteAll();
         recipeRepository.deleteAll();
+        productStepOptionRepository.deleteAllInBatch();
+        productStepRepository.deleteAllInBatch();
         productRepository.deleteAll();
         categoryRepository.deleteAll();
         fiscalProfileRepository.deleteAll();

@@ -2,6 +2,7 @@ package com.farelo.api.catalog;
 
 import com.farelo.api.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -19,6 +20,12 @@ class ProductStepRepositoryIntegrationTests extends AbstractIntegrationTest {
     @Autowired private ProductRepository products;
     @Autowired private ProductStepRepository steps;
     @Autowired private ProductStepOptionRepository options;
+
+    @AfterEach
+    void cleanSteps() {
+        options.deleteAllInBatch();
+        steps.deleteAllInBatch();
+    }
 
     private Product product(String name, String price) {
         Category category = categories.saveAndFlush(new Category("Configuráveis"));

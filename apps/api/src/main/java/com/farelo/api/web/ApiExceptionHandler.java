@@ -10,6 +10,7 @@ import com.farelo.api.cashier.ShiftNotFoundException;
 import com.farelo.api.catalog.CategoryNotFoundException;
 import com.farelo.api.catalog.ProductNotAvailableException;
 import com.farelo.api.catalog.ProductNotFoundException;
+import com.farelo.api.catalog.ProductStepConfigurationException;
 import com.farelo.api.command.CommandCannotAcceptOrdersException;
 import com.farelo.api.command.CommandCannotAcceptPaymentsException;
 import com.farelo.api.command.CommandCannotBeClosedException;
@@ -100,6 +101,12 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ErrorResponse handleProductNotFound(ProductNotFoundException ex) {
         return new ErrorResponse("PRODUCT_NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(ProductStepConfigurationException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleProductStepConfiguration(ProductStepConfigurationException ex) {
+        return new ErrorResponse("PRODUCT_STEP_INVALID", ex.getMessage(), UUID.randomUUID().toString());
     }
 
     @ExceptionHandler(CommandNotFoundException.class)
