@@ -13,6 +13,14 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+# FARELO-171: direct NFC-e integration starts in SEFAZ-SP's test environment.
+# This only selects endpoints/tpAmb; no XML generation or transmission exists.
+# Production requires BOTH variables and must be enabled only after fiscal signoff.
+fiscal:
+  nfce:
+    mode: ${FARELO_NFCE_MODE:HOMOLOGATION}
+    allow-production: ${FARELO_NFCE_ALLOW_PRODUCTION:false}
+
 server:
   port: 8080
 

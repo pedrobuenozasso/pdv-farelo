@@ -5999,3 +5999,22 @@ o histórico da venda. `order_item.unit_price` contém o preço-base somado aos
 adicionais por unidade do item; os cálculos de cobrança existentes usam esse
 snapshot. A duplicação de item configurável replica preço e opções históricos;
 itens simples preservam o comportamento anterior de preço atual.
+
+## Ambiente NFC-e SEFAZ-SP (FARELO-171)
+
+`SefazSpNfceEnvironment` escolhe os endereços fixos dos serviços NFC-e de
+São Paulo e o valor fiscal `tpAmb` correspondente: homologação `2` (padrão)
+ou produção `1`. A seleção de produção exige **duas** configurações explícitas:
+`FARELO_NFCE_MODE=PRODUCTION` e `FARELO_NFCE_ALLOW_PRODUCTION=true`. Se apenas
+a primeira for definida, a API falha ao iniciar; nunca troca de ambiente
+automaticamente. Os endereços são os publicados na
+[página oficial de WebServices NFC-e da SEFAZ-SP](https://portal.fazenda.sp.gov.br/servicos/nfce/Paginas/WebServices.aspx).
+O texto publicado para o URL de autorização contém um erro de formatação
+(`ttps://`); o endereço no código usa `https://` e o mesmo host/caminho dos
+demais serviços. Antes de FARELO-174, confirmar o WSDL real desse serviço.
+
+Esta configuração não implementa o `FiscalProvider`, não cria XML, não assina,
+não transmite e não registra autorização. O leiaute/XSD não foi fixado nesta
+etapa porque as notas técnicas e seus prazos mudam; FARELO-172 a 174 devem
+selecionar o leiaute vigente antes de qualquer teste com a SEFAZ. A seleção
+de ambiente não substitui credenciamento, certificado nem validação contábil.

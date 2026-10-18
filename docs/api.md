@@ -3163,3 +3163,12 @@ do item multiplica esse preço unitário no total da comanda. A resposta inclui
 `items[].options[]` com IDs, nomes, quantidades e preços congelados; alterar o
 catálogo depois não altera pedidos anteriores. A chave de idempotência também
 identifica as escolhas: reutilizá-la com opções diferentes retorna conflito.
+
+## Ambiente fiscal NFC-e (FARELO-171)
+
+Nenhuma rota HTTP foi adicionada. O backend usa homologação SEFAZ-SP por
+padrão (`tpAmb=2`). Para selecionar produção futuramente, o operador terá de
+definir `FARELO_NFCE_MODE=PRODUCTION` **e**
+`FARELO_NFCE_ALLOW_PRODUCTION=true`; selecionar só o modo faz a aplicação
+falhar na inicialização. A configuração centraliza os URLs oficiais dos
+serviços, mas ainda não existe cliente HTTP, XML, assinatura ou emissão.
