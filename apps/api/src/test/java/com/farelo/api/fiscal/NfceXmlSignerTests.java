@@ -118,7 +118,7 @@ class NfceXmlSignerTests {
     }
 
     /** Minimal X.509 v3 test certificate built and signed entirely in memory. */
-    private static X509Certificate selfSignedTestCertificate(KeyPair keyPair) throws Exception {
+    static X509Certificate selfSignedTestCertificate(KeyPair keyPair) throws Exception {
         byte[] sha256Rsa = seq(oid(1, 2, 840, 113549, 1, 1, 11), tag(0x05, new byte[0]));
         byte[] name = seq(tag(0x31, seq(oid(2, 5, 4, 3),
                 tag(0x0C, "Farelo Test Only".getBytes(StandardCharsets.UTF_8)))));

@@ -6067,3 +6067,12 @@ criptograficamente válida não significa NFC-e válida**: ainda faltam XSD
 vigente, validações de negócio/tributos, vínculo do certificado à empresa,
 CSC/QR Code e autorização da SEFAZ. O componente não é conectado a endpoint,
 `FiscalProvider` nem ambiente de produção.
+
+`Pkcs12SigningCredentials#load` complementa o FARELO-173: lê um arquivo A1
+PKCS#12 por caminho fornecido em tempo de execução, exige uma única chave
+privada RSA, certificado X.509 vigente apto a assinar e correspondência do par.
+A senha é recebida como `char[]`, copiada temporariamente e apagada da cópia
+ao terminar; o componente não registra caminho, senha ou conteúdo em logs e
+não copia o arquivo para o repositório. Isso ainda **não** comprova que o
+certificado pertence ao CNPJ emitente ou a uma cadeia ICP-Brasil confiável;
+essas verificações devem ocorrer antes de usar o A1 em homologação.

@@ -3181,3 +3181,6 @@ o subconjunto fiscal suportado e as validações pendentes.
 FARELO-173 adiciona assinatura XMLDSig interna para o rascunho de homologação,
 sem endpoint novo, armazenamento de certificado ou transmissão. A assinatura
 isolada não altera o bloqueio de emissão descrito acima.
+
+O carregador PKCS#12 do FARELO-173 é interno e recebe arquivo/senha apenas em
+tempo de execução; não há rota HTTP para enviar certificado ou senha.
