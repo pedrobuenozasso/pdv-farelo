@@ -32,12 +32,26 @@ public final class NfceXmlBuilder {
     public record Address(String street, String number, String district,
                           String cityCode, String city, String postalCode) { }
 
-    /** ICMS branch is selected explicitly. Other tax cases are unsupported. */
-    public record Taxes(String origin, String icmsCode, String pisCst, String cofinsCst) { }
+    /** CST 99 is supported only with explicit zero base, rate and amount. */
+    public record OtherContribution(BigDecimal base, BigDecimal rate, BigDecimal amount) { }
 
-    public record Item(String code, String description, String gtin, String ncm,
+    /** ICMS and contribution branches are selected explicitly by the caller. */
+    public record Taxes(String origin, String icmsCode, String pisCst, String cofinsCst,
+                        OtherContribution pisOther, OtherContribution cofinsOther) {
+        public Taxes(String origin, String icmsCode, String pisCst, String cofinsCst) {
+            this(origin, icmsCode, pisCst, cofinsCst, null, null);
+        }
+    }
+
+    public record Item(String code, String description, String gtin, String ncm, String cest,
                        String cfop, String unit, BigDecimal quantity,
-                       BigDecimal unitPrice, BigDecimal total, Taxes taxes) { }
+                       BigDecimal unitPrice, BigDecimal total, Taxes taxes) {
+        public Item(String code, String description, String gtin, String ncm,
+                    String cfop, String unit, BigDecimal quantity,
+                    BigDecimal unitPrice, BigDecimal total, Taxes taxes) {
+            this(code, description, gtin, ncm, null, cfop, unit, quantity, unitPrice, total, taxes);
+        }
+    }
 
     /** This first iteration supports only an exact cash payment, without change. */
     public record Draft(Issuer issuer, String operation, int series, int number,
@@ -134,6 +148,7 @@ public final class NfceXmlBuilder {
         element(xml, "cEAN", item.gtin());
         element(xml, "xProd", number == 1 ? HOMOLOGATION_PRODUCT_NAME : item.description());
         element(xml, "NCM", item.ncm());
+        if (item.cest() != null) element(xml, "CEST", item.cest());
         element(xml, "CFOP", item.cfop());
         element(xml, "uCom", item.unit());
         element(xml, "qCom", quantity(item.quantity()));
@@ -153,18 +168,24 @@ public final class NfceXmlBuilder {
         element(xml, simple ? "CSOSN" : "CST", item.taxes().icmsCode());
         xml.writeEndElement();
         xml.writeEndElement();
-        start(xml, "PIS");
-        start(xml, "PISNT");
-        element(xml, "CST", item.taxes().pisCst());
-        xml.writeEndElement();
-        xml.writeEndElement();
-        start(xml, "COFINS");
-        start(xml, "COFINSNT");
-        element(xml, "CST", item.taxes().cofinsCst());
-        xml.writeEndElement();
-        xml.writeEndElement();
+        writeContribution(xml, "PIS", item.taxes().pisCst(), item.taxes().pisOther());
+        writeContribution(xml, "COFINS", item.taxes().cofinsCst(), item.taxes().cofinsOther());
         xml.writeEndElement(); // imposto
         xml.writeEndElement(); // det
+    }
+
+    private static void writeContribution(XMLStreamWriter xml, String name, String cst,
+                                          OtherContribution other) throws XMLStreamException {
+        start(xml, name);
+        start(xml, name + ("99".equals(cst) ? "Outr" : "NT"));
+        element(xml, "CST", cst);
+        if (other != null) {
+            element(xml, "vBC", money(other.base()));
+            element(xml, "p" + name, money(other.rate()));
+            element(xml, "v" + name, money(other.amount()));
+        }
+        xml.writeEndElement();
+        xml.writeEndElement();
     }
 
     private static void writeTotals(XMLStreamWriter xml, List<Item> items) throws XMLStreamException {
@@ -227,6 +248,7 @@ public final class NfceXmlBuilder {
             label(item.description(), 1, 120, "product description");
             require("SEM GTIN".equals(item.gtin()), "only explicit SEM GTIN is supported until GTIN validation");
             digits(item.ncm(), 8, "NCM");
+            if (item.cest() != null) digits(item.cest(), 7, "CEST");
             digits(item.cfop(), 4, "CFOP");
             label(item.unit(), 1, 6, "unit");
             decimal(item.quantity(), 4, "quantity");
@@ -244,13 +266,27 @@ public final class NfceXmlBuilder {
             require(tax.origin() != null && tax.origin().matches("[0-8]"), "invalid ICMS origin");
             require(("1".equals(e.crt()) ? List.of("102", "103", "300", "400")
                     : List.of("40", "41", "50")).contains(tax.icmsCode()), "unsupported ICMS code for CRT");
-            require(List.of("04", "06", "07", "08", "09").contains(tax.pisCst()), "unsupported PIS CST");
-            require(List.of("04", "06", "07", "08", "09").contains(tax.cofinsCst()), "unsupported COFINS CST");
+            validateContribution(tax.pisCst(), tax.pisOther(), "PIS");
+            validateContribution(tax.cofinsCst(), tax.cofinsOther(), "COFINS");
             total = total.add(item.total());
         }
         decimal(d.cashPaid(), 2, "cashPaid");
         require(total.compareTo(d.cashPaid()) == 0, "cash payment must equal invoice total");
         require(total.precision() - total.scale() <= 13, "invoice total exceeds XML numeric size");
+    }
+
+    private static void validateContribution(String cst, OtherContribution other, String name) {
+        if ("99".equals(cst)) {
+            require(other != null && isExplicitZero(other.base()) && isExplicitZero(other.rate())
+                    && isExplicitZero(other.amount()), name + " CST 99 requires explicit zero base/rate/amount");
+        } else {
+            require(List.of("04", "06", "07", "08", "09").contains(cst) && other == null,
+                    "unsupported " + name + " CST or unexpected contribution amounts");
+        }
+    }
+
+    private static boolean isExplicitZero(BigDecimal value) {
+        return value != null && value.signum() == 0 && value.scale() <= 2;
     }
 
     private static boolean validCnpj(String value) {

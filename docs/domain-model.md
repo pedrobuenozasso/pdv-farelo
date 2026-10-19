@@ -6076,3 +6076,17 @@ ao terminar; o componente não registra caminho, senha ou conteúdo em logs e
 não copia o arquivo para o repositório. Isso ainda **não** comprova que o
 certificado pertence ao CNPJ emitente ou a uma cadeia ICP-Brasil confiável;
 essas verificações devem ocorrer antes de usar o A1 em homologação.
+
+### Ampliação controlada do rascunho XML (FARELO-172)
+
+Os 151 XMLs de setembro extraídos do Sischef mostram 779 itens com
+`ICMSSN102`, `PISOutr`/`COFINSOutr` CST `99` e base, alíquota e valor zerados.
+O construtor agora aceita esses dois grupos `Outr` **somente quando os três
+valores de cada contribuição são fornecidos explicitamente como zero**;
+ausência dos valores ou tributo não zero continua rejeitada. `CEST` opcional
+de sete dígitos também pode ser fornecido por item, sem preenchimento por
+analogia. O [MOC 7.0, Anexo I](https://hom.nfe.fazenda.gov.br/PORTAL/exibirArquivo.aspx?conteudo=DQFCIFUzszw%3D)
+define o CEST, e a [orientação oficial para Simples Nacional](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?AspxAutoDetectCookieSupport=1&conteudo=StUR4XLmiS4%3D)
+mostra o ramo `PISOutr` CST `99` com base, alíquota e valor. Essas evidências
+não aprovam a classificação de cada produto Farelo; a matriz fiscal ainda
+precisa ser validada por ID e o XML integral precisa passar no XSD vigente.

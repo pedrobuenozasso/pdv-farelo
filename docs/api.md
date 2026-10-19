@@ -3184,3 +3184,7 @@ isolada não altera o bloqueio de emissão descrito acima.
 
 O carregador PKCS#12 do FARELO-173 é interno e recebe arquivo/senha apenas em
 tempo de execução; não há rota HTTP para enviar certificado ou senha.
+
+O rascunho XML FARELO-172 também aceita CEST explícito de sete dígitos e
+PIS/COFINS CST `99` com base, alíquota e valor explicitamente zerados. Isso
+não cria endpoint nem libera transmissão fiscal.

@@ -114,6 +114,49 @@ class NfceXmlBuilderTests {
         assertEquals(0, xml.getElementsByTagName("ICMSSN102").getLength());
     }
 
+    @Test
+    void writesObservedFareloTaxBranchesOnlyWhenZeroAmountsAndCestAreExplicit() throws Exception {
+        NfceXmlBuilder.Draft source = draft("Cafe", "12.50", "12.50");
+        NfceXmlBuilder.Item item = source.items().get(0);
+        NfceXmlBuilder.OtherContribution zero = new NfceXmlBuilder.OtherContribution(
+                new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"));
+        NfceXmlBuilder.Taxes taxes = new NfceXmlBuilder.Taxes("0", "102", "99", "99", zero, zero);
+        NfceXmlBuilder.Item withCest = new NfceXmlBuilder.Item(item.code(), item.description(),
+                item.gtin(), item.ncm(), "0300100", item.cfop(), item.unit(), item.quantity(),
+                item.unitPrice(), item.total(), taxes);
+
+        Document xml = parse(builder.buildHomologation(replaceItem(source, withCest)).unsignedXml());
+
+        assertEquals("0300100", text(xml, "CEST"));
+        assertEquals(1, xml.getElementsByTagName("ICMSSN102").getLength());
+        assertEquals(1, xml.getElementsByTagName("PISOutr").getLength());
+        assertEquals(1, xml.getElementsByTagName("COFINSOutr").getLength());
+        assertEquals(0, xml.getElementsByTagName("PISNT").getLength());
+        assertEquals("0.00", text(xml, "vPIS"));
+        assertEquals("0.00", text(xml, "vCOFINS"));
+    }
+
+    @Test
+    void rejectsUnapprovedOtherContributionAmountsAndInvalidCest() {
+        NfceXmlBuilder.Draft source = draft("Cafe", "12.50", "12.50");
+        NfceXmlBuilder.Item item = source.items().get(0);
+        NfceXmlBuilder.OtherContribution zero = new NfceXmlBuilder.OtherContribution(
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+        NfceXmlBuilder.OtherContribution nonzero = new NfceXmlBuilder.OtherContribution(
+                BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("0.01"));
+        NfceXmlBuilder.Item badTax = new NfceXmlBuilder.Item(item.code(), item.description(),
+                item.gtin(), item.ncm(), item.cfop(), item.unit(), item.quantity(),
+                item.unitPrice(), item.total(),
+                new NfceXmlBuilder.Taxes("0", "102", "99", "99", nonzero, zero));
+        assertThrows(IllegalArgumentException.class,
+                () -> builder.buildHomologation(replaceItem(source, badTax)));
+        NfceXmlBuilder.Item badCest = new NfceXmlBuilder.Item(item.code(), item.description(),
+                item.gtin(), item.ncm(), "123", item.cfop(), item.unit(), item.quantity(),
+                item.unitPrice(), item.total(), item.taxes());
+        assertThrows(IllegalArgumentException.class,
+                () -> builder.buildHomologation(replaceItem(source, badCest)));
+    }
+
     private static NfceXmlBuilder.Draft replaceItem(NfceXmlBuilder.Draft source, NfceXmlBuilder.Item item) {
         return new NfceXmlBuilder.Draft(source.issuer(), source.operation(), source.series(), source.number(),
                 source.randomCode(), source.issuedAt(), List.of(item), source.cashPaid());
