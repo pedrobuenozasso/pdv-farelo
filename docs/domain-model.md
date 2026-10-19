@@ -6155,9 +6155,12 @@ resultado incerto não produzem autorização. O componente não chama a SEFAZ,
 não é chamado pelo caixa e não libera emissão automática. Persistência de
 rejeição e consulta de envio incerto ainda são etapas separadas.
 
-O `POST` administrativo de transição é limitado aos estados preparatórios:
-ele não pode marcar uma nota como `AUTHORIZED`, `REJECTED` ou `CANCELLED`.
-Esses estados devem resultar da resposta ou do evento fiscal correspondente.
+O `POST` administrativo de transição permite apenas `PENDING` →
+`PROCESSING`. Ele não pode marcar uma nota como `AUTHORIZED`, `REJECTED`,
+`CANCELLED` ou `CONTINGENCY`: os três primeiros exigem resposta/evento
+fiscal correspondente, e contingência exige XML assinado no modo legal
+apropriado. A tabela de transição do domínio continua disponível para os
+produtores internos quando houver evidência fiscal.
 
 ### Registro de rejeição (FARELO-176)
 
@@ -6169,7 +6172,8 @@ o motivo, o SOAP original e o XML assinado enviado, mudando o documento para
 retido no banco para auditoria. A migration V58 acrescenta essas colunas.
 
 Autorização, lote pendente, resposta incompleta, denegação e duplicidade
-(`204`, `205`, `206`, `218`, `539`) **não** são registrados como rejeição:
+(`204`, `205`, `206`, `218`, `539`) e códigos de denegação
+(`301`, `302`, `303`) **não** são registrados como rejeição:
 exigem consulta pela chave antes de decidir o destino do documento. Essa
 distinção segue os [códigos do MOC](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=J+I+v4eN00E%3D)
 e os [exemplos oficiais de rejeições NFC-e](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=R7Y%2FbEE%2FRM8%3D).

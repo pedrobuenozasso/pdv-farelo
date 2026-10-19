@@ -2872,6 +2872,14 @@ subseção FARELO-157, para a tabela completa com o raciocínio por aresta):
 | `REJECTED` | — (terminal) |
 | `CANCELLED` | — (terminal) |
 
+A tabela descreve as transições internas possíveis. Nesta rota manual,
+somente `PROCESSING` pode ser solicitado a partir de `PENDING`.
+`AUTHORIZED`, `REJECTED`, `CANCELLED` e `CONTINGENCY` exigem a evidência
+fiscal correspondente e retornam `409 FISCAL_DOCUMENT_INVALID_TRANSITION`
+se solicitados aqui. Em particular, entrar em contingência requer XML
+assinado com as informações legais do modo de emissão, ainda não produzido
+por esta rota.
+
 **Response — `200 OK`**
 
 `FiscalDocumentResponse` atualizado, mesmo formato do `GET

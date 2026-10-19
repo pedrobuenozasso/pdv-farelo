@@ -17,8 +17,9 @@ final class SefazSpRejectionParser {
     private static final String SERVICE_NS = "http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4";
     private static final String NFE_NS = "http://www.portalfiscal.inf.br/nfe";
     private static final int MAX_RESPONSE_BYTES = 5_000_000;
-    // These statuses may refer to an existing fiscal record; consult by key.
-    private static final Set<String> RECONCILE_FIRST = Set.of("204", "205", "206", "218", "539");
+    // Duplicates need key reconciliation; denegation needs separate handling.
+    private static final Set<String> RECONCILE_FIRST = Set.of(
+            "204", "205", "206", "218", "301", "302", "303", "539");
 
     private SefazSpRejectionParser() { }
 

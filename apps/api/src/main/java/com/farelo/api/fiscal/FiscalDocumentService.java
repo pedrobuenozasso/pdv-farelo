@@ -305,7 +305,8 @@ public class FiscalDocumentService {
         // must be recorded with SEFAZ evidence, never asserted by a user.
         if (newStatus == FiscalDocumentStatus.AUTHORIZED
                 || newStatus == FiscalDocumentStatus.REJECTED
-                || newStatus == FiscalDocumentStatus.CANCELLED) {
+                || newStatus == FiscalDocumentStatus.CANCELLED
+                || newStatus == FiscalDocumentStatus.CONTINGENCY) {
             throw new FiscalDocumentInvalidTransitionException(id, document.getStatus(), newStatus);
         }
 

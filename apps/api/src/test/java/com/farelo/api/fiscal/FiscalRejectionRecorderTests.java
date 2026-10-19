@@ -42,7 +42,7 @@ class FiscalRejectionRecorderTests {
         var repository = FiscalAuthorizationRecorderTests.repository(
                 fixture.request().documentId(), null, saves);
         var recorder = new FiscalRejectionRecorder(repository);
-        for (String status : new String[]{"100", "204", "539"}) {
+        for (String status : new String[]{"100", "204", "301", "302", "303", "539"}) {
             assertThrows(IllegalArgumentException.class, () -> recorder.record(fixture.request(),
                     new FiscalAuthorizationResponse(
                             FiscalAuthorizationRecorderTests.reply(fixture.request().accessKey(), status))));

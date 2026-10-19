@@ -204,9 +204,9 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
                         document.getId())
                         .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"status\":\"CONTINGENCY\"}"))
+                        .content("{\"status\":\"PROCESSING\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CONTINGENCY"));
+                .andExpect(jsonPath("$.status").value("PROCESSING"));
     }
 
     @Test
@@ -266,7 +266,7 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
         String token = tokenFor(UserRole.ADMIN);
         for (FiscalDocumentStatus outcome : new FiscalDocumentStatus[]{
                 FiscalDocumentStatus.AUTHORIZED, FiscalDocumentStatus.REJECTED,
-                FiscalDocumentStatus.CANCELLED}) {
+                FiscalDocumentStatus.CANCELLED, FiscalDocumentStatus.CONTINGENCY}) {
             FiscalDocument document = newDocument(TRANSITION_INVALID_MOVE_NUMBER);
             document.setStatus(outcome == FiscalDocumentStatus.CANCELLED
                     ? FiscalDocumentStatus.AUTHORIZED : FiscalDocumentStatus.PROCESSING);
