@@ -6018,3 +6018,31 @@ não transmite e não registra autorização. O leiaute/XSD não foi fixado nest
 etapa porque as notas técnicas e seus prazos mudam; FARELO-172 a 174 devem
 selecionar o leiaute vigente antes de qualquer teste com a SEFAZ. A seleção
 de ambiente não substitui credenciamento, certificado nem validação contábil.
+
+## Rascunho XML NFC-e (FARELO-172)
+
+`NfceXmlBuilder#buildHomologation` cria um XML **não assinado** para o modelo 65,
+versão 4.00, `tpAmb=2` e operação presencial interna em São Paulo. A entrada
+traz CNPJ, IE, CRT, endereço, número/série, itens, NCM, CFOP, códigos de
+impostos e valor pago de forma explícita. O construtor não lê perfis fiscais
+pendentes nem escolhe códigos tributários pelo nome do produto. Calcula a
+chave de 44 dígitos (módulo 11), soma produtos, exige pagamento em dinheiro
+igual ao total e escapa texto XML. Para homologação, a descrição do primeiro
+item segue a regra oficial de ambiente sem valor fiscal.
+
+O subconjunto deliberado é estreito: CRT 1 com ICMS `ICMSSN102` ou CRT 3 com
+`ICMS40`, PIS/COFINS não tributados, `SEM GTIN`, sem desconto/frete/troco e
+pagamento somente em dinheiro. Todos esses códigos ainda precisam ser
+fornecidos e aprovados para a operação concreta; suportar um código no
+construtor **não o torna correto para o Farelo**. Valores ou formas de
+pagamento fora desse subconjunto são rejeitados. A saída não possui assinatura
+digital nem `infNFeSupl`/QR Code (dependente do CSC) e não é usada por
+`FiscalProvider`; nenhum endpoint emite nota. Antes da transmissão, é
+obrigatório baixar e validar contra o XSD oficial vigente, completar os grupos
+fiscais requeridos, assinatura, QR Code e demais regras aplicáveis. Referências:
+[MOC 7.0, Anexo I](https://hom.nfe.fazenda.gov.br/PORTAL/exibirArquivo.aspx?conteudo=DQFCIFUzszw%3D),
+[esquemas oficiais](https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?AspxAutoDetectCookieSupport=1&tipoConteudo=BMPFMBoln3w%3D)
+e [regra de descrição do primeiro item em homologação](https://hom.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=46D5BItDXwU%3D).
+As sequências `orig`/`CST` de `ICMS40` e `orig`/`CSOSN` de `ICMSSN102`
+foram conferidas nas [tabelas oficiais do leiaute](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=9bznzUXCXr0%3D);
+isso não substitui validar o XML integral com XSD atual.

@@ -3172,3 +3172,8 @@ definir `FARELO_NFCE_MODE=PRODUCTION` **e**
 `FARELO_NFCE_ALLOW_PRODUCTION=true`; selecionar só o modo faz a aplicação
 falhar na inicialização. A configuração centraliza os URLs oficiais dos
 serviços, mas ainda não existe cliente HTTP, XML, assinatura ou emissão.
+
+FARELO-172 adiciona um construtor interno de rascunho XML NFC-e apenas para
+homologação (`NfceXmlBuilder`), sem endpoint novo. O resultado é não assinado,
+sem QR Code/CSC e não pode ser transmitido; veja `docs/domain-model.md` para
+o subconjunto fiscal suportado e as validações pendentes.
