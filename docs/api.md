@@ -3177,3 +3177,7 @@ FARELO-172 adiciona um construtor interno de rascunho XML NFC-e apenas para
 homologação (`NfceXmlBuilder`), sem endpoint novo. O resultado é não assinado,
 sem QR Code/CSC e não pode ser transmitido; veja `docs/domain-model.md` para
 o subconjunto fiscal suportado e as validações pendentes.
+
+FARELO-173 adiciona assinatura XMLDSig interna para o rascunho de homologação,
+sem endpoint novo, armazenamento de certificado ou transmissão. A assinatura
+isolada não altera o bloqueio de emissão descrito acima.

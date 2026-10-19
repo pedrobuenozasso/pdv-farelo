@@ -6046,3 +6046,24 @@ e [regra de descrição do primeiro item em homologação](https://hom.nfe.fazen
 As sequências `orig`/`CST` de `ICMS40` e `orig`/`CSOSN` de `ICMSSN102`
 foram conferidas nas [tabelas oficiais do leiaute](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=9bznzUXCXr0%3D);
 isso não substitui validar o XML integral com XSD atual.
+
+## Assinatura XML NFC-e (FARELO-173)
+
+`NfceXmlSigner#signHomologation` assina um XML não assinado do modelo 65 em
+homologação. Aceita chave privada RSA e certificado X.509 fornecidos pelo
+chamador, sem ler arquivo, senha ou variável de ambiente, e insere apenas o
+certificado final em `X509Data`. Usa XMLDSig enveloped sobre `infNFe` com
+`Reference URI="#NFe..."`, canonicalização inclusiva e RSA-SHA1/SHA1,
+conforme o [MOC 7.0 — Visão Geral](https://www.nfe.fazenda.gov.br/PORTAl/exibirArquivo.aspx?conteudo=CGT8ZmsZjcc%3D)
+e a [tabela oficial de assinatura](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=HO2V+vzhFBk%3D).
+SHA-1 é mantido aqui por exigência do leiaute consultado; nenhuma outra
+finalidade criptográfica do sistema usa esse algoritmo.
+
+Antes de assinar, o componente bloqueia DTD/entidades externas, exige
+namespace/versão NFC-e, rejeita assinatura ou `Id` extra, confere os campos
+da chave de acesso e `tpAmb=2`, e verifica se chave privada e certificado
+combinam. O certificado de teste é gerado inteiramente em memória. **Assinatura
+criptograficamente válida não significa NFC-e válida**: ainda faltam XSD
+vigente, validações de negócio/tributos, vínculo do certificado à empresa,
+CSC/QR Code e autorização da SEFAZ. O componente não é conectado a endpoint,
+`FiscalProvider` nem ambiente de produção.
