@@ -6031,15 +6031,16 @@ igual ao total e escapa texto XML. Para homologação, a descrição do primeiro
 item segue a regra oficial de ambiente sem valor fiscal.
 
 O subconjunto deliberado é estreito: CRT 1 com ICMS `ICMSSN102` ou CRT 3 com
-`ICMS40`, PIS/COFINS não tributados, `SEM GTIN`, sem desconto/frete/troco e
+`ICMS40`, PIS/COFINS não tributados ou CST `99` explicitamente zerados,
+`SEM GTIN`, sem desconto/frete/troco e
 pagamento somente em dinheiro. Todos esses códigos ainda precisam ser
 fornecidos e aprovados para a operação concreta; suportar um código no
 construtor **não o torna correto para o Farelo**. Valores ou formas de
-pagamento fora desse subconjunto são rejeitados. A saída não possui assinatura
-digital nem `infNFeSupl`/QR Code (dependente do CSC) e não é usada por
-`FiscalProvider`; nenhum endpoint emite nota. Antes da transmissão, é
-obrigatório baixar e validar contra o XSD oficial vigente, completar os grupos
-fiscais requeridos, assinatura, QR Code e demais regras aplicáveis. Referências:
+pagamento fora desse subconjunto são rejeitados. A saída do construtor não
+possui assinatura digital nem `infNFeSupl`; esses passos são componentes
+internos separados. Nenhum endpoint emite nota. Antes da transmissão real,
+é obrigatório confirmar o XSD vigente, os grupos fiscais e demais regras
+aplicáveis. Referências:
 [MOC 7.0, Anexo I](https://hom.nfe.fazenda.gov.br/PORTAL/exibirArquivo.aspx?conteudo=DQFCIFUzszw%3D),
 [esquemas oficiais](https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?AspxAutoDetectCookieSupport=1&tipoConteudo=BMPFMBoln3w%3D)
 e [regra de descrição do primeiro item em homologação](https://hom.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=46D5BItDXwU%3D).
@@ -6106,3 +6107,17 @@ define os três parâmetros `chNFe|3|tpAmb` e dispensa CSC nesse leiaute.
 Teste local comprova que acrescentar o suplemento preserva a assinatura e
 continua validando no XSD 010f. A aceitação efetiva em homologação e as
 regras locais ainda precisam ser comprovadas antes de liberar emissão.
+
+### Transporte de homologação (FARELO-174)
+
+`SefazSpNfceProvider` implementa a fronteira `FiscalProvider` para **um**
+`enviNFe` síncrono (`indSinc=1`) em SOAP 1.2, apenas no endpoint fixo de
+homologação da SEFAZ-SP. Recebe um `HttpClient` mTLS configurado fora da classe;
+não é registrado como bean nem chamado pelo caixa. Confere chave, ambiente,
+modelo, QR e referência da assinatura antes de enviar. O lote contém uma nota
+e não há retry automático: falha de rede ou resposta incompleta gera
+`FiscalSubmissionUncertainException`, exigindo consulta pela chave. Um teste
+com chave e certificado fictícios verifica a assinatura **dentro do envelope
+SOAP** e que a chamada simulada acontece uma única vez. Nenhum XML real foi
+enviado; WSDL e retorno da SEFAZ ainda precisam ser comprovados com mTLS em
+homologação antes de conectar o fluxo de vendas.

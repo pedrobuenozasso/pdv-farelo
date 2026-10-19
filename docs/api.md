@@ -3193,3 +3193,10 @@ O QR Code v3 online de homologação é adicionado depois da assinatura por
 `NfceQrCodeV3`, sem CSC. A função recusa XML sem assinatura, ambiente de
 produção, contingência e duplicação do suplemento. Nenhuma rota HTTP foi
 criada; não há transmissão automática nem liberação do caixa fiscal.
+
+`SefazSpNfceProvider` é um adaptador interno para envio único de lote NFC-e
+em homologação por SOAP 1.2. Depende de um `HttpClient` mTLS injetado pelo
+chamador; não é um bean ativo. Retorna o SOAP bruto ao futuro tratamento de
+autorização/rejeição (FARELO-175/176). Em erro de comunicação, o resultado é
+incerto e exige consulta pela chave antes de qualquer repetição. Não há rota
+HTTP nova nem emissão a partir do PDV.
