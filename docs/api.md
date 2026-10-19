@@ -3188,3 +3188,8 @@ tempo de execução; não há rota HTTP para enviar certificado ou senha.
 O rascunho XML FARELO-172 também aceita CEST explícito de sete dígitos e
 PIS/COFINS CST `99` com base, alíquota e valor explicitamente zerados. Isso
 não cria endpoint nem libera transmissão fiscal.
+
+O QR Code v3 online de homologação é adicionado depois da assinatura por
+`NfceQrCodeV3`, sem CSC. A função recusa XML sem assinatura, ambiente de
+produção, contingência e duplicação do suplemento. Nenhuma rota HTTP foi
+criada; não há transmissão automática nem liberação do caixa fiscal.

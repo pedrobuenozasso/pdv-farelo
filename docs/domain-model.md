@@ -6094,5 +6094,15 @@ precisa ser validada por ID e o XML integral precisa passar no XSD vigente.
 Uma fixture com emitente e certificado fictícios, `CEST` e os ramos `Outr`
 zerados passa no XSD `PL_010f_v1.04` após assinatura XMLDSig. O XML sem
 assinatura não passa, como esperado. Este teste comprova somente a estrutura
-da fixture; QR/CSC, regras de validação da SEFAZ, dados reais e autorização
+da fixture; regras de validação da SEFAZ, dados reais e autorização
 continuam pendentes.
+
+O componente interno `NfceQrCodeV3` acrescenta `infNFeSupl` ao XML assinado
+somente para NFC-e **online de homologação em São Paulo**, com a URL de QR
+Code v3 e a URL de consulta publicadas pela
+[SEFAZ-SP](https://portal.fazenda.sp.gov.br/servicos/nfce/Paginas/WebServices.aspx).
+O [manual nacional v6.0](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=k%2FIuuaW4YiY%3D)
+define os três parâmetros `chNFe|3|tpAmb` e dispensa CSC nesse leiaute.
+Teste local comprova que acrescentar o suplemento preserva a assinatura e
+continua validando no XSD 010f. A aceitação efetiva em homologação e as
+regras locais ainda precisam ser comprovadas antes de liberar emissão.

@@ -74,6 +74,19 @@ class NfceXmlSignerTests {
     @Test
     void signedObservedFareloTaxBranchesValidateAgainstOfficial2026Schema() throws Exception {
         String signed = SIGNER.signHomologation(unsignedObservedTaxes(), pair.getPrivate(), certificate);
+        String withQrCode = new NfceQrCodeV3().addToSignedHomologation(signed);
+        Document document = parse(withQrCode);
+        Element inf = (Element) document.getElementsByTagNameNS(
+                "http://www.portalfiscal.inf.br/nfe", "infNFe").item(0);
+        Element signature = (Element) document.getElementsByTagNameNS(XMLSignature.XMLNS, "Signature").item(0);
+        inf.setIdAttribute("Id", true);
+        DOMValidateContext context = new DOMValidateContext(certificate.getPublicKey(), signature);
+        context.setProperty("org.jcp.xml.dsig.secureValidation", false);
+        assertTrue(XMLSignatureFactory.getInstance("DOM").unmarshalXMLSignature(context).validate(context));
+        assertEquals("https://www.homologacao.nfce.fazenda.sp.gov.br/qrcode?p="
+                        + inf.getAttribute("Id").substring(3) + "|3|2",
+                document.getElementsByTagNameNS("http://www.portalfiscal.inf.br/nfe", "qrCode")
+                        .item(0).getTextContent());
         var resource = getClass().getResource("/nfe-xsd/PL_010f_v1.04/nfe_v4.00.xsd");
         assertTrue(resource != null);
         SchemaFactory factory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
@@ -82,7 +95,18 @@ class NfceXmlSignerTests {
         var validator = factory.newSchema(resource).newValidator();
         validator.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
         validator.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-        validator.validate(new StreamSource(new StringReader(signed)));
+        validator.validate(new StreamSource(new StringReader(withQrCode)));
+    }
+
+    @Test
+    void qrCodeV3RefusesUnsignedProductionOrRepeatedDecoration() throws Exception {
+        NfceQrCodeV3 qr = new NfceQrCodeV3();
+        assertThrows(IllegalArgumentException.class, () -> qr.addToSignedHomologation(unsigned()));
+        String signed = SIGNER.signHomologation(unsigned(), pair.getPrivate(), certificate);
+        assertThrows(IllegalArgumentException.class,
+                () -> qr.addToSignedHomologation(signed.replace("<tpAmb>2", "<tpAmb>1")));
+        String decorated = qr.addToSignedHomologation(signed);
+        assertThrows(IllegalArgumentException.class, () -> qr.addToSignedHomologation(decorated));
     }
 
     @Test
