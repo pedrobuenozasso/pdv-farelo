@@ -6090,3 +6090,9 @@ define o CEST, e a [orientação oficial para Simples Nacional](https://www.nfe.
 mostra o ramo `PISOutr` CST `99` com base, alíquota e valor. Essas evidências
 não aprovam a classificação de cada produto Farelo; a matriz fiscal ainda
 precisa ser validada por ID e o XML integral precisa passar no XSD vigente.
+
+Uma fixture com emitente e certificado fictícios, `CEST` e os ramos `Outr`
+zerados passa no XSD `PL_010f_v1.04` após assinatura XMLDSig. O XML sem
+assinatura não passa, como esperado. Este teste comprova somente a estrutura
+da fixture; QR/CSC, regras de validação da SEFAZ, dados reais e autorização
+continuam pendentes.

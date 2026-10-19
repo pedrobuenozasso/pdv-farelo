@@ -11,6 +11,8 @@ import javax.xml.crypto.dsig.XMLSignature;
 import javax.xml.crypto.dsig.XMLSignatureFactory;
 import javax.xml.crypto.dsig.dom.DOMValidateContext;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.transform.stream.StreamSource;
+import javax.xml.validation.SchemaFactory;
 import java.io.ByteArrayInputStream;
 import java.io.StringReader;
 import java.math.BigDecimal;
@@ -70,6 +72,20 @@ class NfceXmlSignerTests {
     }
 
     @Test
+    void signedObservedFareloTaxBranchesValidateAgainstOfficial2026Schema() throws Exception {
+        String signed = SIGNER.signHomologation(unsignedObservedTaxes(), pair.getPrivate(), certificate);
+        var resource = getClass().getResource("/nfe-xsd/PL_010f_v1.04/nfe_v4.00.xsd");
+        assertTrue(resource != null);
+        SchemaFactory factory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+        factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        factory.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "file");
+        var validator = factory.newSchema(resource).newValidator();
+        validator.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        validator.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        validator.validate(new StreamSource(new StringReader(signed)));
+    }
+
+    @Test
     void refusesMalformedOrWrongKeyXmlAndDoesNotSilentlyResign() throws Exception {
         String raw = unsigned();
         assertThrows(IllegalArgumentException.class,
@@ -104,6 +120,22 @@ class NfceXmlSignerTests {
         NfceXmlBuilder.Item item = new NfceXmlBuilder.Item("P1", "Cafe", "SEM GTIN", "19059090",
                 "5102", "UN", new BigDecimal("1.0000"), new BigDecimal("12.5000"),
                 new BigDecimal("12.50"), new NfceXmlBuilder.Taxes("0", "102", "07", "07"));
+        return new NfceXmlBuilder().buildHomologation(new NfceXmlBuilder.Draft(issuer, "VENDA", 1,
+                123, "12345678", OffsetDateTime.parse("2026-10-18T12:00:00-03:00"), List.of(item),
+                new BigDecimal("12.50"))).unsignedXml();
+    }
+
+    private static String unsignedObservedTaxes() {
+        NfceXmlBuilder.Address address = new NfceXmlBuilder.Address("Rua Exemplo", "100", "Centro",
+                "3550308", "Sao Paulo", "01001000");
+        NfceXmlBuilder.Issuer issuer = new NfceXmlBuilder.Issuer("11222333000181", "Empresa Exemplo LTDA",
+                "123456789012", "1", address);
+        NfceXmlBuilder.OtherContribution zero = new NfceXmlBuilder.OtherContribution(
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+        NfceXmlBuilder.Taxes taxes = new NfceXmlBuilder.Taxes("0", "102", "99", "99", zero, zero);
+        NfceXmlBuilder.Item item = new NfceXmlBuilder.Item("P1", "Cafe", "SEM GTIN", "19059090",
+                "0300100", "5102", "UN", new BigDecimal("1.0000"), new BigDecimal("12.5000"),
+                new BigDecimal("12.50"), taxes);
         return new NfceXmlBuilder().buildHomologation(new NfceXmlBuilder.Draft(issuer, "VENDA", 1,
                 123, "12345678", OffsetDateTime.parse("2026-10-18T12:00:00-03:00"), List.of(item),
                 new BigDecimal("12.50"))).unsignedXml();
