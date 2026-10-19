@@ -281,8 +281,8 @@ public class FiscalDocumentService {
      *
      * <p>Delegates the actual legality check/mutation to {@link
      * #transition(UUID, FiscalDocumentStatus)} above once ownership is
-     * confirmed — this overload only adds the comanda-scoping concern, not
-     * a second copy of the transition rules.
+     * confirmed, except that fiscal outcomes require SEFAZ evidence and
+     * cannot be asserted through this manual HTTP path.
      *
      * @throws com.farelo.api.command.CommandNotFoundException if {@code
      *     commandNumber} doesn't exist.
@@ -299,6 +299,14 @@ public class FiscalDocumentService {
 
         if (!document.getCommand().getId().equals(command.getId())) {
             throw new FiscalDocumentNotFoundException(id);
+        }
+
+        // This overload backs the manual HTTP action. A legal fiscal outcome
+        // must be recorded with SEFAZ evidence, never asserted by a user.
+        if (newStatus == FiscalDocumentStatus.AUTHORIZED
+                || newStatus == FiscalDocumentStatus.REJECTED
+                || newStatus == FiscalDocumentStatus.CANCELLED) {
+            throw new FiscalDocumentInvalidTransitionException(id, document.getStatus(), newStatus);
         }
 
         return applyTransition(document, newStatus);

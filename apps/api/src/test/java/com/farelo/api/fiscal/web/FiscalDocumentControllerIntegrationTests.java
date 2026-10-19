@@ -262,6 +262,30 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void manualTransitionCannotForgeSefazOutcomes() throws Exception {
+        String token = tokenFor(UserRole.ADMIN);
+        for (FiscalDocumentStatus outcome : new FiscalDocumentStatus[]{
+                FiscalDocumentStatus.AUTHORIZED, FiscalDocumentStatus.REJECTED,
+                FiscalDocumentStatus.CANCELLED}) {
+            FiscalDocument document = newDocument(TRANSITION_INVALID_MOVE_NUMBER);
+            document.setStatus(outcome == FiscalDocumentStatus.CANCELLED
+                    ? FiscalDocumentStatus.AUTHORIZED : FiscalDocumentStatus.PROCESSING);
+            fiscalDocumentRepository.saveAndFlush(document);
+
+            mockMvc.perform(post("/api/v1/commands/{number}/fiscal-documents/{id}/transition",
+                            TRANSITION_INVALID_MOVE_NUMBER, document.getId())
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"" + outcome + "\"}"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("FISCAL_DOCUMENT_INVALID_TRANSITION"));
+            assertThat(fiscalDocumentRepository.findById(document.getId()).orElseThrow().getStatus())
+                    .isEqualTo(outcome == FiscalDocumentStatus.CANCELLED
+                            ? FiscalDocumentStatus.AUTHORIZED : FiscalDocumentStatus.PROCESSING);
+        }
+    }
+
+    @Test
     void transitionReturnsNotFoundForUnknownDocumentId() throws Exception {
         mockMvc.perform(post(
                         "/api/v1/commands/{number}/fiscal-documents/{id}/transition",

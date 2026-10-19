@@ -6154,3 +6154,7 @@ igual à enviada. Grava protocolo, data/hora, XML processado e estado
 resultado incerto não produzem autorização. O componente não chama a SEFAZ,
 não é chamado pelo caixa e não libera emissão automática. Persistência de
 rejeição e consulta de envio incerto ainda são etapas separadas.
+
+O `POST` administrativo de transição é limitado aos estados preparatórios:
+ele não pode marcar uma nota como `AUTHORIZED`, `REJECTED` ou `CANCELLED`.
+Esses estados devem resultar da resposta ou do evento fiscal correspondente.

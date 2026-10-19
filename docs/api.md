@@ -3213,3 +3213,5 @@ endpoint e ação SOAP. Nenhuma NFC-e foi transmitida nessa verificação.
 confirmada para documento já em processamento, após validar lote, protocolo,
 ambiente e chave. Salva `nfeProc`, protocolo, horário e estado `AUTHORIZED` na
 mesma transação. Não há endpoint novo nem ligação com o fluxo do caixa.
+A rota administrativa de transição rejeita `AUTHORIZED`, `REJECTED` e
+`CANCELLED` com 409; esses resultados exigem evidência do fluxo fiscal próprio.

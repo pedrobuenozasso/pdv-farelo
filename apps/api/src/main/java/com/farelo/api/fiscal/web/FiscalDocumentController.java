@@ -75,7 +75,9 @@ import java.util.UUID;
  * directly (bypassing this HTTP layer entirely, as it naturally would from
  * inside a backend process), leaving this endpoint as a genuinely separate,
  * still-useful manual/operability surface (e.g. support staff manually
- * resolving a stuck document) rather than something to delete later.
+ * resolving a stuck document) rather than something to delete later. As
+ * Epic 12 records real SEFAZ outcomes, this route only permits preparatory
+ * moves; it cannot assert authorization, rejection or cancellation.
  *
  * <p><b>{@link #transition} requires {@code ADMIN} or {@code MANAGER}</b>,
  * unlike {@code PrintJobController#retry}'s deliberately broad
