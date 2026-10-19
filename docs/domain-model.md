@@ -6011,7 +6011,8 @@ automaticamente. Os endereços são os publicados na
 [página oficial de WebServices NFC-e da SEFAZ-SP](https://portal.fazenda.sp.gov.br/servicos/nfce/Paginas/WebServices.aspx).
 O texto publicado para o URL de autorização contém um erro de formatação
 (`ttps://`); o endereço no código usa `https://` e o mesmo host/caminho dos
-demais serviços. Antes de FARELO-174, confirmar o WSDL real desse serviço.
+demais serviços. O WSDL real de homologação foi obtido em 19/10/2026 com
+autenticação mútua A1 e confirma esse endpoint.
 
 Esta configuração não implementa o `FiscalProvider`, não cria XML, não assina,
 não transmite e não registra autorização. O leiaute/XSD não foi fixado nesta
@@ -6130,5 +6131,8 @@ conserva a cadeia completa do PKCS#12 para autenticação de cliente e valida
 o servidor por TLS. Uma cópia da raiz pública é usada somente nos testes; o
 A1 real e a senha não entram no Git. O certificado de servidor da SEFAZ-SP
 não foi aceito pelo trust store padrão do Mac; a raiz do ITI permitiu validar
-o TLS, mas o WSDL não respondeu sem autenticação do cliente. A primeira
-conexão mTLS real ainda é pendente.
+o TLS. Em 19/10/2026, uma consulta **GET** ao WSDL de homologação com mTLS
+retornou HTTP 200. O contrato público obtido confirma SOAP 1.2, operação
+`nfeAutorizacaoLote`, `soapAction`, elemento `nfeDadosMsg` e endereço usados
+pelo adaptador; sua cópia pública está em `src/test/resources`. Essa consulta
+não enviou NFC-e, não comprova autorização fiscal e não libera emissão.

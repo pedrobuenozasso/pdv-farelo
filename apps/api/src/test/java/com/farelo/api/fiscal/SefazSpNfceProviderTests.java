@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.security.KeyPairGenerator;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -24,6 +25,35 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SefazSpNfceProviderTests {
     private static final String NFE_NS = "http://www.portalfiscal.inf.br/nfe";
+
+    @Test
+    void publishedHomologationWsdlMatchesEndpointAndSoapAction() throws Exception {
+        String wsdl = "http://schemas.xmlsoap.org/wsdl/";
+        String soap12 = "http://schemas.xmlsoap.org/wsdl/soap12/";
+        var factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        Document contract;
+        try (var input = Objects.requireNonNull(getClass().getResourceAsStream(
+                "/sefaz-sp-nfce-autorizacao4-homologacao.wsdl"))) {
+            contract = factory.newDocumentBuilder().parse(input);
+        }
+        var address = (org.w3c.dom.Element) contract.getElementsByTagNameNS(soap12, "address").item(0);
+        assertEquals("https://homologacao.nfce.fazenda.sp.gov.br/ws/NFeAutorizacao4.asmx",
+                address.getAttribute("location"));
+        var operations = contract.getElementsByTagNameNS(wsdl, "operation");
+        boolean matched = false;
+        for (int i = 0; i < operations.getLength(); i++) {
+            var operation = (org.w3c.dom.Element) operations.item(i);
+            var actions = operation.getElementsByTagNameNS(soap12, "operation");
+            if ("nfeAutorizacaoLote".equals(operation.getAttribute("name")) && actions.getLength() == 1) {
+                assertEquals("http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote",
+                        ((org.w3c.dom.Element) actions.item(0)).getAttribute("soapAction"));
+                matched = true;
+            }
+        }
+        assertTrue(matched);
+    }
 
     @Test
     void wrapsOneSignedQrCodeNfceInSynchronousSoap12AndKeepsSignatureValid() throws Exception {

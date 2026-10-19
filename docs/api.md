@@ -3205,3 +3205,6 @@ HTTP nova nem emissão a partir do PDV.
 pública ICP-Brasil v10, mais a senha como `char[]` em tempo de execução. Confere
 o A1 e a impressão oficial da raiz antes de criar o cliente mTLS. A senha
 não é colocada em URL, configuração do Git ou log.
+Em 19/10/2026, uma consulta GET com mTLS recebeu o WSDL de homologação da
+SEFAZ-SP. O contrato público está em `src/test/resources` e um teste confere
+endpoint e ação SOAP. Nenhuma NFC-e foi transmitida nessa verificação.
