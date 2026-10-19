@@ -3215,3 +3215,9 @@ ambiente e chave. Salva `nfeProc`, protocolo, horário e estado `AUTHORIZED` na
 mesma transação. Não há endpoint novo nem ligação com o fluxo do caixa.
 A rota administrativa de transição rejeita `AUTHORIZED`, `REJECTED` e
 `CANCELLED` com 409; esses resultados exigem evidência do fluxo fiscal próprio.
+
+`FiscalRejectionRecorder` registra internamente uma rejeição individual
+confirmada pela SEFAZ: código, motivo, resposta SOAP e XML enviado. O `GET`
+administrativo de documentos fiscais inclui `rejectionCode` e
+`rejectionReason`; não expõe o SOAP bruto. Duplicidade e resposta incerta
+continuam pendentes de consulta por chave. Nenhuma rota de emissão foi aberta.

@@ -145,6 +145,15 @@ public class FiscalDocument {
     @Column(name = "authorized_at")
     private OffsetDateTime authorizedAt;
 
+    @Column(name = "rejection_code", length = 3)
+    private String rejectionCode;
+
+    @Column(name = "rejection_reason", length = 255)
+    private String rejectionReason;
+
+    @Column(name = "rejection_response_xml", columnDefinition = "TEXT")
+    private String rejectionResponseXml;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -252,6 +261,30 @@ public class FiscalDocument {
 
     public void setAuthorizedAt(OffsetDateTime authorizedAt) {
         this.authorizedAt = authorizedAt;
+    }
+
+    public String getRejectionCode() {
+        return rejectionCode;
+    }
+
+    public void setRejectionCode(String rejectionCode) {
+        this.rejectionCode = rejectionCode;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
+    }
+
+    public void setRejectionReason(String rejectionReason) {
+        this.rejectionReason = rejectionReason;
+    }
+
+    public String getRejectionResponseXml() {
+        return rejectionResponseXml;
+    }
+
+    public void setRejectionResponseXml(String rejectionResponseXml) {
+        this.rejectionResponseXml = rejectionResponseXml;
     }
 
     public OffsetDateTime getCreatedAt() {

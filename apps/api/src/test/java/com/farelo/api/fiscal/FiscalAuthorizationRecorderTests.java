@@ -85,7 +85,7 @@ class FiscalAuthorizationRecorderTests {
         assertEquals(0, saves.get());
     }
 
-    private static FiscalDocumentRepository repository(UUID id, FiscalDocument document, AtomicInteger saves) {
+    static FiscalDocumentRepository repository(UUID id, FiscalDocument document, AtomicInteger saves) {
         return (FiscalDocumentRepository) Proxy.newProxyInstance(
                 FiscalDocumentRepository.class.getClassLoader(),
                 new Class<?>[]{FiscalDocumentRepository.class}, (proxy, method, args) -> {
@@ -98,6 +98,8 @@ class FiscalAuthorizationRecorderTests {
     }
 
     static String reply(String key, String noteStatus) {
+        String motive = "100".equals(noteStatus)
+                ? "Autorizado o uso da NFC-e" : "Rejeição: Falha no Schema XML da NFC-e";
         return """
                 <Envelope xmlns="http://www.w3.org/2003/05/soap-envelope"><Body>
                   <nfeResultMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
@@ -108,12 +110,12 @@ class FiscalAuthorizationRecorderTests {
                       <protNFe versao="4.00"><infProt>
                         <tpAmb>2</tpAmb><verAplic>SP_TESTE</verAplic><chNFe>%s</chNFe>
                         <dhRecbto>2026-10-19T12:00:00-03:00</dhRecbto>
-                        <nProt>%s</nProt><cStat>%s</cStat><xMotivo>Autorizado</xMotivo>
+                        <nProt>%s</nProt><cStat>%s</cStat><xMotivo>%s</xMotivo>
                       </infProt></protNFe>
                     </retEnviNFe>
                   </nfeResultMsg>
                 </Body></Envelope>
-                """.formatted(key, PROTOCOL, noteStatus);
+                """.formatted(key, PROTOCOL, noteStatus, motive);
     }
 
     private static Document parse(String xml) throws Exception {

@@ -69,6 +69,9 @@ class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private FiscalAuthorizationRecorder authorizationRecorder;
 
+    @Autowired
+    private FiscalRejectionRecorder rejectionRecorder;
+
     private Command command(int number) {
         return commandRepository.findByNumber(number).orElseThrow();
     }
@@ -125,6 +128,29 @@ class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
         assertThat(saved.getProtocolNumber()).isEqualTo("135260000000001");
         assertThat(saved.getAuthorizedAt()).isNotNull();
         assertThat(saved.getXmlContent()).contains("nfeProc", "protNFe");
+    }
+
+    @Test
+    void persistsDefiniteRejectionWithCodeReasonAndRawResponse() throws Exception {
+        var fixture = SefazSpNfceProviderTests.fixture();
+        FiscalDocument document = new FiscalDocument(command(SEEDED_COMMAND_NUMBER));
+        document.setStatus(FiscalDocumentStatus.PROCESSING);
+        document.setAccessKey(fixture.request().accessKey());
+        document = fiscalDocumentRepository.saveAndFlush(document);
+        var request = new FiscalAuthorizationRequest(document.getId(),
+                fixture.request().accessKey(), fixture.request().signedXml());
+        String reply = FiscalAuthorizationRecorderTests.reply(request.accessKey(), "215");
+
+        rejectionRecorder.record(request, new FiscalAuthorizationResponse(reply));
+
+        FiscalDocument saved = fiscalDocumentRepository.findById(document.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(FiscalDocumentStatus.REJECTED);
+        assertThat(saved.getRejectionCode()).isEqualTo("215");
+        assertThat(saved.getRejectionReason()).startsWith("Rejeição:");
+        assertThat(saved.getRejectionResponseXml()).isEqualTo(reply);
+        assertThat(saved.getXmlContent()).isEqualTo(request.signedXml());
+        assertThat(saved.getProtocolNumber()).isNull();
+        assertThat(saved.getAuthorizedAt()).isNull();
     }
 
     @Test
