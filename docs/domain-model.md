@@ -6121,3 +6121,14 @@ com chave e certificado fictícios verifica a assinatura **dentro do envelope
 SOAP** e que a chamada simulada acontece uma única vez. Nenhum XML real foi
 enviado; WSDL e retorno da SEFAZ ainda precisam ser comprovados com mTLS em
 homologação antes de conectar o fluxo de vendas.
+
+`SefazSpMutualTlsClientFactory` cria o `HttpClient` a partir do A1 externo e
+de um arquivo público da raiz SSL ICP-Brasil v10. Confere a impressão SHA-256
+`6e0bff069a26994c15de2c4888cc54af84882e5495b7fbf66be9ccffec7489f6`
+publicada pelo [ITI](https://www.gov.br/iti/pt-br/assuntos/repositorio/repositorio-ac-raiz),
+conserva a cadeia completa do PKCS#12 para autenticação de cliente e valida
+o servidor por TLS. Uma cópia da raiz pública é usada somente nos testes; o
+A1 real e a senha não entram no Git. O certificado de servidor da SEFAZ-SP
+não foi aceito pelo trust store padrão do Mac; a raiz do ITI permitiu validar
+o TLS, mas o WSDL não respondeu sem autenticação do cliente. A primeira
+conexão mTLS real ainda é pendente.

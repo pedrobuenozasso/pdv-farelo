@@ -3200,3 +3200,8 @@ chamador; não é um bean ativo. Retorna o SOAP bruto ao futuro tratamento de
 autorização/rejeição (FARELO-175/176). Em erro de comunicação, o resultado é
 incerto e exige consulta pela chave antes de qualquer repetição. Não há rota
 HTTP nova nem emissão a partir do PDV.
+
+`SefazSpMutualTlsClientFactory` aceita caminhos locais do A1 e da raiz
+pública ICP-Brasil v10, mais a senha como `char[]` em tempo de execução. Confere
+o A1 e a impressão oficial da raiz antes de criar o cliente mTLS. A senha
+não é colocada em URL, configuração do Git ou log.
