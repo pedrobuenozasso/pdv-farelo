@@ -21,6 +21,28 @@ public class FiscalAuthorizationRecorder {
         // Parsing happens before the row lock and before any mutation. A
         // rejection or ambiguous SOAP reply must never become AUTHORIZED.
         var authorization = SefazSpAuthorizationParser.parse(request, response);
+        return persist(request, authorization);
+    }
+
+    /** Reconciles a prior uncertain send by key; never resubmits the NFC-e. */
+    @Transactional
+    public FiscalConsultationResult reconcile(FiscalAuthorizationRequest request,
+                                              FiscalConsultationResponse response) {
+        Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(response, "response");
+        var outcome = SefazSpConsultationParser.parse(request, response);
+        if (outcome.kind() == SefazSpConsultationParser.Kind.NOT_FOUND) {
+            return FiscalConsultationResult.NOT_FOUND;
+        }
+        if (outcome.kind() != SefazSpConsultationParser.Kind.AUTHORIZED) {
+            return FiscalConsultationResult.UNRESOLVED;
+        }
+        persist(request, outcome.authorization());
+        return FiscalConsultationResult.AUTHORIZED;
+    }
+
+    private FiscalDocument persist(FiscalAuthorizationRequest request,
+                                   SefazSpAuthorizationParser.Authorized authorization) {
         FiscalDocument document = documents.findByIdForUpdate(request.documentId())
                 .orElseThrow(() -> new FiscalDocumentNotFoundException(request.documentId()));
         if (!request.accessKey().equals(document.getAccessKey())

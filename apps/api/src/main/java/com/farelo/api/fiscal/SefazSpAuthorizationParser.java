@@ -48,36 +48,7 @@ final class SefazSpAuthorizationParser {
             }
             OffsetDateTime.parse(text(batch, "dhRecbto"));
             Element protocol = child(batch, NFE_NS, "protNFe");
-            Element details = child(protocol, NFE_NS, "infProt");
-            if (!"4.00".equals(protocol.getAttribute("versao"))
-                    || !"2".equals(text(details, "tpAmb"))
-                    || !"100".equals(text(details, "cStat"))
-                    || !request.accessKey().equals(text(details, "chNFe"))
-                    || text(details, "verAplic").isBlank()
-                    || text(details, "xMotivo").isBlank()) {
-                throw new IllegalArgumentException("SEFAZ protocol is not authorization for this NFC-e");
-            }
-            String number = text(details, "nProt");
-            if (!number.matches("[0-9]{15}|[0-9]{17}")) {
-                throw new IllegalArgumentException("invalid SEFAZ protocol number");
-            }
-            OffsetDateTime receivedAt = OffsetDateTime.parse(text(details, "dhRecbto"));
-
-            // This validates the local key, model, QR and reference before
-            // the signed XML is stored alongside the SEFAZ protocol.
-            SefazSpNfceProvider.envelope(request);
-            Document signed = parseXml(request.signedXml());
-            if (!NFE_NS.equals(signed.getDocumentElement().getNamespaceURI())
-                    || !"NFe".equals(signed.getDocumentElement().getLocalName())) {
-                throw new IllegalArgumentException("invalid signed NFC-e");
-            }
-            Document processed = factory().newDocumentBuilder().newDocument();
-            Element root = processed.createElementNS(NFE_NS, "nfeProc");
-            root.setAttribute("versao", "4.00");
-            processed.appendChild(root);
-            root.appendChild(processed.importNode(signed.getDocumentElement(), true));
-            root.appendChild(processed.importNode(protocol, true));
-            return new Authorized(number, receivedAt, serialize(processed));
+            return fromProtocol(request, protocol);
         } catch (IllegalArgumentException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -86,7 +57,40 @@ final class SefazSpAuthorizationParser {
         }
     }
 
-    private static Document parseXml(String xml) throws Exception {
+    static Authorized fromProtocol(FiscalAuthorizationRequest request, Element protocol) throws Exception {
+        Element details = child(protocol, NFE_NS, "infProt");
+        if (!"4.00".equals(protocol.getAttribute("versao"))
+                || !"2".equals(text(details, "tpAmb"))
+                || !"100".equals(text(details, "cStat"))
+                || !request.accessKey().equals(text(details, "chNFe"))
+                || text(details, "verAplic").isBlank()
+                || text(details, "xMotivo").isBlank()) {
+            throw new IllegalArgumentException("SEFAZ protocol is not authorization for this NFC-e");
+        }
+        String number = text(details, "nProt");
+        if (!number.matches("[0-9]{15}|[0-9]{17}")) {
+            throw new IllegalArgumentException("invalid SEFAZ protocol number");
+        }
+        OffsetDateTime receivedAt = OffsetDateTime.parse(text(details, "dhRecbto"));
+
+        // This validates the local key, model, QR and reference before
+        // the signed XML is stored alongside the SEFAZ protocol.
+        SefazSpNfceProvider.envelope(request);
+        Document signed = parseXml(request.signedXml());
+        if (!NFE_NS.equals(signed.getDocumentElement().getNamespaceURI())
+                || !"NFe".equals(signed.getDocumentElement().getLocalName())) {
+            throw new IllegalArgumentException("invalid signed NFC-e");
+        }
+        Document processed = factory().newDocumentBuilder().newDocument();
+        Element root = processed.createElementNS(NFE_NS, "nfeProc");
+        root.setAttribute("versao", "4.00");
+        processed.appendChild(root);
+        root.appendChild(processed.importNode(signed.getDocumentElement(), true));
+        root.appendChild(processed.importNode(protocol, true));
+        return new Authorized(number, receivedAt, serialize(processed));
+    }
+
+    static Document parseXml(String xml) throws Exception {
         var builder = factory().newDocumentBuilder();
         builder.setErrorHandler(new org.xml.sax.helpers.DefaultHandler() {
             @Override public void fatalError(org.xml.sax.SAXParseException error)
@@ -109,7 +113,7 @@ final class SefazSpAuthorizationParser {
         return factory;
     }
 
-    private static Element child(Element parent, String namespace, String name) {
+    static Element child(Element parent, String namespace, String name) {
         Element found = null;
         for (Node node = parent.getFirstChild(); node != null; node = node.getNextSibling()) {
             if (node.getNodeType() == Node.ELEMENT_NODE
@@ -122,7 +126,7 @@ final class SefazSpAuthorizationParser {
         return found;
     }
 
-    private static String text(Element parent, String name) {
+    static String text(Element parent, String name) {
         return child(parent, NFE_NS, name).getTextContent().trim();
     }
 

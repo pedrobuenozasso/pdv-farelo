@@ -3221,3 +3221,9 @@ confirmada pela SEFAZ: código, motivo, resposta SOAP e XML enviado. O `GET`
 administrativo de documentos fiscais inclui `rejectionCode` e
 `rejectionReason`; não expõe o SOAP bruto. Duplicidade e resposta incerta
 continuam pendentes de consulta por chave. Nenhuma rota de emissão foi aberta.
+
+`SefazSpProtocolConsultationClient` faz somente consulta de chave no serviço
+fixo de homologação. `FiscalAuthorizationRecorder#reconcile` registra a
+autorização se a consulta trouxer protocolo `100` da mesma chave. `217` e
+outros resultados não provocam reenvio nem mudança de estado. O WSDL da
+consulta ainda precisa ser confirmado com A1; não há endpoint HTTP novo.

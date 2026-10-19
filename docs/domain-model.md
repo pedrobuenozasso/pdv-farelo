@@ -6174,3 +6174,20 @@ exigem consulta pela chave antes de decidir o destino do documento. Essa
 distinção segue os [códigos do MOC](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=J+I+v4eN00E%3D)
 e os [exemplos oficiais de rejeições NFC-e](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=R7Y%2FbEE%2FRM8%3D).
 Não há integração com o caixa ou transmissão automática nesta etapa.
+
+### Consulta por chave após envio incerto (FARELO-178, pré-requisito)
+
+`SefazSpProtocolConsultationClient` consulta uma única chave modelo 65 no
+serviço fixo de homologação `NFeConsultaProtocolo4`, usando o mesmo cliente
+mTLS externo. O pedido contém somente `consSitNFe`; nunca reenvia `NFe`.
+Uma falha de consulta não aciona nova transmissão. O endpoint foi conferido
+na [lista oficial da SEFAZ-SP](https://portal.fazenda.sp.gov.br/servicos/nfce/Paginas/WebServices.aspx);
+o WSDL desse serviço ainda precisa ser confirmado com A1.
+
+`FiscalAuthorizationRecorder#reconcile` só muda o documento para
+`AUTHORIZED` quando `retConsSitNFe` informa `100` e traz `protNFe` versão
+4.00, ambiente 2, mesma chave e protocolo de autorização. `217` (“não consta”)
+retorna `NOT_FOUND`, mas **não autoriza reenvio automático**; os demais
+resultados ficam `UNRESOLVED`. Um teste em PostgreSQL confirma a gravação de
+protocolo de 17 dígitos. A consulta não está ligada ao caixa e não implementa
+emissão offline/contingência legal; essas partes continuam pendentes.

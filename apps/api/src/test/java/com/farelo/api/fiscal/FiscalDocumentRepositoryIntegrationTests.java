@@ -154,6 +154,27 @@ class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void consultationProtocolResolvesPriorUncertainAuthorization() throws Exception {
+        var fixture = SefazSpNfceProviderTests.fixture();
+        FiscalDocument document = new FiscalDocument(command(SEEDED_COMMAND_NUMBER));
+        document.setStatus(FiscalDocumentStatus.PROCESSING);
+        document.setAccessKey(fixture.request().accessKey());
+        document = fiscalDocumentRepository.saveAndFlush(document);
+        var request = new FiscalAuthorizationRequest(document.getId(),
+                fixture.request().accessKey(), fixture.request().signedXml());
+
+        FiscalConsultationResult result = authorizationRecorder.reconcile(request,
+                new FiscalConsultationResponse(FiscalConsultationReconciliationTests.reply(
+                        request.accessKey(), "100", true)));
+
+        assertThat(result).isEqualTo(FiscalConsultationResult.AUTHORIZED);
+        FiscalDocument saved = fiscalDocumentRepository.findById(document.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(FiscalDocumentStatus.AUTHORIZED);
+        assertThat(saved.getProtocolNumber()).isEqualTo("13526000000000001");
+        assertThat(saved.getXmlContent()).contains("nfeProc", "protNFe");
+    }
+
+    @Test
     void savesEveryFiscalDocumentStatus() {
         Command command = command(SEEDED_COMMAND_NUMBER);
 
