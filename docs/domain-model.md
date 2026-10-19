@@ -6136,3 +6136,21 @@ retornou HTTP 200. O contrato público obtido confirma SOAP 1.2, operação
 `nfeAutorizacaoLote`, `soapAction`, elemento `nfeDadosMsg` e endereço usados
 pelo adaptador; sua cópia pública está em `src/test/resources`. Essa consulta
 não enviou NFC-e, não comprova autorização fiscal e não libera emissão.
+
+### Registro de autorização (FARELO-175)
+
+`FiscalAuthorizationRecorder` recebe o pedido já assinado e a resposta SOAP
+bruta de uma transmissão síncrona. Antes de alterar o banco, confere SOAP 1.2,
+`retEnviNFe` versão 4.00, homologação (`tpAmb=2`), lote processado (`104`),
+um protocolo da mesma chave com status `100`, número e horário de autorização.
+Também reaplica as conferências locais de chave, modelo, QR e referência da
+assinatura. Monta o `nfeProc` com a NFC-e assinada e o `protNFe` recebido; um
+teste confirma que a assinatura continua válida nesse XML.
+
+O registro ocorre em transação, com bloqueio da linha do documento, somente
+se o estado ainda for `PROCESSING` ou `CONTINGENCY` e a chave persistida for
+igual à enviada. Grava protocolo, data/hora, XML processado e estado
+`AUTHORIZED` juntos. Rejeição, chave divergente, resposta incompleta e
+resultado incerto não produzem autorização. O componente não chama a SEFAZ,
+não é chamado pelo caixa e não libera emissão automática. Persistência de
+rejeição e consulta de envio incerto ainda são etapas separadas.

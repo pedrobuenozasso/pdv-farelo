@@ -1,7 +1,9 @@
 package com.farelo.api.fiscal;
 
 import com.farelo.api.command.Command;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -37,5 +39,10 @@ public interface FiscalDocumentRepository extends JpaRepository<FiscalDocument, 
     // method's own (short) transaction has already closed.
     @Query("SELECT fd FROM FiscalDocument fd JOIN FETCH fd.command WHERE fd.id = :id")
     Optional<FiscalDocument> findByIdWithCommand(@Param("id") UUID id);
+
+    /** Serializes fiscal outcome writes for one document after a SEFAZ reply. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT fd FROM FiscalDocument fd WHERE fd.id = :id")
+    Optional<FiscalDocument> findByIdForUpdate(@Param("id") UUID id);
 
 }

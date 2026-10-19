@@ -6,6 +6,7 @@ import com.farelo.api.command.CommandRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -65,6 +66,9 @@ class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private CommandRepository commandRepository;
 
+    @Autowired
+    private FiscalAuthorizationRecorder authorizationRecorder;
+
     private Command command(int number) {
         return commandRepository.findByNumber(number).orElseThrow();
     }
@@ -91,6 +95,36 @@ class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
         assertThat(found).isPresent();
         assertThat(found.get().getStatus()).isEqualTo(FiscalDocumentStatus.PENDING);
         assertThat(found.get().getCommand().getId()).isEqualTo(command.getId());
+    }
+
+    @Test
+    @Transactional
+    void locksFiscalDocumentByIdBeforeRecordingAuthorization() {
+        FiscalDocument saved = fiscalDocumentRepository.saveAndFlush(
+                new FiscalDocument(command(SEEDED_COMMAND_NUMBER)));
+
+        assertThat(fiscalDocumentRepository.findByIdForUpdate(saved.getId()))
+                .isPresent().get().extracting(FiscalDocument::getId).isEqualTo(saved.getId());
+    }
+
+    @Test
+    void persistsConfirmedAuthorizationAtomically() throws Exception {
+        var fixture = SefazSpNfceProviderTests.fixture();
+        FiscalDocument document = new FiscalDocument(command(SEEDED_COMMAND_NUMBER));
+        document.setStatus(FiscalDocumentStatus.PROCESSING);
+        document.setAccessKey(fixture.request().accessKey());
+        document = fiscalDocumentRepository.saveAndFlush(document);
+        var request = new FiscalAuthorizationRequest(document.getId(),
+                fixture.request().accessKey(), fixture.request().signedXml());
+
+        authorizationRecorder.record(request, new FiscalAuthorizationResponse(
+                FiscalAuthorizationRecorderTests.reply(request.accessKey(), "100")));
+
+        FiscalDocument saved = fiscalDocumentRepository.findById(document.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(FiscalDocumentStatus.AUTHORIZED);
+        assertThat(saved.getProtocolNumber()).isEqualTo("135260000000001");
+        assertThat(saved.getAuthorizedAt()).isNotNull();
+        assertThat(saved.getXmlContent()).contains("nfeProc", "protNFe");
     }
 
     @Test

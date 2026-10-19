@@ -127,7 +127,7 @@ class SefazSpNfceProviderTests {
         assertTrue(!error.getMessage().contains("sensitive"));
     }
 
-    private static Fixture fixture() throws Exception {
+    static Fixture fixture() throws Exception {
         var generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         var pair = generator.generateKeyPair();
@@ -157,5 +157,5 @@ class SefazSpNfceProviderTests {
         return factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
     }
 
-    private record Fixture(FiscalAuthorizationRequest request, java.security.cert.X509Certificate certificate) { }
+    record Fixture(FiscalAuthorizationRequest request, java.security.cert.X509Certificate certificate) { }
 }
