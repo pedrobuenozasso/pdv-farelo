@@ -61,7 +61,8 @@ class SefazSpCancellationClientTests {
         String signed = new NfceCancellationEventSigner().signHomologation(
                 new NfceCancellationEventSigner.Draft(key, key.substring(6, 20),
                         "135260000000001", "Venda de teste desfeita antes da entrega",
-                        OffsetDateTime.parse("2026-10-21T12:00:00-03:00"), 7),
+                        OffsetDateTime.parse("2026-10-21T12:00:00-03:00"),
+                        OffsetDateTime.parse("2026-10-21T11:45:00-03:00"), false, 7),
                 pair.getPrivate(), certificate);
         var fiscal = new FiscalCancellationRequest(UUID.randomUUID(), key, signed);
         AtomicInteger sends = new AtomicInteger();

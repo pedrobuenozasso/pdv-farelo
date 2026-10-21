@@ -6220,13 +6220,16 @@ O evento ordinário usa o serviço `NFeRecepcaoEvento4` de
 [homologação da SEFAZ-SP](https://portal.fazenda.sp.gov.br/servicos/nfce/Paginas/WebServices.aspx).
 O [MOC nacional](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=LrBx7WT9PuA%3D)
 define `110111` e justificativa de 15–255 caracteres. Em São Paulo, o pedido
-ordinário deve observar o prazo de 30 minutos após a autorização e a saída
-da mercadoria, conforme a [orientação estadual](https://portal.fazenda.sp.gov.br/DiarioOficial/Paginas/Portaria-CAT-83%2C-de-27-de-setembro-de-2018.aspx).
+ordinário deve ser solicitado em até 30 minutos após a autorização, desde
+que a mercadoria não tenha saído, conforme a [orientação estadual](https://portal.fazenda.sp.gov.br/DiarioOficial/Paginas/Portaria-CAT-83%2C-de-27-de-setembro-de-2018.aspx).
 Em 21/10/2026, o WSDL real do `NFeRecepcaoEvento4` foi obtido por GET com
 mTLS A1, sem enviar evento. Ele especifica SOAP 1.2, endpoint fixo e ação
 `nfeRecepcaoEventoNF` (com sufixo `NF`). `SefazSpCancellationClient` usa
 esse contrato para um único envio, sem retry em resultado incerto; os testes
 conferem que a assinatura segue válida dentro do envelope SOAP. O cliente
-permanece isolado, sem chamada a partir do caixa. Conferência automática do
-prazo e ensaio com evento real ainda precisam ser concluídos antes de ligar
-o cancelamento à operação.
+permanece isolado, sem chamada a partir do caixa. O assinador exige o horário
+de autorização e confirmação explícita de que a mercadoria não saiu; recusa
+um horário de evento anterior à autorização ou mais de 30 minutos depois.
+Ao integrar ao caixa, o horário de evento deverá vir do relógio do servidor,
+e a confirmação de saída deverá vir do operador. O ensaio com evento real
+ainda precisa ser concluído antes de ligar o cancelamento à operação.

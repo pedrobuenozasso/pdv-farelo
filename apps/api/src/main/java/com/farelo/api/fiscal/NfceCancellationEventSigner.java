@@ -23,13 +23,14 @@ import java.security.PrivateKey;
 import java.security.Signature;
 import java.security.cert.X509Certificate;
 import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
  * Builds and signs the ordinary cancellation event (110111) for a São Paulo
- * NFC-e in homologation. The caller must verify the original authorization,
- * cancellation deadline, and SEFAZ response before changing fiscal state.
+ * NFC-e in homologation. The caller must verify the original authorization
+ * and SEFAZ response before changing fiscal state.
  * This class never loads credentials or transmits the event.
  */
 public final class NfceCancellationEventSigner {
@@ -39,7 +40,8 @@ public final class NfceCancellationEventSigner {
     private static final DateTimeFormatter EVENT_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX");
 
     public record Draft(String accessKey, String issuerCnpj, String authorizationProtocol,
-                        String justification, OffsetDateTime eventTime, long batchId) { }
+                        String justification, OffsetDateTime eventTime,
+                        OffsetDateTime authorizedAt, Boolean merchandiseLeft, long batchId) { }
 
     public String signHomologation(Draft draft, PrivateKey privateKey, X509Certificate certificate) {
         validate(draft, privateKey, certificate);
@@ -116,6 +118,13 @@ public final class NfceCancellationEventSigner {
                 || draft.justification().length() > 255 || draft.justification().isBlank()
                 || draft.eventTime() == null || draft.batchId() < 1 || draft.batchId() > 999_999_999_999_999L) {
             throw new IllegalArgumentException("invalid São Paulo homologation cancellation draft");
+        }
+        if (draft.authorizedAt() == null || !Boolean.FALSE.equals(draft.merchandiseLeft())) {
+            throw new IllegalArgumentException("authorization time and confirmation of no merchandise departure are required");
+        }
+        Duration sinceAuthorization = Duration.between(draft.authorizedAt().toInstant(), draft.eventTime().toInstant());
+        if (sinceAuthorization.isNegative() || sinceAuthorization.compareTo(Duration.ofMinutes(30)) > 0) {
+            throw new IllegalArgumentException("ordinary São Paulo NFC-e cancellation is outside the 30-minute window");
         }
         if (privateKey == null || certificate == null || !"RSA".equals(privateKey.getAlgorithm())
                 || !"RSA".equals(certificate.getPublicKey().getAlgorithm())) {

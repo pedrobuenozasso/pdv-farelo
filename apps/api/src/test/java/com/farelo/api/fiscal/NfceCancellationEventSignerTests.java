@@ -68,19 +68,38 @@ class NfceCancellationEventSignerTests {
         var original = draft();
         assertThrows(IllegalArgumentException.class, () -> SIGNER.signHomologation(
                 new NfceCancellationEventSigner.Draft(original.accessKey(), "00000000000000",
-                        original.authorizationProtocol(), original.justification(), original.eventTime(), 7),
+                        original.authorizationProtocol(), original.justification(), original.eventTime(),
+                        original.authorizedAt(), false, 7),
                 pair.getPrivate(), certificate));
         assertThrows(IllegalArgumentException.class, () -> SIGNER.signHomologation(
                 new NfceCancellationEventSigner.Draft(original.accessKey().replaceFirst("65", "55"),
                         original.issuerCnpj(), original.authorizationProtocol(), original.justification(),
-                        original.eventTime(), 7), pair.getPrivate(), certificate));
+                        original.eventTime(), original.authorizedAt(), false, 7), pair.getPrivate(), certificate));
         assertThrows(IllegalArgumentException.class, () -> SIGNER.signHomologation(
                 new NfceCancellationEventSigner.Draft(original.accessKey(), original.issuerCnpj(),
-                        original.authorizationProtocol(), "Curta", original.eventTime(), 7),
+                        original.authorizationProtocol(), "Curta", original.eventTime(),
+                        original.authorizedAt(), false, 7),
                 pair.getPrivate(), certificate));
         KeyPair another = KeyPairGenerator.getInstance("RSA").generateKeyPair();
         assertThrows(IllegalArgumentException.class,
                 () -> SIGNER.signHomologation(original, another.getPrivate(), certificate));
+    }
+
+    @Test
+    void refusesLateOrUnconfirmedOrdinaryCancellation() {
+        var original = draft();
+        assertThrows(IllegalArgumentException.class, () -> SIGNER.signHomologation(
+                new NfceCancellationEventSigner.Draft(original.accessKey(), original.issuerCnpj(),
+                        original.authorizationProtocol(), original.justification(), original.eventTime(),
+                        original.authorizedAt().minusSeconds(1801), false, 7), pair.getPrivate(), certificate));
+        assertThrows(IllegalArgumentException.class, () -> SIGNER.signHomologation(
+                new NfceCancellationEventSigner.Draft(original.accessKey(), original.issuerCnpj(),
+                        original.authorizationProtocol(), original.justification(), original.eventTime(),
+                        original.authorizedAt(), true, 7), pair.getPrivate(), certificate));
+        assertThrows(IllegalArgumentException.class, () -> SIGNER.signHomologation(
+                new NfceCancellationEventSigner.Draft(original.accessKey(), original.issuerCnpj(),
+                        original.authorizationProtocol(), original.justification(), original.eventTime(),
+                        original.authorizedAt(), null, 7), pair.getPrivate(), certificate));
     }
 
     private static NfceCancellationEventSigner.Draft draft() {
@@ -95,7 +114,8 @@ class NfceCancellationEventSignerTests {
                 1, 123, "12345678", OffsetDateTime.parse("2026-10-21T11:00:00-03:00"),
                 List.of(item), new BigDecimal("12.50"))).accessKey();
         return new NfceCancellationEventSigner.Draft(key, issuer.cnpj(), "13526000000000001",
-                "Venda desfeita antes da entrega", OffsetDateTime.parse("2026-10-21T12:30:00-03:00"), 7);
+                "Venda desfeita antes da entrega", OffsetDateTime.parse("2026-10-21T12:30:00-03:00"),
+                OffsetDateTime.parse("2026-10-21T12:05:00-03:00"), false, 7);
     }
 
     private static Document parse(String xml) throws Exception {
