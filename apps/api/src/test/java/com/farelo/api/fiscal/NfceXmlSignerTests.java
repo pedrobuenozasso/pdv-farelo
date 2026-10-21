@@ -99,6 +99,45 @@ class NfceXmlSignerTests {
     }
 
     @Test
+    void signedSplitElectronicPaymentsValidateAgainstOfficial2026Schema() throws Exception {
+        NfceXmlBuilder.Address address = new NfceXmlBuilder.Address("Rua Exemplo", "100", "Centro",
+                "3550308", "Sao Paulo", "01001000");
+        NfceXmlBuilder.Issuer issuer = new NfceXmlBuilder.Issuer("11222333000181",
+                "Empresa Exemplo LTDA", "123456789012", "1", address);
+        NfceXmlBuilder.Item item = new NfceXmlBuilder.Item("P1", "Cafe", "SEM GTIN", "19059090",
+                "5102", "UN", new BigDecimal("1.0000"), new BigDecimal("12.5000"),
+                new BigDecimal("12.50"), new NfceXmlBuilder.Taxes("0", "102", "07", "07"));
+        List<NfceXmlBuilder.Payment> payments = List.of(
+                new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.CASH, new BigDecimal("2.50")),
+                new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.PIX, new BigDecimal("3.00"),
+                        new NfceXmlBuilder.ElectronicDetails("2", null, null, null, null, null)),
+                new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.DEBIT_CARD, new BigDecimal("4.00"),
+                        new NfceXmlBuilder.ElectronicDetails("1", "11222333000181", "01", "AUTH-1", null, null)),
+                new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.CREDIT_CARD, new BigDecimal("3.00"),
+                        new NfceXmlBuilder.ElectronicDetails("2", null, "02", null, null, null)));
+        String unsigned = new NfceXmlBuilder().buildHomologation(new NfceXmlBuilder.Draft(issuer,
+                "VENDA", 1, 124, "12345679", OffsetDateTime.parse("2026-10-18T12:00:00-03:00"),
+                List.of(item), payments)).unsignedXml();
+        String signed = SIGNER.signHomologation(unsigned, pair.getPrivate(), certificate);
+        String decorated = new NfceQrCodeV3().addToSignedHomologation(signed);
+        var resource = getClass().getResource("/nfe-xsd/PL_010f_v1.04/nfe_v4.00.xsd");
+        SchemaFactory factory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+        factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        factory.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "file");
+        var validator = factory.newSchema(resource).newValidator();
+        validator.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        validator.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        validator.validate(new StreamSource(new StringReader(decorated)));
+        Document document = parse(decorated);
+        Element inf = (Element) document.getElementsByTagNameNS("http://www.portalfiscal.inf.br/nfe", "infNFe").item(0);
+        inf.setIdAttribute("Id", true);
+        Element signature = (Element) document.getElementsByTagNameNS(XMLSignature.XMLNS, "Signature").item(0);
+        DOMValidateContext context = new DOMValidateContext(certificate.getPublicKey(), signature);
+        context.setProperty("org.jcp.xml.dsig.secureValidation", false);
+        assertTrue(XMLSignatureFactory.getInstance("DOM").unmarshalXMLSignature(context).validate(context));
+    }
+
+    @Test
     void qrCodeV3RefusesUnsignedProductionOrRepeatedDecoration() throws Exception {
         NfceQrCodeV3 qr = new NfceQrCodeV3();
         assertThrows(IllegalArgumentException.class, () -> qr.addToSignedHomologation(unsigned()));

@@ -53,10 +53,40 @@ public final class NfceXmlBuilder {
         }
     }
 
-    /** This first iteration supports only an exact cash payment, without change. */
+    public enum PaymentMethod {
+        CASH("01"), CREDIT_CARD("03"), DEBIT_CARD("04"), PIX("17");
+
+        private final String fiscalCode;
+
+        PaymentMethod(String fiscalCode) { this.fiscalCode = fiscalCode; }
+    }
+
+    /** Explicit electronic transaction details; no acquirer or authorization is inferred. */
+    public record ElectronicDetails(String integrationType, String institutionCnpj,
+                                    String cardBrand, String authorizationCode,
+                                    String receiverCnpj, String terminalId) { }
+
+    public record Payment(PaymentMethod method, BigDecimal amount, ElectronicDetails electronic) {
+        public Payment(PaymentMethod method, BigDecimal amount) {
+            this(method, amount, null);
+        }
+    }
+
+    /** Payment lines must add exactly to the invoice total; change is not supported. */
     public record Draft(Issuer issuer, String operation, int series, int number,
                         String randomCode, OffsetDateTime issuedAt,
-                        List<Item> items, BigDecimal cashPaid) { }
+                        List<Item> items, List<Payment> payments) {
+        public Draft(Issuer issuer, String operation, int series, int number,
+                     String randomCode, OffsetDateTime issuedAt, List<Item> items, BigDecimal cashPaid) {
+            this(issuer, operation, series, number, randomCode, issuedAt, items,
+                    List.of(new Payment(PaymentMethod.CASH, cashPaid)));
+        }
+
+        public BigDecimal cashPaid() {
+            return payments.stream().filter(p -> p.method() == PaymentMethod.CASH)
+                    .map(Payment::amount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        }
+    }
 
     public record Result(String accessKey, String unsignedXml) { }
 
@@ -80,10 +110,7 @@ public final class NfceXmlBuilder {
             writeTotals(xml, draft.items());
             start(xml, "transp"); element(xml, "modFrete", "9"); xml.writeEndElement();
             start(xml, "pag");
-            start(xml, "detPag");
-            element(xml, "tPag", "01");
-            element(xml, "vPag", money(draft.cashPaid()));
-            xml.writeEndElement();
+            for (Payment payment : draft.payments()) writePayment(xml, payment);
             xml.writeEndElement();
             xml.writeEndElement(); // infNFe
             xml.writeEndElement(); // NFe
@@ -202,6 +229,24 @@ public final class NfceXmlBuilder {
         xml.writeEndElement();
     }
 
+    private static void writePayment(XMLStreamWriter xml, Payment payment) throws XMLStreamException {
+        start(xml, "detPag");
+        element(xml, "tPag", payment.method().fiscalCode);
+        element(xml, "vPag", money(payment.amount()));
+        if (payment.electronic() != null) {
+            ElectronicDetails details = payment.electronic();
+            start(xml, "card");
+            element(xml, "tpIntegra", details.integrationType());
+            if (details.institutionCnpj() != null) element(xml, "CNPJ", details.institutionCnpj());
+            if (details.cardBrand() != null) element(xml, "tBand", details.cardBrand());
+            if (details.authorizationCode() != null) element(xml, "cAut", details.authorizationCode());
+            if (details.receiverCnpj() != null) element(xml, "CNPJReceb", details.receiverCnpj());
+            if (details.terminalId() != null) element(xml, "idTermPag", details.terminalId());
+            xml.writeEndElement();
+        }
+        xml.writeEndElement();
+    }
+
     private static String accessKey(Draft draft) {
         String base = "35" + draft.issuedAt().format(KEY_DATE) + draft.issuer().cnpj()
                 + "65" + String.format(Locale.ROOT, "%03d%09d", draft.series(), draft.number())
@@ -270,9 +315,46 @@ public final class NfceXmlBuilder {
             validateContribution(tax.cofinsCst(), tax.cofinsOther(), "COFINS");
             total = total.add(item.total());
         }
-        decimal(d.cashPaid(), 2, "cashPaid");
-        require(total.compareTo(d.cashPaid()) == 0, "cash payment must equal invoice total");
+        require(d.payments() != null && !d.payments().isEmpty() && d.payments().size() <= 100,
+                "1 to 100 payment lines are required");
+        BigDecimal paid = BigDecimal.ZERO;
+        for (Payment payment : d.payments()) {
+            require(payment != null && payment.method() != null, "payment method is required");
+            decimal(payment.amount(), 2, "payment amount");
+            require(payment.amount().precision() - payment.amount().scale() <= 13,
+                    "payment amount exceeds XML numeric size");
+            if (payment.method() == PaymentMethod.CASH) {
+                require(payment.electronic() == null, "cash cannot carry electronic transaction details");
+            } else {
+                validateElectronic(payment.electronic(), payment.method());
+            }
+            paid = paid.add(payment.amount());
+        }
+        require(total.compareTo(paid) == 0, "payments must equal invoice total; change is unsupported");
         require(total.precision() - total.scale() <= 13, "invoice total exceeds XML numeric size");
+    }
+
+    private static void validateElectronic(ElectronicDetails details, PaymentMethod method) {
+        require(details != null, method + " requires explicit electronic transaction details");
+        require(List.of("1", "2").contains(details.integrationType()), "invalid payment integration type");
+        if (details.institutionCnpj() != null) {
+            digits(details.institutionCnpj(), 14, "institution CNPJ");
+            require(validCnpj(details.institutionCnpj()), "invalid institution CNPJ check digits");
+        }
+        if (details.cardBrand() != null) {
+            require(method != PaymentMethod.PIX, "PIX cannot have a card brand");
+            digits(details.cardBrand(), 2, "cardBrand");
+        }
+        if (details.authorizationCode() != null) label(details.authorizationCode(), 1, 128, "authorizationCode");
+        if (details.receiverCnpj() != null) {
+            digits(details.receiverCnpj(), 14, "receiver CNPJ");
+            require(validCnpj(details.receiverCnpj()), "invalid receiver CNPJ check digits");
+        }
+        if (details.terminalId() != null) label(details.terminalId(), 1, 40, "terminalId");
+        if ("1".equals(details.integrationType())) {
+            require(details.institutionCnpj() != null && details.authorizationCode() != null,
+                    "integrated electronic payment requires institution CNPJ and authorization code");
+        }
     }
 
     private static void validateContribution(String cst, OtherContribution other, String name) {

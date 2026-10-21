@@ -6025,16 +6025,23 @@ de ambiente não substitui credenciamento, certificado nem validação contábil
 `NfceXmlBuilder#buildHomologation` cria um XML **não assinado** para o modelo 65,
 versão 4.00, `tpAmb=2` e operação presencial interna em São Paulo. A entrada
 traz CNPJ, IE, CRT, endereço, número/série, itens, NCM, CFOP, códigos de
-impostos e valor pago de forma explícita. O construtor não lê perfis fiscais
+impostos e linhas de pagamento de forma explícita. O construtor não lê perfis fiscais
 pendentes nem escolhe códigos tributários pelo nome do produto. Calcula a
-chave de 44 dígitos (módulo 11), soma produtos, exige pagamento em dinheiro
-igual ao total e escapa texto XML. Para homologação, a descrição do primeiro
+chave de 44 dígitos (módulo 11), soma produtos, exige que os pagamentos
+igualem o total sem troco e escapa texto XML. Para homologação, a descrição do primeiro
 item segue a regra oficial de ambiente sem valor fiscal.
 
 O subconjunto deliberado é estreito: CRT 1 com ICMS `ICMSSN102` ou CRT 3 com
 `ICMS40`, PIS/COFINS não tributados ou CST `99` explicitamente zerados,
-`SEM GTIN`, sem desconto/frete/troco e
-pagamento somente em dinheiro. Todos esses códigos ainda precisam ser
+`SEM GTIN`, sem desconto/frete/troco e meios de pagamento `01` (dinheiro),
+`17` (Pix), `04` (débito) e `03` (crédito), inclusive divisão em até 100
+linhas. Pix e cartões exigem grupo `card` com `tpIntegra` explícito; se
+integrado (`1`), CNPJ da instituição e código de autorização são obrigatórios.
+Os campos opcionais de bandeira, beneficiário e terminal são escritos apenas
+quando fornecidos, sem inventar dados de adquirente ou autorização. O formato
+do grupo segue o [XSD oficial 010f v1.04](https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=BMPFMBoln3w%3D)
+e a [regra YA04 da NT 2025.001](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=NvuzQGYd6E8%3D).
+Todos esses códigos ainda precisam ser
 fornecidos e aprovados para a operação concreta; suportar um código no
 construtor **não o torna correto para o Farelo**. Valores ou formas de
 pagamento fora desse subconjunto são rejeitados. A saída do construtor não

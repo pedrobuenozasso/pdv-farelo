@@ -2,6 +2,8 @@ package com.farelo.api.fiscal;
 
 import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
 import javax.xml.XMLConstants;
@@ -155,6 +157,73 @@ class NfceXmlBuilderTests {
                 item.unitPrice(), item.total(), item.taxes());
         assertThrows(IllegalArgumentException.class,
                 () -> builder.buildHomologation(replaceItem(source, badCest)));
+    }
+
+    @Test
+    void writesExplicitSplitPaymentsInGivenOrder() throws Exception {
+        NfceXmlBuilder.Draft source = draft("Cafe", "12.50", "12.50");
+        List<NfceXmlBuilder.Payment> payments = List.of(
+                new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.CASH, new BigDecimal("2.50")),
+                new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.PIX, new BigDecimal("3.00"),
+                        new NfceXmlBuilder.ElectronicDetails("2", null, null, "PIX-TESTE", null, null)),
+                new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.DEBIT_CARD, new BigDecimal("4.00"),
+                        new NfceXmlBuilder.ElectronicDetails("1", "11222333000181", "01", "AUTH-1", null, "POS-1")),
+                new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.CREDIT_CARD, new BigDecimal("3.00"),
+                        new NfceXmlBuilder.ElectronicDetails("2", null, "02", null, null, null)));
+        NfceXmlBuilder.Draft split = withPayments(source, payments);
+
+        Document xml = parse(builder.buildHomologation(split).unsignedXml());
+        NodeList lines = xml.getElementsByTagName("detPag");
+        assertEquals(4, lines.getLength());
+        assertEquals(List.of("01", "17", "04", "03"), List.of(
+                child(lines, 0, "tPag"), child(lines, 1, "tPag"),
+                child(lines, 2, "tPag"), child(lines, 3, "tPag")));
+        assertEquals("2.50", child(lines, 0, "vPag"));
+        assertEquals("3.00", child(lines, 1, "vPag"));
+        assertEquals("4.00", child(lines, 2, "vPag"));
+        assertEquals("3.00", child(lines, 3, "vPag"));
+        assertEquals(0, ((Element) lines.item(0)).getElementsByTagName("card").getLength());
+        assertEquals("2", child(lines, 1, "tpIntegra"));
+        assertEquals("PIX-TESTE", child(lines, 1, "cAut"));
+        assertEquals("11222333000181", child(lines, 2, "CNPJ"));
+        assertEquals("AUTH-1", child(lines, 2, "cAut"));
+        assertEquals(0, ((Element) lines.item(3)).getElementsByTagName("CNPJ").getLength());
+        assertEquals(0, ((Element) lines.item(3)).getElementsByTagName("cAut").getLength());
+        assertEquals("12.50", text(xml, "vNF"));
+    }
+
+    @Test
+    void rejectsPaymentMismatchOrUnsubstantiatedElectronicDetails() {
+        NfceXmlBuilder.Draft source = draft("Cafe", "12.50", "12.50");
+        assertThrows(IllegalArgumentException.class, () -> builder.buildHomologation(withPayments(source,
+                List.of(new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.PIX,
+                        new BigDecimal("12.49"),
+                        new NfceXmlBuilder.ElectronicDetails("2", null, null, null, null, null))))));
+        assertThrows(IllegalArgumentException.class, () -> builder.buildHomologation(withPayments(source,
+                List.of(new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.PIX,
+                        new BigDecimal("12.50"))))));
+        assertThrows(IllegalArgumentException.class, () -> builder.buildHomologation(withPayments(source,
+                List.of(new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.CREDIT_CARD,
+                        new BigDecimal("12.50"),
+                        new NfceXmlBuilder.ElectronicDetails("1", null, "01", null, null, null))))));
+        assertThrows(IllegalArgumentException.class, () -> builder.buildHomologation(withPayments(source,
+                List.of(new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.CASH,
+                        new BigDecimal("12.50"),
+                        new NfceXmlBuilder.ElectronicDetails("2", null, null, null, null, null))))));
+        assertThrows(IllegalArgumentException.class, () -> builder.buildHomologation(withPayments(source,
+                List.of(new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.PIX,
+                        new BigDecimal("12.50"),
+                        new NfceXmlBuilder.ElectronicDetails("2", null, "01", null, null, null))))));
+    }
+
+    private static NfceXmlBuilder.Draft withPayments(NfceXmlBuilder.Draft source,
+                                                      List<NfceXmlBuilder.Payment> payments) {
+        return new NfceXmlBuilder.Draft(source.issuer(), source.operation(), source.series(), source.number(),
+                source.randomCode(), source.issuedAt(), source.items(), payments);
+    }
+
+    private static String child(NodeList lines, int index, String tag) {
+        return ((Element) lines.item(index)).getElementsByTagName(tag).item(0).getTextContent();
     }
 
     private static NfceXmlBuilder.Draft replaceItem(NfceXmlBuilder.Draft source, NfceXmlBuilder.Item item) {
