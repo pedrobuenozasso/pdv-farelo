@@ -3232,8 +3232,9 @@ continuam pendentes de consulta por chave. Nenhuma rota de emissão foi aberta.
 
 `FiscalCancellationRecorder` guarda internamente um evento `110111` aceito e
 vinculado pela SEFAZ, sem sobrescrever o XML autorizado. O `GET`
-administrativo inclui `cancellationProtocolNumber` e `cancelledAt`; o XML do
-evento e o SOAP bruto não são expostos nesta resposta. Ainda não existe rota
+administrativo inclui `cancellationProtocolNumber`, `cancelledAt` e
+`cancellationEventXml` (`procEventoNFe`); o SOAP bruto não é exposto nesta
+resposta. Ainda não existe rota
 HTTP para pedir cancelamento nem envio automático do evento.
 
 `SefazSpProtocolConsultationClient` faz somente consulta de chave no serviço

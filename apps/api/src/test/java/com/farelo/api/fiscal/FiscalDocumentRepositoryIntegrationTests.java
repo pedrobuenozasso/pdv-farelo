@@ -3,6 +3,7 @@ package com.farelo.api.fiscal;
 import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandRepository;
+import com.farelo.api.fiscal.web.FiscalDocumentResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -178,6 +179,10 @@ class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
         assertThat(saved.getCancelledAt()).isNotNull();
         assertThat(saved.getCancellationEventXml()).contains("procEventoNFe", "retEvento");
         assertThat(saved.getCancellationResponseXml()).isEqualTo(reply);
+        FiscalDocumentResponse admin = FiscalDocumentResponse.from(
+                fiscalDocumentRepository.findByIdWithCommand(document.getId()).orElseThrow());
+        assertThat(admin.cancellationEventXml()).contains("procEventoNFe", "retEvento");
+        assertThat(admin.cancellationProtocolNumber()).isEqualTo("135260000000002");
     }
 
     @Test

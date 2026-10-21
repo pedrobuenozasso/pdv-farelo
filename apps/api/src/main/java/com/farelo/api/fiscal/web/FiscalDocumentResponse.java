@@ -33,6 +33,7 @@ public record FiscalDocumentResponse(
         String rejectionReason,
         String cancellationProtocolNumber,
         OffsetDateTime cancelledAt,
+        String cancellationEventXml,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
@@ -51,6 +52,7 @@ public record FiscalDocumentResponse(
                 fiscalDocument.getRejectionReason(),
                 fiscalDocument.getCancellationProtocolNumber(),
                 fiscalDocument.getCancelledAt(),
+                fiscalDocument.getCancellationEventXml(),
                 fiscalDocument.getCreatedAt(),
                 fiscalDocument.getUpdatedAt());
     }
