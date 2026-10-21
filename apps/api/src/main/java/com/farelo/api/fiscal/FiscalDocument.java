@@ -154,6 +154,18 @@ public class FiscalDocument {
     @Column(name = "rejection_response_xml", columnDefinition = "TEXT")
     private String rejectionResponseXml;
 
+    @Column(name = "cancellation_protocol_number", length = 64)
+    private String cancellationProtocolNumber;
+
+    @Column(name = "cancelled_at")
+    private OffsetDateTime cancelledAt;
+
+    @Column(name = "cancellation_event_xml", columnDefinition = "TEXT")
+    private String cancellationEventXml;
+
+    @Column(name = "cancellation_response_xml", columnDefinition = "TEXT")
+    private String cancellationResponseXml;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -286,6 +298,22 @@ public class FiscalDocument {
     public void setRejectionResponseXml(String rejectionResponseXml) {
         this.rejectionResponseXml = rejectionResponseXml;
     }
+
+    public String getCancellationProtocolNumber() { return cancellationProtocolNumber; }
+
+    public void setCancellationProtocolNumber(String value) { this.cancellationProtocolNumber = value; }
+
+    public OffsetDateTime getCancelledAt() { return cancelledAt; }
+
+    public void setCancelledAt(OffsetDateTime value) { this.cancelledAt = value; }
+
+    public String getCancellationEventXml() { return cancellationEventXml; }
+
+    public void setCancellationEventXml(String value) { this.cancellationEventXml = value; }
+
+    public String getCancellationResponseXml() { return cancellationResponseXml; }
+
+    public void setCancellationResponseXml(String value) { this.cancellationResponseXml = value; }
 
     public OffsetDateTime getCreatedAt() {
         return createdAt;

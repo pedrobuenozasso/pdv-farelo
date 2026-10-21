@@ -72,6 +72,9 @@ class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
     @Autowired
     private FiscalRejectionRecorder rejectionRecorder;
 
+    @Autowired
+    private FiscalCancellationRecorder cancellationRecorder;
+
     private Command command(int number) {
         return commandRepository.findByNumber(number).orElseThrow();
     }
@@ -151,6 +154,30 @@ class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
         assertThat(saved.getXmlContent()).isEqualTo(request.signedXml());
         assertThat(saved.getProtocolNumber()).isNull();
         assertThat(saved.getAuthorizedAt()).isNull();
+    }
+
+    @Test
+    void persistsConfirmedCancellationWithoutReplacingAuthorizedXml() throws Exception {
+        var fixture = SefazSpNfceProviderTests.fixture();
+        FiscalDocument document = new FiscalDocument(command(SEEDED_COMMAND_NUMBER));
+        document.setStatus(FiscalDocumentStatus.AUTHORIZED);
+        document.setAccessKey(fixture.request().accessKey());
+        document.setProtocolNumber("135260000000001");
+        document.setXmlContent("<nfeProc>authorized original</nfeProc>");
+        document = fiscalDocumentRepository.saveAndFlush(document);
+        String reply = FiscalCancellationRecorderTests.reply(document.getAccessKey(), "135", "110111");
+
+        cancellationRecorder.record(FiscalCancellationRecorderTests.request(
+                document.getId(), document.getAccessKey(), document.getProtocolNumber()),
+                new FiscalCancellationResponse(reply));
+
+        FiscalDocument saved = fiscalDocumentRepository.findById(document.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(FiscalDocumentStatus.CANCELLED);
+        assertThat(saved.getXmlContent()).isEqualTo("<nfeProc>authorized original</nfeProc>");
+        assertThat(saved.getCancellationProtocolNumber()).isEqualTo("135260000000002");
+        assertThat(saved.getCancelledAt()).isNotNull();
+        assertThat(saved.getCancellationEventXml()).contains("procEventoNFe", "retEvento");
+        assertThat(saved.getCancellationResponseXml()).isEqualTo(reply);
     }
 
     @Test

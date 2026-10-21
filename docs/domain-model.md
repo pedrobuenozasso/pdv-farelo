@@ -6186,7 +6186,9 @@ serviço fixo de homologação `NFeConsultaProtocolo4`, usando o mesmo cliente
 mTLS externo. O pedido contém somente `consSitNFe`; nunca reenvia `NFe`.
 Uma falha de consulta não aciona nova transmissão. O endpoint foi conferido
 na [lista oficial da SEFAZ-SP](https://portal.fazenda.sp.gov.br/servicos/nfce/Paginas/WebServices.aspx);
-o WSDL desse serviço ainda precisa ser confirmado com A1.
+em 21/10/2026, o GET do WSDL com mTLS A1 retornou HTTP 200 sem enviar nota.
+O contrato público guardado em `src/test/resources` confirma SOAP 1.2,
+endpoint e ação `nfeConsultaNF`; um teste trava esses valores.
 
 `FiscalAuthorizationRecorder#reconcile` só muda o documento para
 `AUTHORIZED` quando `retConsSitNFe` informa `100` e traz `protNFe` versão
@@ -6195,3 +6197,24 @@ retorna `NOT_FOUND`, mas **não autoriza reenvio automático**; os demais
 resultados ficam `UNRESOLVED`. Um teste em PostgreSQL confirma a gravação de
 protocolo de 17 dígitos. A consulta não está ligada ao caixa e não implementa
 emissão offline/contingência legal; essas partes continuam pendentes.
+
+### Evento de cancelamento (FARELO-177, implementação parcial)
+
+`FiscalCancellationRecorder` só grava `CANCELLED` após um retorno de evento
+`110111` com lote `128`, evento `135`, ambiente de homologação, UF 35, mesma
+chave, sequência 1 e protocolo de evento. Ele também exige que o documento
+esteja `AUTHORIZED` e que o evento assinado cite exatamente o protocolo de
+autorização já persistido. O XML da NFC-e autorizada não é substituído:
+`procEventoNFe`, SOAP original, protocolo e horário do cancelamento ficam em
+campos separados (migration V59). `136`, rejeição, outra chave ou outro evento
+não cancelam o registro local.
+
+O evento ordinário usa o serviço `NFeRecepcaoEvento4` de
+[homologação da SEFAZ-SP](https://portal.fazenda.sp.gov.br/servicos/nfce/Paginas/WebServices.aspx).
+O [MOC nacional](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=LrBx7WT9PuA%3D)
+define `110111` e justificativa de 15–255 caracteres. Em São Paulo, o pedido
+ordinário deve observar o prazo de 30 minutos após a autorização e a saída
+da mercadoria, conforme a [orientação estadual](https://portal.fazenda.sp.gov.br/DiarioOficial/Paginas/Portaria-CAT-83%2C-de-27-de-setembro-de-2018.aspx).
+O serviço de transmissão, o WSDL real, a conferência automática do prazo e
+o ensaio com evento real ainda precisam ser concluídos antes de ligar o
+cancelamento ao caixa.

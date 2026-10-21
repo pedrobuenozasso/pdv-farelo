@@ -3222,13 +3222,19 @@ confirmada para documento já em processamento, após validar lote, protocolo,
 ambiente e chave. Salva `nfeProc`, protocolo, horário e estado `AUTHORIZED` na
 mesma transação. Não há endpoint novo nem ligação com o fluxo do caixa.
 A rota administrativa de transição rejeita `AUTHORIZED`, `REJECTED` e
-`CANCELLED` com 409; esses resultados exigem evidência do fluxo fiscal próprio.
+`CANCELLED` e `CONTINGENCY` com 409; esses resultados exigem evidência do fluxo fiscal próprio.
 
 `FiscalRejectionRecorder` registra internamente uma rejeição individual
 confirmada pela SEFAZ: código, motivo, resposta SOAP e XML enviado. O `GET`
 administrativo de documentos fiscais inclui `rejectionCode` e
 `rejectionReason`; não expõe o SOAP bruto. Duplicidade e resposta incerta
 continuam pendentes de consulta por chave. Nenhuma rota de emissão foi aberta.
+
+`FiscalCancellationRecorder` guarda internamente um evento `110111` aceito e
+vinculado pela SEFAZ, sem sobrescrever o XML autorizado. O `GET`
+administrativo inclui `cancellationProtocolNumber` e `cancelledAt`; o XML do
+evento e o SOAP bruto não são expostos nesta resposta. Ainda não existe rota
+HTTP para pedir cancelamento nem envio automático do evento.
 
 `SefazSpProtocolConsultationClient` faz somente consulta de chave no serviço
 fixo de homologação. `FiscalAuthorizationRecorder#reconcile` registra a
