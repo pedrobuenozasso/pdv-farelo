@@ -6056,6 +6056,14 @@ As sequências `orig`/`CST` de `ICMS40` e `orig`/`CSOSN` de `ICMSSN102`
 foram conferidas nas [tabelas oficiais do leiaute](https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=9bznzUXCXr0%3D);
 isso não substitui validar o XML integral com XSD atual.
 
+`NfceRecordedPaymentMapper` preserva valores e ordem do ledger de pagamentos
+da comanda. Dinheiro é mapeado diretamente. PIX e cartões exigem detalhes
+eletrônicos vinculados ao ID de cada pagamento; `OTHER` é recusado porque não
+identifica um código fiscal. A API de caixa ainda não coleta esses detalhes,
+portanto o mapper permanece isolado da emissão. Capturar a evidência de cada
+transação e apresentá-la ao mapper é requisito antes de emitir uma NFC-e com
+PIX ou cartão.
+
 ## Assinatura XML NFC-e (FARELO-173)
 
 `NfceXmlSigner#signHomologation` assina um XML não assinado do modelo 65 em

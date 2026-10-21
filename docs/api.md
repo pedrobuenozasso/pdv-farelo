@@ -3197,6 +3197,12 @@ O rascunho XML FARELO-172 também aceita CEST explícito de sete dígitos e
 PIS/COFINS CST `99` com base, alíquota e valor explicitamente zerados. Isso
 não cria endpoint nem libera transmissão fiscal.
 
+O mapper interno `NfceRecordedPaymentMapper` converte pagamentos reais da
+comanda em linhas do XML, preservando valor e ordem. Dinheiro funciona sem
+dados adicionais; PIX e cartões exigem detalhes eletrônicos explícitos por
+pagamento. O endpoint de pagamentos ainda não os captura, então nenhuma rota
+de emissão usa esse mapper. `OTHER` permanece sem tradução fiscal automática.
+
 O QR Code v3 online de homologação é adicionado depois da assinatura por
 `NfceQrCodeV3`, sem CSC. A função recusa XML sem assinatura, ambiente de
 produção, contingência e duplicação do suplemento. Nenhuma rota HTTP foi
