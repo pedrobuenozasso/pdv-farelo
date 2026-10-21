@@ -106,6 +106,13 @@ class PaymentRecordIdempotencyIntegrationTests extends AbstractIntegrationTest {
                 amountReceived == null ? "" : ", \"amountReceived\": " + amountReceived);
     }
 
+    private String pixWithEvidence(String authorizationCode) {
+        return """
+                {"amount": 10.00, "method": "PIX", "cashSessionId": "%s",
+                 "fiscalDetails": {"integrationType": "2", "authorizationCode": "%s"}}
+                """.formatted(session.getId(), authorizationCode);
+    }
+
     private MvcResult submit(String body, String key) throws Exception {
         return mockMvc.perform(post("/api/v1/commands/{number}/payments", commandNumber)
                         .header("Authorization", "Bearer " + token)
@@ -173,6 +180,54 @@ class PaymentRecordIdempotencyIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REUSED"));
         assertThat(payments()).hasSize(1);
+    }
+
+    @Test
+    void persistsFiscalEvidenceAndIncludesItInIdempotencyFingerprint() throws Exception {
+        String key = key();
+        String body = pixWithEvidence("PIX-RECEIPT-1");
+        MvcResult first = submit(body, key);
+        submit(body, key);
+
+        assertThat(first.getResponse().getContentAsString()).contains("\"authorizationCode\":\"PIX-RECEIPT-1\"");
+        assertThat(payments()).hasSize(1);
+        assertThat(payments().get(0).getFiscalDetails().integrationType()).isEqualTo("2");
+        assertThat(payments().get(0).getFiscalDetails().authorizationCode()).isEqualTo("PIX-RECEIPT-1");
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", commandNumber)
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(pixWithEvidence("PIX-RECEIPT-2")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REUSED"));
+        assertThat(payments()).hasSize(1);
+    }
+
+    @Test
+    void rejectsElectronicEvidenceOnCashPayment() throws Exception {
+        String key = key();
+        String body = pixWithEvidence("PIX-RECEIPT-1").replace("\"PIX\"", "\"CASH\"");
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", commandNumber)
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+        assertThat(payments()).isEmpty();
+    }
+
+    @Test
+    void rejectsIntegratedPaymentWithoutInstitutionAndAuthorization() throws Exception {
+        String key = key();
+        String body = pixWithEvidence("PIX-RECEIPT-1")
+                .replace("\"integrationType\": \"2\"", "\"integrationType\": \"1\"");
+        mockMvc.perform(post("/api/v1/commands/{number}/payments", commandNumber)
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+        assertThat(payments()).isEmpty();
     }
 
     @Test

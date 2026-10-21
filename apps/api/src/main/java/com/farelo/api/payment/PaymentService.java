@@ -140,12 +140,19 @@ public class PaymentService {
     public Payment record(
             int commandNumber, BigDecimal amount, PaymentMethod method,
             UUID cashSessionId, UUID actorId, UserRole role) {
+        return record(commandNumber, amount, method, cashSessionId, actorId, role, null);
+    }
+
+    @Transactional
+    public Payment record(
+            int commandNumber, BigDecimal amount, PaymentMethod method,
+            UUID cashSessionId, UUID actorId, UserRole role, ElectronicPaymentDetails fiscalDetails) {
         Command command = commandService.findForPayment(commandNumber);
         CashSession cashSession = cashSessionService.findOpenAccessibleForUpdate(cashSessionId, actorId, role);
         if (cashSession.getOpeningAmount() == null) {
             throw new CashSessionOpeningAmountUnknownException(cashSessionId);
         }
-        Payment payment = new Payment(command, amount, method, cashSession);
+        Payment payment = new Payment(command, amount, method, cashSession, fiscalDetails);
         Payment saved = paymentRepository.save(payment);
 
         // FARELO-305 ("Auditoria por usuário"): recording a payment is

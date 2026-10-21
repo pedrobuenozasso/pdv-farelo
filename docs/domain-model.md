@@ -6058,11 +6058,13 @@ isso não substitui validar o XML integral com XSD atual.
 
 `NfceRecordedPaymentMapper` preserva valores e ordem do ledger de pagamentos
 da comanda. Dinheiro é mapeado diretamente. PIX e cartões exigem detalhes
-eletrônicos vinculados ao ID de cada pagamento; `OTHER` é recusado porque não
-identifica um código fiscal. A API de caixa ainda não coleta esses detalhes,
-portanto o mapper permanece isolado da emissão. Capturar a evidência de cada
-transação e apresentá-la ao mapper é requisito antes de emitir uma NFC-e com
-PIX ou cartão.
+eletrônicos persistidos no próprio pagamento; `OTHER` é recusado porque não
+identifica um código fiscal. A API de pagamento aceita evidência fiscal
+opcional no registro e a guarda como campos imutáveis (V60), sem número de
+cartão ou CVV. Registros históricos continuam sem evidência e não podem ser
+convertidos em PIX/cartão fiscalmente completo por inferência. A tela do caixa
+coleta os dados disponíveis no comprovante; a emissão ainda precisa consumir
+esse contrato e passar pela homologação.
 
 ## Assinatura XML NFC-e (FARELO-173)
 

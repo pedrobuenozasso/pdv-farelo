@@ -128,15 +128,46 @@ public class Payment {
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
+    @Column(name = "fiscal_integration_type", length = 1, updatable = false)
+    private String fiscalIntegrationType;
+
+    @Column(name = "fiscal_institution_cnpj", length = 14, updatable = false)
+    private String fiscalInstitutionCnpj;
+
+    @Column(name = "fiscal_card_brand", length = 2, updatable = false)
+    private String fiscalCardBrand;
+
+    @Column(name = "fiscal_authorization_code", length = 128, updatable = false)
+    private String fiscalAuthorizationCode;
+
+    @Column(name = "fiscal_receiver_cnpj", length = 14, updatable = false)
+    private String fiscalReceiverCnpj;
+
+    @Column(name = "fiscal_terminal_id", length = 40, updatable = false)
+    private String fiscalTerminalId;
+
     protected Payment() {
         // required by JPA
     }
 
     public Payment(Command command, BigDecimal amount, PaymentMethod method, CashSession cashSession) {
+        this(command, amount, method, cashSession, null);
+    }
+
+    public Payment(Command command, BigDecimal amount, PaymentMethod method, CashSession cashSession,
+                   ElectronicPaymentDetails fiscalDetails) {
         this.command = command;
         this.amount = amount;
         this.method = method;
         this.cashSession = cashSession;
+        if (fiscalDetails != null) {
+            this.fiscalIntegrationType = fiscalDetails.integrationType();
+            this.fiscalInstitutionCnpj = fiscalDetails.institutionCnpj();
+            this.fiscalCardBrand = fiscalDetails.cardBrand();
+            this.fiscalAuthorizationCode = fiscalDetails.authorizationCode();
+            this.fiscalReceiverCnpj = fiscalDetails.receiverCnpj();
+            this.fiscalTerminalId = fiscalDetails.terminalId();
+        }
     }
 
     /** For pre-migration fixtures only: historical session identity is unknown. */
@@ -172,6 +203,12 @@ public class Payment {
 
     public OffsetDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public ElectronicPaymentDetails getFiscalDetails() {
+        return fiscalIntegrationType == null ? null : new ElectronicPaymentDetails(
+                fiscalIntegrationType, fiscalInstitutionCnpj, fiscalCardBrand,
+                fiscalAuthorizationCode, fiscalReceiverCnpj, fiscalTerminalId);
     }
 
     @Override

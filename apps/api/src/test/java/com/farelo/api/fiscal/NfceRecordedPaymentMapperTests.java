@@ -2,12 +2,12 @@ package com.farelo.api.fiscal;
 
 import com.farelo.api.payment.Payment;
 import com.farelo.api.payment.PaymentMethod;
+import com.farelo.api.payment.ElectronicPaymentDetails;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -17,10 +17,11 @@ class NfceRecordedPaymentMapperTests {
     @Test
     void preservesRecordedSplitAmountsAndExplicitPixDetails() {
         Payment cash = payment(PaymentMethod.CASH, "12.50");
-        Payment pix = payment(PaymentMethod.PIX, "7.50");
+        Payment pix = payment(PaymentMethod.PIX, "7.50",
+                new ElectronicPaymentDetails("2", null, null, null, null, null));
         var evidence = new NfceXmlBuilder.ElectronicDetails("2", null, null, null, null, null);
 
-        var lines = NfceRecordedPaymentMapper.map(List.of(cash, pix), Map.of(pix.getId(), evidence));
+        var lines = NfceRecordedPaymentMapper.map(List.of(cash, pix));
 
         assertEquals(List.of(
                 new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.CASH, new BigDecimal("12.50")),
@@ -35,18 +36,36 @@ class NfceRecordedPaymentMapperTests {
         Payment cash = payment(PaymentMethod.CASH, "20.00");
 
         assertThrows(IllegalArgumentException.class,
-                () -> NfceRecordedPaymentMapper.map(List.of(card), Map.of()));
+                () -> NfceRecordedPaymentMapper.map(List.of(card)));
         assertThrows(IllegalArgumentException.class,
-                () -> NfceRecordedPaymentMapper.map(List.of(other), Map.of()));
+                () -> NfceRecordedPaymentMapper.map(List.of(other)));
         assertThrows(IllegalArgumentException.class,
-                () -> NfceRecordedPaymentMapper.map(List.of(cash), Map.of(
-                        cash.getId(), new NfceXmlBuilder.ElectronicDetails("2", null, null, null, null, null))));
+                () -> NfceRecordedPaymentMapper.map(List.of(payment(PaymentMethod.CASH, "20.00",
+                        new ElectronicPaymentDetails("2", null, null, null, null, null)))));
         assertThrows(IllegalArgumentException.class,
-                () -> NfceRecordedPaymentMapper.map(List.of(cash, cash), Map.of()));
+                () -> NfceRecordedPaymentMapper.map(List.of(cash, cash)));
+    }
+
+    @Test
+    void mapsPersistedElectronicEvidenceWithoutExternalOverrides() {
+        Payment pix = new Payment(null, new BigDecimal("7.50"), PaymentMethod.PIX, null,
+                new ElectronicPaymentDetails("2", null, null, null, null, null));
+        ReflectionTestUtils.setField(pix, "id", UUID.randomUUID());
+
+        assertEquals(List.of(new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.PIX,
+                        new BigDecimal("7.50"),
+                        new NfceXmlBuilder.ElectronicDetails("2", null, null, null, null, null))),
+                NfceRecordedPaymentMapper.map(List.of(pix)));
+        assertThrows(IllegalArgumentException.class,
+                () -> NfceRecordedPaymentMapper.map(List.of(payment(PaymentMethod.PIX, "7.50"))));
     }
 
     private static Payment payment(PaymentMethod method, String amount) {
-        Payment payment = new Payment(null, new BigDecimal(amount), method, null);
+        return payment(method, amount, null);
+    }
+
+    private static Payment payment(PaymentMethod method, String amount, ElectronicPaymentDetails details) {
+        Payment payment = new Payment(null, new BigDecimal(amount), method, null, details);
         ReflectionTestUtils.setField(payment, "id", UUID.randomUUID());
         return payment;
     }

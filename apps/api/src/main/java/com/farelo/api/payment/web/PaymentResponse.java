@@ -2,6 +2,7 @@ package com.farelo.api.payment.web;
 
 import com.farelo.api.payment.Payment;
 import com.farelo.api.payment.PaymentMethod;
+import com.farelo.api.payment.ElectronicPaymentDetails;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -26,7 +27,8 @@ public record PaymentResponse(
         BigDecimal amount,
         PaymentMethod method,
         UUID cashSessionId,
-        OffsetDateTime createdAt) {
+        OffsetDateTime createdAt,
+        ElectronicPaymentDetails fiscalDetails) {
 
     public static PaymentResponse from(Payment payment) {
         return new PaymentResponse(
@@ -35,7 +37,8 @@ public record PaymentResponse(
                 payment.getAmount(),
                 payment.getMethod(),
                 payment.getCashSession() == null ? null : payment.getCashSession().getId(),
-                payment.getCreatedAt());
+                payment.getCreatedAt(),
+                payment.getFiscalDetails());
     }
 
 }

@@ -4,6 +4,7 @@ import com.farelo.api.payment.PaymentMethod;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.Valid;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -54,7 +55,13 @@ public record PaymentRequest(
         @NotNull @Positive BigDecimal amount,
         @NotNull PaymentMethod method,
         @Positive BigDecimal amountReceived,
-        @NotNull UUID cashSessionId) {
+        @NotNull UUID cashSessionId,
+        @Valid ElectronicPaymentDetailsRequest fiscalDetails) {
+
+    public PaymentRequest(BigDecimal amount, PaymentMethod method, BigDecimal amountReceived,
+                          UUID cashSessionId) {
+        this(amount, method, amountReceived, cashSessionId, null);
+    }
 
     @AssertTrue(message = "amountReceived só é permitido quando method é CASH")
     public boolean isAmountReceivedOnlyForCash() {
@@ -64,6 +71,17 @@ public record PaymentRequest(
     @AssertTrue(message = "amountReceived deve ser maior ou igual a amount")
     public boolean isAmountReceivedAtLeastAmount() {
         return amountReceived == null || amount == null || amountReceived.compareTo(amount) >= 0;
+    }
+
+    @AssertTrue(message = "detalhes fiscais são permitidos somente para PIX ou cartão")
+    public boolean isFiscalDetailsOnlyForElectronicMethod() {
+        return fiscalDetails == null || method == PaymentMethod.PIX
+                || method == PaymentMethod.CREDIT_CARD || method == PaymentMethod.DEBIT_CARD;
+    }
+
+    @AssertTrue(message = "PIX não pode ter bandeira de cartão")
+    public boolean isCardBrandOnlyForCard() {
+        return method != PaymentMethod.PIX || fiscalDetails == null || fiscalDetails.cardBrand() == null;
     }
 
 }

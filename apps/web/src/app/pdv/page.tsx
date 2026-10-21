@@ -1598,6 +1598,12 @@ function PaymentPanel({
           "Informe reais e até dois centavos",
         )
         .optional(),
+      integrationType: z.enum(["", "1", "2"]),
+      institutionCnpj: z.string().trim().optional(),
+      cardBrand: z.string().trim().optional(),
+      authorizationCode: z.string().trim().optional(),
+      receiverCnpj: z.string().trim().optional(),
+      terminalId: z.string().trim().optional(),
     })
     .refine(
       (data) =>
@@ -1610,7 +1616,72 @@ function PaymentPanel({
         message: "Dinheiro recebido deve ser maior ou igual ao valor",
         path: ["amountReceived"],
       },
-    );
+    )
+    .refine(
+      (data) =>
+        !["PIX", "CREDIT_CARD", "DEBIT_CARD"].includes(data.method) ||
+        data.integrationType !== "",
+      {
+        message: "Informe como o pagamento foi processado",
+        path: ["integrationType"],
+      },
+    )
+    .superRefine((data, context) => {
+      const electronic = ["PIX", "CREDIT_CARD", "DEBIT_CARD"].includes(
+        data.method,
+      );
+      if (!electronic) return;
+      if (data.institutionCnpj && !/^[0-9]{14}$/.test(data.institutionCnpj)) {
+        context.addIssue({
+          code: "custom",
+          message: "Informe 14 dígitos",
+          path: ["institutionCnpj"],
+        });
+      }
+      if (data.receiverCnpj && !/^[0-9]{14}$/.test(data.receiverCnpj)) {
+        context.addIssue({
+          code: "custom",
+          message: "Informe 14 dígitos",
+          path: ["receiverCnpj"],
+        });
+      }
+      if (
+        data.method !== "PIX" &&
+        data.cardBrand &&
+        !/^[0-9]{2}$/.test(data.cardBrand)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "Informe o código de 2 dígitos",
+          path: ["cardBrand"],
+        });
+      }
+      if (data.authorizationCode && data.authorizationCode.length > 128) {
+        context.addIssue({
+          code: "custom",
+          message: "Máximo de 128 caracteres",
+          path: ["authorizationCode"],
+        });
+      }
+      if (data.terminalId && data.terminalId.length > 40) {
+        context.addIssue({
+          code: "custom",
+          message: "Máximo de 40 caracteres",
+          path: ["terminalId"],
+        });
+      }
+      if (
+        data.integrationType === "1" &&
+        (!data.institutionCnpj || !data.authorizationCode)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Pagamento integrado exige CNPJ da instituição e autorização",
+          path: ["authorizationCode"],
+        });
+      }
+    });
   type PaymentFormValues = z.infer<typeof paymentFormSchema>;
 
   const {
@@ -1625,6 +1696,12 @@ function PaymentPanel({
       amount: remaining > 0 ? String(remaining) : "",
       method: "PIX",
       amountReceived: "",
+      integrationType: "",
+      institutionCnpj: "",
+      cardBrand: "",
+      authorizationCode: "",
+      receiverCnpj: "",
+      terminalId: "",
     },
   });
 
@@ -1647,6 +1724,12 @@ function PaymentPanel({
       amount: remaining > 0 ? String(remaining) : "",
       method: "PIX",
       amountReceived: "",
+      integrationType: "",
+      institutionCnpj: "",
+      cardBrand: "",
+      authorizationCode: "",
+      receiverCnpj: "",
+      terminalId: "",
     });
     setLastChangeGiven(null);
     setFormOpen(true);
@@ -1686,6 +1769,21 @@ function PaymentPanel({
         amountReceived:
           values.method === "CASH" && values.amountReceived
             ? parseMoneyCents(values.amountReceived)! / 100
+            : undefined,
+        fiscalDetails:
+          ["PIX", "CREDIT_CARD", "DEBIT_CARD"].includes(values.method) &&
+          values.integrationType !== ""
+            ? {
+                integrationType: values.integrationType,
+                institutionCnpj: values.institutionCnpj || undefined,
+                cardBrand:
+                  values.method === "PIX"
+                    ? undefined
+                    : values.cardBrand || undefined,
+                authorizationCode: values.authorizationCode || undefined,
+                receiverCnpj: values.receiverCnpj || undefined,
+                terminalId: values.terminalId || undefined,
+              }
             : undefined,
       };
       paymentIntent.current = paymentIntentFor(
@@ -1880,6 +1978,102 @@ function PaymentPanel({
                   Troco: {currencyFormatter.format(previewChange)}
                 </p>
               ) : null}
+            </div>
+          ) : null}
+          {["PIX", "CREDIT_CARD", "DEBIT_CARD"].includes(method) ? (
+            <div className="border-line flex flex-col gap-3 rounded-lg border p-3">
+              <p className="text-ink text-sm font-medium">
+                Dados do comprovante para a NFC-e
+              </p>
+              <p className="text-ink-soft text-xs">
+                Informe somente dados da transação. Nunca digite número do
+                cartão ou CVV.
+              </p>
+              <div className="flex flex-col gap-1">
+                <label className="text-ink text-sm" htmlFor="integrationType">
+                  Como o pagamento foi processado?
+                </label>
+                <select
+                  id="integrationType"
+                  className="border-line bg-surface rounded-lg border px-3 py-2 text-sm"
+                  {...register("integrationType")}
+                >
+                  <option value="">Selecione</option>
+                  <option value="2">Maquininha ou app separado do PDV</option>
+                  <option value="1">Integrado ao PDV (TEF)</option>
+                </select>
+                {errors.integrationType ? (
+                  <p className="text-red text-sm">
+                    {errors.integrationType.message}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-ink text-sm" htmlFor="authorizationCode">
+                  Código de autorização do comprovante
+                </label>
+                <input
+                  id="authorizationCode"
+                  className="border-line bg-surface rounded-lg border px-3 py-2 text-sm"
+                  {...register("authorizationCode")}
+                />
+                {errors.authorizationCode ? (
+                  <p className="text-red text-sm">
+                    {errors.authorizationCode.message}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-ink text-sm" htmlFor="institutionCnpj">
+                  CNPJ da instituição de pagamento
+                </label>
+                <input
+                  id="institutionCnpj"
+                  inputMode="numeric"
+                  placeholder="14 dígitos, se constar no comprovante"
+                  className="border-line bg-surface rounded-lg border px-3 py-2 text-sm"
+                  {...register("institutionCnpj")}
+                />
+                {errors.institutionCnpj ? (
+                  <p className="text-red text-sm">
+                    {errors.institutionCnpj.message}
+                  </p>
+                ) : null}
+              </div>
+              {method !== "PIX" ? (
+                <div className="flex flex-col gap-1">
+                  <label className="text-ink text-sm" htmlFor="cardBrand">
+                    Código fiscal da bandeira
+                  </label>
+                  <input
+                    id="cardBrand"
+                    inputMode="numeric"
+                    placeholder="2 dígitos, se confirmado"
+                    className="border-line bg-surface rounded-lg border px-3 py-2 text-sm"
+                    {...register("cardBrand")}
+                  />
+                  {errors.cardBrand ? (
+                    <p className="text-red text-sm">
+                      {errors.cardBrand.message}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="flex flex-col gap-1">
+                <label className="text-ink text-sm" htmlFor="terminalId">
+                  Identificador do terminal · opcional
+                </label>
+                <input
+                  id="terminalId"
+                  className="border-line bg-surface rounded-lg border px-3 py-2 text-sm"
+                  {...register("terminalId")}
+                />
+                {errors.terminalId ? (
+                  <p className="text-red text-sm">
+                    {errors.terminalId.message}
+                  </p>
+                ) : null}
+              </div>
             </div>
           ) : null}
           {errorMessage ? (

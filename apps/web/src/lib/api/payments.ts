@@ -8,6 +8,15 @@ import { authHeaders, parseResponse } from "./client";
 export type PaymentMethod =
   "PIX" | "CREDIT_CARD" | "DEBIT_CARD" | "CASH" | "OTHER";
 
+export type ElectronicPaymentDetails = {
+  integrationType: "1" | "2";
+  institutionCnpj?: string | null;
+  cardBrand?: string | null;
+  authorizationCode?: string | null;
+  receiverCnpj?: string | null;
+  terminalId?: string | null;
+};
+
 export type Payment = {
   id: string;
   commandNumber: number;
@@ -15,6 +24,7 @@ export type Payment = {
   method: PaymentMethod;
   cashSessionId: string | null;
   createdAt: string;
+  fiscalDetails: ElectronicPaymentDetails | null;
 };
 
 export type TotalPaid = {
@@ -43,6 +53,7 @@ export type RecordPaymentInput = {
   // cash the customer physically handed over; amount stays "valor
   // efetivamente aplicado" exactly as before this ticket.
   amountReceived?: number;
+  fiscalDetails?: ElectronicPaymentDetails;
 };
 
 // FARELO-225: response shape for recordPayment — changeGiven is computed

@@ -6,6 +6,7 @@ import com.farelo.api.payment.PaymentService;
 import com.farelo.api.security.UserRole;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.persistence.EntityManager;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -82,7 +83,8 @@ public class PaymentRecordIdempotencyService {
 
     private PaymentRecordResponse create(int commandNumber, PaymentRequest request, UUID actorId, UserRole role) {
         Payment payment = paymentService.record(commandNumber, request.amount(), request.method(),
-                request.cashSessionId(), actorId, role);
+                request.cashSessionId(), actorId, role,
+                request.fiscalDetails() == null ? null : request.fiscalDetails().toDomain());
         BigDecimal changeGiven = request.amountReceived() != null
                 ? request.amountReceived().subtract(request.amount()) : BigDecimal.ZERO;
         return PaymentRecordResponse.from(payment, changeGiven);
@@ -102,7 +104,8 @@ public class PaymentRecordIdempotencyService {
 
     private String fingerprint(int commandNumber, PaymentRequest request, UUID actorId) {
         FingerprintPayload payload = new FingerprintPayload(commandNumber, actorId, money(request.amount()),
-                request.method().name(), money(request.amountReceived()), request.cashSessionId());
+                request.method().name(), money(request.amountReceived()), request.cashSessionId(),
+                request.fiscalDetails());
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(serialize(payload).getBytes(StandardCharsets.UTF_8)));
@@ -135,6 +138,8 @@ public class PaymentRecordIdempotencyService {
     }
 
     private record FingerprintPayload(int commandNumber, UUID actorId, String amount, String method,
-                                      String amountReceived, UUID cashSessionId) {
+                                      String amountReceived, UUID cashSessionId,
+                                      @JsonInclude(JsonInclude.Include.NON_NULL)
+                                      ElectronicPaymentDetailsRequest fiscalDetails) {
     }
 }

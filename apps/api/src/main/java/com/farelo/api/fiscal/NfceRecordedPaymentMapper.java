@@ -2,28 +2,25 @@ package com.farelo.api.fiscal;
 
 import com.farelo.api.payment.Payment;
 import com.farelo.api.payment.PaymentMethod;
+import com.farelo.api.payment.ElectronicPaymentDetails;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
 /**
  * Converts the immutable payment ledger to NFC-e payment lines. Electronic
- * transaction details must be explicitly captured and supplied by payment ID;
- * the current cashier API does not yet persist them. No fiscal value is inferred
- * from a payment method alone.
+ * transaction details must be persisted with their payment. No fiscal value
+ * is inferred from a payment method alone.
  */
 public final class NfceRecordedPaymentMapper {
     private NfceRecordedPaymentMapper() { }
 
-    public static List<NfceXmlBuilder.Payment> map(
-            List<Payment> recorded, Map<UUID, NfceXmlBuilder.ElectronicDetails> electronicByPaymentId) {
+    public static List<NfceXmlBuilder.Payment> map(List<Payment> recorded) {
         Objects.requireNonNull(recorded, "recorded payments");
-        Objects.requireNonNull(electronicByPaymentId, "electronic payment details");
         if (recorded.isEmpty() || recorded.size() > 100) {
             throw new IllegalArgumentException("1 to 100 recorded payments are required");
         }
@@ -36,7 +33,10 @@ public final class NfceRecordedPaymentMapper {
                 throw new IllegalArgumentException("invalid or duplicate recorded payment");
             }
             PaymentMethod method = payment.getMethod();
-            var electronic = electronicByPaymentId.get(payment.getId());
+            ElectronicPaymentDetails details = payment.getFiscalDetails();
+            var electronic = details == null ? null : new NfceXmlBuilder.ElectronicDetails(
+                    details.integrationType(), details.institutionCnpj(), details.cardBrand(),
+                    details.authorizationCode(), details.receiverCnpj(), details.terminalId());
             NfceXmlBuilder.PaymentMethod fiscalMethod;
             switch (method) {
                 case CASH -> {
@@ -62,9 +62,6 @@ public final class NfceRecordedPaymentMapper {
                 default -> throw new IllegalArgumentException("unsupported recorded payment method");
             }
             fiscal.add(new NfceXmlBuilder.Payment(fiscalMethod, payment.getAmount(), electronic));
-        }
-        if (!seen.containsAll(electronicByPaymentId.keySet())) {
-            throw new IllegalArgumentException("electronic details do not belong to recorded payments");
         }
         return List.copyOf(fiscal);
     }

@@ -2095,6 +2095,7 @@ deles).
 | `amount` | `BigDecimal`, sempre positivo — o valor efetivamente pago nesta transação. |
 | `method` | Um de `PIX`/`CREDIT_CARD`/`DEBIT_CARD`/`CASH`/`OTHER`. |
 | `cashSessionId` | Caixa vinculado explicitamente; `null` apenas para pagamentos históricos sem vínculo confiável. |
+| `fiscalDetails` | Evidência eletrônica persistida no pagamento, ou `null` para dinheiro e registros antigos sem dados. Visível apenas aos papéis autorizados para ler pagamentos. |
 
 Sem `updatedAt` — este é um registro de ledger, imutável desde a criação
 (ver `docs/domain-model.md`, seção `payment`/`Payment`).
@@ -2146,6 +2147,7 @@ chamada, um por requisição.
 | `amount` | `BigDecimal`, obrigatório, estritamente positivo (`@Positive`) — zero ou negativo é `400 VALIDATION_ERROR`. |
 | `method` | Obrigatório, um de `PIX`/`CREDIT_CARD`/`DEBIT_CARD`/`CASH`/`OTHER` — ausente/`null` é `400 VALIDATION_ERROR`. |
 | `cashSessionId` | UUID obrigatório de um caixa `OPEN`. `CASHIER` só registra no próprio caixa; `ADMIN`/`MANAGER` podem registrar em qualquer caixa aberto. |
+| `fiscalDetails` | Opcional nesta etapa, somente para `PIX`/cartões. Objeto com `integrationType` (`1` integrado, `2` não integrado), `institutionCnpj`, `cardBrand`, `authorizationCode`, `receiverCnpj` e `terminalId`, conforme o comprovante real. Quando `integrationType=1`, CNPJ da instituição e código de autorização são obrigatórios. A ausência de detalhes não é preenchida automaticamente e impede a futura emissão fiscal desse pagamento. Nunca enviar número do cartão ou CVV. |
 
 **Estados de origem válidos da comanda**: `OPEN` e `PAYMENT_REQUESTED` —
 mesmos dois estados que `POST /api/v1/commands/{number}/close` já aceita
@@ -3199,9 +3201,10 @@ não cria endpoint nem libera transmissão fiscal.
 
 O mapper interno `NfceRecordedPaymentMapper` converte pagamentos reais da
 comanda em linhas do XML, preservando valor e ordem. Dinheiro funciona sem
-dados adicionais; PIX e cartões exigem detalhes eletrônicos explícitos por
-pagamento. O endpoint de pagamentos ainda não os captura, então nenhuma rota
-de emissão usa esse mapper. `OTHER` permanece sem tradução fiscal automática.
+dados adicionais; PIX e cartões exigem detalhes eletrônicos persistidos no
+pagamento. O endpoint e a tela do caixa coletam os campos informados no
+comprovante, mas a emissão ainda não usa esse fluxo. `OTHER` permanece sem
+tradução fiscal automática.
 
 O QR Code v3 online de homologação é adicionado depois da assinatura por
 `NfceQrCodeV3`, sem CSC. A função recusa XML sem assinatura, ambiente de
