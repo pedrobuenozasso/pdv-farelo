@@ -3234,8 +3234,10 @@ continuam pendentes de consulta por chave. Nenhuma rota de emissão foi aberta.
 vinculado pela SEFAZ, sem sobrescrever o XML autorizado. O `GET`
 administrativo inclui `cancellationProtocolNumber`, `cancelledAt` e
 `cancellationEventXml` (`procEventoNFe`); o SOAP bruto não é exposto nesta
-resposta. Ainda não existe rota
-HTTP para pedir cancelamento nem envio automático do evento.
+resposta. `SefazSpCancellationClient` prepara um único envio SOAP de
+homologação para o endpoint fixo confirmado por WSDL, sem retry automático
+quando a resposta é incerta. Ainda não existe rota HTTP para pedir
+cancelamento nem envio automático do evento.
 
 `SefazSpProtocolConsultationClient` faz somente consulta de chave no serviço
 fixo de homologação. `FiscalAuthorizationRecorder#reconcile` registra a
