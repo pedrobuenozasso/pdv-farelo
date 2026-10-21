@@ -3206,6 +3206,12 @@ pagamento. O endpoint e a tela do caixa coletam os campos informados no
 comprovante, mas a emissão ainda não usa esse fluxo. `OTHER` permanece sem
 tradução fiscal automática.
 
+O proprietário confirmou em 21/10/2026 que PIX e cartão são processados em
+maquininha/app separado do PDV. Por isso, a tela atual grava `integrationType=2`
+para essas formas e mostra apenas os campos que o operador pode copiar do
+comprovante; o endpoint conserva suporte explícito a `1` para uma eventual
+integração TEF futura. Não presumir CNPJ, bandeira ou autorização ausentes.
+
 O QR Code v3 online de homologação é adicionado depois da assinatura por
 `NfceQrCodeV3`, sem CSC. A função recusa XML sem assinatura, ambiente de
 produção, contingência e duplicação do suplemento. Nenhuma rota HTTP foi

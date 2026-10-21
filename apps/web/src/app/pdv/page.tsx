@@ -1598,7 +1598,6 @@ function PaymentPanel({
           "Informe reais e até dois centavos",
         )
         .optional(),
-      integrationType: z.enum(["", "1", "2"]),
       institutionCnpj: z.string().trim().optional(),
       cardBrand: z.string().trim().optional(),
       authorizationCode: z.string().trim().optional(),
@@ -1615,15 +1614,6 @@ function PaymentPanel({
       {
         message: "Dinheiro recebido deve ser maior ou igual ao valor",
         path: ["amountReceived"],
-      },
-    )
-    .refine(
-      (data) =>
-        !["PIX", "CREDIT_CARD", "DEBIT_CARD"].includes(data.method) ||
-        data.integrationType !== "",
-      {
-        message: "Informe como o pagamento foi processado",
-        path: ["integrationType"],
       },
     )
     .superRefine((data, context) => {
@@ -1670,17 +1660,6 @@ function PaymentPanel({
           path: ["terminalId"],
         });
       }
-      if (
-        data.integrationType === "1" &&
-        (!data.institutionCnpj || !data.authorizationCode)
-      ) {
-        context.addIssue({
-          code: "custom",
-          message:
-            "Pagamento integrado exige CNPJ da instituição e autorização",
-          path: ["authorizationCode"],
-        });
-      }
     });
   type PaymentFormValues = z.infer<typeof paymentFormSchema>;
 
@@ -1696,7 +1675,6 @@ function PaymentPanel({
       amount: remaining > 0 ? String(remaining) : "",
       method: "PIX",
       amountReceived: "",
-      integrationType: "",
       institutionCnpj: "",
       cardBrand: "",
       authorizationCode: "",
@@ -1724,7 +1702,6 @@ function PaymentPanel({
       amount: remaining > 0 ? String(remaining) : "",
       method: "PIX",
       amountReceived: "",
-      integrationType: "",
       institutionCnpj: "",
       cardBrand: "",
       authorizationCode: "",
@@ -1770,21 +1747,21 @@ function PaymentPanel({
           values.method === "CASH" && values.amountReceived
             ? parseMoneyCents(values.amountReceived)! / 100
             : undefined,
-        fiscalDetails:
-          ["PIX", "CREDIT_CARD", "DEBIT_CARD"].includes(values.method) &&
-          values.integrationType !== ""
-            ? {
-                integrationType: values.integrationType,
-                institutionCnpj: values.institutionCnpj || undefined,
-                cardBrand:
-                  values.method === "PIX"
-                    ? undefined
-                    : values.cardBrand || undefined,
-                authorizationCode: values.authorizationCode || undefined,
-                receiverCnpj: values.receiverCnpj || undefined,
-                terminalId: values.terminalId || undefined,
-              }
-            : undefined,
+        fiscalDetails: ["PIX", "CREDIT_CARD", "DEBIT_CARD"].includes(
+          values.method,
+        )
+          ? {
+              integrationType: "2" as const,
+              institutionCnpj: values.institutionCnpj || undefined,
+              cardBrand:
+                values.method === "PIX"
+                  ? undefined
+                  : values.cardBrand || undefined,
+              authorizationCode: values.authorizationCode || undefined,
+              receiverCnpj: values.receiverCnpj || undefined,
+              terminalId: values.terminalId || undefined,
+            }
+          : undefined,
       };
       paymentIntent.current = paymentIntentFor(
         commandNumber,
@@ -1989,25 +1966,9 @@ function PaymentPanel({
                 Informe somente dados da transação. Nunca digite número do
                 cartão ou CVV.
               </p>
-              <div className="flex flex-col gap-1">
-                <label className="text-ink text-sm" htmlFor="integrationType">
-                  Como o pagamento foi processado?
-                </label>
-                <select
-                  id="integrationType"
-                  className="border-line bg-surface rounded-lg border px-3 py-2 text-sm"
-                  {...register("integrationType")}
-                >
-                  <option value="">Selecione</option>
-                  <option value="2">Maquininha ou app separado do PDV</option>
-                  <option value="1">Integrado ao PDV (TEF)</option>
-                </select>
-                {errors.integrationType ? (
-                  <p className="text-red text-sm">
-                    {errors.integrationType.message}
-                  </p>
-                ) : null}
-              </div>
+              <p className="text-ink-soft text-xs">
+                Processamento: maquininha ou app separado do PDV.
+              </p>
               <div className="flex flex-col gap-1">
                 <label className="text-ink text-sm" htmlFor="authorizationCode">
                   Código de autorização do comprovante
