@@ -125,6 +125,51 @@ export default function ProductsAdminPage() {
   });
   const fiscalProfiles = fiscalProfilesQuery.data ?? [];
 
+  const visibilityMutation = useMutation({
+    mutationFn: ({
+      product,
+      field,
+    }: {
+      product: Product;
+      field: "availableOnMenu" | "availableOnPos";
+    }) =>
+      updateProduct(product.id, {
+        name: product.name,
+        description: product.description ?? undefined,
+        price: product.price,
+        categoryId: product.categoryId,
+        imageUrl: product.imageUrl ?? undefined,
+        active: product.active,
+        availableOnMenu:
+          field === "availableOnMenu"
+            ? !product.availableOnMenu
+            : product.availableOnMenu,
+        availableOnPos:
+          field === "availableOnPos"
+            ? !product.availableOnPos
+            : product.availableOnPos,
+        productionStation: product.productionStation ?? undefined,
+        fiscalProfileId: product.fiscalProfileId,
+      }),
+    onSuccess: (savedProduct) => {
+      queryClient.setQueryData<Product[]>(PRODUCTS_QUERY_KEY, (products) =>
+        products?.map((product) =>
+          product.id === savedProduct.id ? savedProduct : product,
+        ),
+      );
+      queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+    },
+  });
+
+  const toggleVisibility = (
+    product: Product,
+    field: "availableOnMenu" | "availableOnPos",
+  ) => {
+    if (visibilityMutation.isPending) return;
+    visibilityMutation.reset();
+    visibilityMutation.mutate({ product, field });
+  };
+
   const categories = categoriesQuery.data ?? [];
   const categoryNameById = new Map(
     categories.map((category) => [category.id, category.name]),
@@ -468,6 +513,14 @@ export default function ProductsAdminPage() {
           </div>
 
           <div className="border-line bg-surface overflow-hidden rounded-2xl border">
+            {visibilityMutation.isError ? (
+              <p role="alert" className="text-red p-5 text-sm">
+                {apiErrorMessageFor(
+                  visibilityMutation.error,
+                  "Não foi possível atualizar a visibilidade do produto.",
+                )}
+              </p>
+            ) : null}
             {productsQuery.isLoading ? (
               <p className="text-ink-faint p-5 text-sm">Carregando...</p>
             ) : null}
@@ -542,10 +595,26 @@ export default function ProductsAdminPage() {
                             {currencyFormatter.format(product.price)}
                           </td>
                           <td className="px-3 py-3.5">
-                            <ReadonlyDot on={product.availableOnMenu} />
+                            <VisibilitySwitch
+                              on={product.availableOnMenu}
+                              productName={product.name}
+                              channel="cardápio"
+                              disabled={visibilityMutation.isPending}
+                              onClick={() =>
+                                toggleVisibility(product, "availableOnMenu")
+                              }
+                            />
                           </td>
                           <td className="px-3 py-3.5">
-                            <ReadonlyDot on={product.availableOnPos} />
+                            <VisibilitySwitch
+                              on={product.availableOnPos}
+                              productName={product.name}
+                              channel="PDV"
+                              disabled={visibilityMutation.isPending}
+                              onClick={() =>
+                                toggleVisibility(product, "availableOnPos")
+                              }
+                            />
                           </td>
                           <td className="px-3 py-3.5">
                             <Badge tone={product.active ? "green" : "red"}>
@@ -594,13 +663,31 @@ export default function ProductsAdminPage() {
   );
 }
 
-function ReadonlyDot({ on }: { on: boolean }) {
+function VisibilitySwitch({
+  on,
+  productName,
+  channel,
+  disabled,
+  onClick,
+}: {
+  on: boolean;
+  productName: string;
+  channel: "cardápio" | "PDV";
+  disabled: boolean;
+  onClick: () => void;
+}) {
   return (
-    <span
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={`${on ? "Ocultar" : "Exibir"} ${productName} no ${channel}`}
+      disabled={disabled}
+      onClick={onClick}
       className={
         on
-          ? "bg-primary inline-block h-[19px] w-[34px] rounded-full"
-          : "bg-line inline-block h-[19px] w-[34px] rounded-full"
+          ? "bg-primary focus-visible:outline-primary inline-block h-[19px] w-[34px] cursor-pointer rounded-full align-middle focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50"
+          : "bg-line focus-visible:outline-primary inline-block h-[19px] w-[34px] cursor-pointer rounded-full align-middle focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50"
       }
     >
       <span
@@ -610,7 +697,7 @@ function ReadonlyDot({ on }: { on: boolean }) {
             : "bg-surface block h-[15px] w-[15px] translate-x-[2px] translate-y-[2px] rounded-full"
         }
       />
-    </span>
+    </button>
   );
 }
 
