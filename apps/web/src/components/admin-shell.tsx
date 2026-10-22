@@ -76,6 +76,7 @@ const ADMIN_SECTIONS = [
     items: [
       { href: "/admin/categories", label: "Grupos / categorias" },
       { href: "/admin/products", label: "Produtos" },
+      { href: "/admin/menu-preview", label: "Prévia do cardápio" },
       { href: "/admin/users", label: "Usuários" },
       { href: "/admin/fiscal-profiles", label: "Perfis fiscais" },
     ],

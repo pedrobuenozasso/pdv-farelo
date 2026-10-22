@@ -208,6 +208,12 @@ export default function ProductsAdminPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <Link
+                href="/admin/menu-preview"
+                className="text-primary text-sm font-semibold"
+              >
+                Ver cardápio
+              </Link>
               {session?.role === "ADMIN" && (
                 <Link
                   href="/admin/fiscal-profiles"

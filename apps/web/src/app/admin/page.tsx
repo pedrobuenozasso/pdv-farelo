@@ -17,6 +17,7 @@ const READY_AREAS = [
     description: "Produtos, grupos e cadastros disponíveis para seu perfil.",
     links: [
       { href: "/admin/products", label: "Produtos" },
+      { href: "/admin/menu-preview", label: "Prévia do cardápio" },
       { href: "/admin/categories", label: "Grupos / categorias" },
       { href: "/admin/users", label: "Usuários e permissões" },
       { href: "/admin/fiscal-profiles", label: "Perfis fiscais" },
