@@ -91,7 +91,9 @@ public class ProductService {
     }
 
     public List<Product> listAll() {
-        return productRepository.findAll(Sort.by(Sort.Direction.ASC, "name"));
+        return productRepository.findAll(
+                Sort.by(Sort.Direction.ASC, "displayOrder")
+                        .and(Sort.by(Sort.Direction.ASC, "name")));
     }
 
     // Reused by both update() below and com.farelo.api.ordering.OrderService

@@ -220,7 +220,7 @@ embutidos.
 
 ### `GET /api/v1/products`
 
-Lista todos os produtos, ordenados por `name` (asc). (FARELO-015)
+Lista todos os produtos, ordenados por `displayOrder` e `name` (asc). O campo de ordem foi acrescentado para preservar a sequência do cardápio QR.
 
 **Sem autenticação — deliberado (FARELO-123).** Mesmo raciocínio de
 `GET /api/v1/categories` acima: consumido pelo Cardápio QR cliente-facing
@@ -241,6 +241,7 @@ consumidor existir.
     "id": "8a1b2c3d-4e5f-6789-0abc-def123456789",
     "name": "Café Espresso",
     "description": "Espresso curto, torra média",
+    "displayOrder": 1,
     "price": 7.50,
     "active": true,
     "availableOnMenu": true,

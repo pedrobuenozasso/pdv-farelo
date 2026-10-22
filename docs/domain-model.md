@@ -47,6 +47,10 @@ Pacote: `com.farelo.api.catalog`.
   `fiscalProfile` em FARELO-151 (ver subseção dedicada abaixo). Escopo ainda
   restrito propositalmente: sem receita/estoque.
 
+  `displayOrder` (V61) guarda a sequência de exibição dentro da categoria.
+  A listagem da API ordena por esse campo e usa o nome como desempate;
+  produtos já existentes recebem `0` até terem sua ordem conferida.
+
   **`productionStation`** (FARELO-073): enum `ProductionStation` (`BAR`,
   `KITCHEN` — `@Enumerated(EnumType.STRING)`, mesma convenção de
   `CommandStatus`/`OrderStatus`), indicando qual estação física prepara o

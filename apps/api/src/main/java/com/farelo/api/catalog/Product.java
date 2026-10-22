@@ -47,6 +47,9 @@ public class Product {
     @Column(name = "description")
     private String description;
 
+    @Column(name = "display_order", nullable = false)
+    private int displayOrder;
+
     @Column(name = "price", nullable = false, precision = 10, scale = 2)
     private BigDecimal price;
 
@@ -165,6 +168,14 @@ public class Product {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public int getDisplayOrder() {
+        return displayOrder;
+    }
+
+    public void setDisplayOrder(int displayOrder) {
+        this.displayOrder = displayOrder;
     }
 
     public BigDecimal getPrice() {

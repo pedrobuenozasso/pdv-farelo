@@ -13,6 +13,7 @@ export type Product = {
   id: string;
   name: string;
   description: string | null;
+  displayOrder: number;
   price: number;
   active: boolean;
   availableOnMenu: boolean;
