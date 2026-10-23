@@ -9,7 +9,7 @@ Substituir o Sischef por um PDV próprio para a cafeteria Farelo de Bolo e come�
 ## Onde está o código e como está o Git
 
 - Checkout de trabalho deste histórico: `/Users/pedrobueno/Documents/ChatGPT/Farelo PDV Codex/pdv-farelo-admin-login`.
-- Branch de trabalho: `codex/admin-username-login`. Neste checkout, `origin` aponta para o repositório local `/Users/pedrobueno/pdv-farelo`; o `origin` desse repositório principal aponta para `https://github.com/pedrobuenozasso/pdv-farelo.git`.
+- Branch de trabalho: `codex/admin-username-login`, publicada em [GitHub](https://github.com/pedrobuenozasso/pdv-farelo/tree/codex/admin-username-login). Neste checkout, `origin` aponta para o repositório local `/Users/pedrobueno/pdv-farelo` e `github` aponta para o repositório online. A branch acompanha `github/codex/admin-username-login`. O `gh auth` estava inválido nesta data, mas `git push` HTTPS com a credencial do Mac funcionou; outra máquina pode exigir login próprio.
 - Não assumir que `main` contém este trabalho: em 23/10, a branch tinha mais de 100 commits após o ancestral `a196df2`. Conferir `git status`, `git log`, `git branch -vv` e o remoto antes de fazer merge ou novo deploy.
 - `AGENTS.md` descreve convenções. `docs/architecture.md`, `docs/domain-model.md` e `docs/api.md` contêm a arquitetura e contratos; alguns trechos antigos ainda dizem que a VPS não foi implantada. Para o estado operacional atual, preferir este arquivo e `deploy/README.md`.
 
