@@ -79,6 +79,31 @@ class FiscalSubmissionAttemptServiceTests {
         assertEquals(FiscalSubmissionAttemptStatus.RESERVED, attempt.getStatus());
     }
 
+    @Test
+    void onlyHomologationDocumentsCanCrossTheDispatchFence() {
+        Fixture fixture = new Fixture();
+        var request = new FiscalAuthorizationRequest(fixture.documentId, KEY, "<signed>one</signed>");
+        fixture.document.setFiscalEnvironment(FiscalNumberEnvironment.PRODUCTION);
+        assertThrows(IllegalStateException.class, () -> fixture.service.reserve(request));
+        fixture.document.setFiscalEnvironment(FiscalNumberEnvironment.HOMOLOGATION);
+        FiscalSubmissionAttempt attempt = fixture.service.reserve(request);
+        fixture.document.setFiscalEnvironment(FiscalNumberEnvironment.PRODUCTION);
+        assertThrows(IllegalStateException.class, () -> fixture.service.beginDispatch(attempt.getId()));
+        assertEquals(FiscalSubmissionAttemptStatus.RESERVED, attempt.getStatus());
+    }
+
+    @Test
+    void recoveryFindsOnlyThePreviouslyReservedPayload() {
+        Fixture fixture = new Fixture();
+        var request = new FiscalAuthorizationRequest(fixture.documentId, KEY, "<signed>one</signed>");
+        FiscalSubmissionAttempt attempt = fixture.service.reserve(request);
+        fixture.service.beginDispatch(attempt.getId());
+        fixture.document.setStatus(FiscalDocumentStatus.AUTHORIZED);
+        assertSame(attempt, fixture.service.findMatching(request));
+        assertThrows(IllegalStateException.class, () -> fixture.service.findMatching(
+                new FiscalAuthorizationRequest(fixture.documentId, KEY, "<signed>different</signed>")));
+    }
+
     private static final class Fixture {
         final UUID documentId = UUID.randomUUID();
         final FiscalDocument document = new FiscalDocument(new Command(1));
@@ -89,6 +114,7 @@ class FiscalSubmissionAttemptServiceTests {
         Fixture() {
             ReflectionTestUtils.setField(document, "id", documentId);
             document.setStatus(FiscalDocumentStatus.PROCESSING);
+            document.setFiscalEnvironment(FiscalNumberEnvironment.HOMOLOGATION);
             document.setAccessKey(KEY);
             document.setXmlContent("<signed>one</signed>");
             FiscalDocumentRepository documents = (FiscalDocumentRepository) Proxy.newProxyInstance(

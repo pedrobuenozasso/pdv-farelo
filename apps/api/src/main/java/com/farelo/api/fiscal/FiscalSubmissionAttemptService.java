@@ -33,6 +33,7 @@ public class FiscalSubmissionAttemptService {
                 .orElseThrow(() -> new FiscalDocumentNotFoundException(request.documentId()));
         if (document.getStatus() != FiscalDocumentStatus.PROCESSING
                 && document.getStatus() != FiscalDocumentStatus.CONTINGENCY
+                || document.getFiscalEnvironment() != FiscalNumberEnvironment.HOMOLOGATION
                 || !request.accessKey().equals(document.getAccessKey())
                 || !request.signedXml().equals(document.getXmlContent())) {
             throw new IllegalStateException("fiscal document is not ready for submission");
@@ -57,6 +58,7 @@ public class FiscalSubmissionAttemptService {
         FiscalDocument document = pair.document();
         if (document.getStatus() != FiscalDocumentStatus.PROCESSING
                 && document.getStatus() != FiscalDocumentStatus.CONTINGENCY
+                || document.getFiscalEnvironment() != FiscalNumberEnvironment.HOMOLOGATION
                 || !attempt.getAccessKey().equals(document.getAccessKey())
                 || document.getXmlContent() == null
                 || !attempt.getRequestSha256().equals(sha256(document.getXmlContent()))) {
@@ -71,6 +73,19 @@ public class FiscalSubmissionAttemptService {
         FiscalSubmissionAttempt attempt = locked(attemptId);
         attempt.uncertain();
         return attempts.save(attempt);
+    }
+
+    /** Reads a previously fenced payload even after its document was resolved. */
+    @Transactional(readOnly = true)
+    public FiscalSubmissionAttempt findMatching(FiscalAuthorizationRequest request) {
+        Objects.requireNonNull(request, "request");
+        FiscalSubmissionAttempt attempt = attempts.findByDocumentId(request.documentId())
+                .orElseThrow(() -> new IllegalArgumentException("fiscal submission attempt not found"));
+        if (!attempt.getAccessKey().equals(request.accessKey())
+                || !attempt.getRequestSha256().equals(sha256(request.signedXml()))) {
+            throw new IllegalStateException("fiscal submission payload differs from reserved attempt");
+        }
+        return attempt;
     }
 
     /** Only closes the fence after an independent recorder persisted SEFAZ's outcome. */
