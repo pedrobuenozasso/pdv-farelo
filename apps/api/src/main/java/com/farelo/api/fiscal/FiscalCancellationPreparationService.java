@@ -1,5 +1,6 @@
 package com.farelo.api.fiscal;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +21,7 @@ public class FiscalCancellationPreparationService {
     private final NfceCancellationEventSigner signer;
     private final Clock clock;
 
+    @Autowired
     public FiscalCancellationPreparationService(FiscalDocumentRepository documents) {
         this(documents, new NfceCancellationEventSigner(), Clock.systemUTC());
     }
