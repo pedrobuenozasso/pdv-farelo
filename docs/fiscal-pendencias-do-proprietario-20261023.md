@@ -1,6 +1,6 @@
 # Fiscal: decisões que dependem do Farelo e da contabilidade
 
-Estado em 23/10/2026: o release `7138766` está na VPS privada. O caixa **não** emite NFC-e; nenhum XML foi enviado à SEFAZ. O banco tem 52 produtos e ainda não tem perfil fiscal, configuração do emitente, sequência fiscal ou documento emitido. O pacote A1 e sua senha continuam fora do Git e da VPS.
+Estado em 23/10/2026: o release `cfb6b05` está na VPS privada. O caixa **não** emite NFC-e; nenhum XML foi enviado à SEFAZ. O banco tem 52 produtos e ainda não tem perfil fiscal, configuração do emitente, sequência fiscal ou documento emitido. O pacote A1 e sua senha continuam fora do Git e da VPS.
 
 ## O que Pedro e a contabilidade precisam conferir
 
@@ -12,7 +12,7 @@ Estado em 23/10/2026: o release `7138766` está na VPS privada. O caixa **não**
 ## Trabalho técnico que permanece com a equipe
 
 - Instalar e verificar um pacote XSD oficial, versionado, sem busca de esquema na internet em tempo de emissão.
-- Concluir a custódia do A1, o vínculo CNPJ certificado/emitente, a criação controlada de documentos pendentes e o teste de rollback no PostgreSQL.
+- Concluir a custódia do A1, a criação controlada de documentos pendentes e o provisionamento seguro da numeração. A checagem do CNPJ do certificado e o rollback da preparação já passaram nos testes.
 - Executar homologação real, consulta de resposta incerta, rejeição e cancelamento; conferir XML, DANFE e QR Code.
 - Implementar contingência, guarda/backup externo de XML e procedimento de recuperação antes de habilitar emissão em produção.
 
