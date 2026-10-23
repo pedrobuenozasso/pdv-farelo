@@ -2714,6 +2714,13 @@ CRUD genérico de `fiscal-profiles`).
   "tradeName": "Farelo Café",
   "stateRegistration": "123.456.789.112",
   "address": "Rua das Flores, 123 - São Paulo/SP",
+  "taxRegime": null,
+  "street": null,
+  "streetNumber": null,
+  "district": null,
+  "cityCode": null,
+  "city": null,
+  "postalCode": null,
   "createdAt": "2026-09-02T13:00:00Z",
   "updatedAt": "2026-09-02T13:00:00Z"
 }
@@ -2761,8 +2768,17 @@ constraint de banco).
 | `tradeName` | string | não | Nome fantasia; omitido/`null` = "sem nome fantasia" |
 | `stateRegistration` | string | não | Inscrição estadual; omitido/`null` = "sem inscrição" (empresa isenta) |
 | `address` | string | não | Texto livre (não estruturado); omitido/`null` = "sem endereço" |
+| `taxRegime` | string | não | CRT `1` ou `3`, somente após conferência do emitente; outro valor é rejeitado |
+| `street`, `streetNumber`, `district`, `city` | string | não | Campos estruturados do endereço fiscal; não são extraídos do texto livre |
+| `cityCode` | string | não | Código IBGE municipal de sete dígitos |
+| `postalCode` | string | não | CEP de oito dígitos, sem pontuação |
 
-**Substituição completa**: omitir `tradeName`/`stateRegistration`/`address`
+Os novos campos são opcionais no cadastro para preservar registros existentes,
+mas `NfceIssuerMapper` recusa um emitente incompleto. O construtor do XML
+faz validações adicionais antes de qualquer transmissão. O cadastro de
+emitente, por si só, não ativa emissão.
+
+**Substituição completa**: omitir qualquer campo opcional
 (ou enviar `null`) *limpa* um valor configurado anteriormente — mesmo
 comportamento de `PUT /api/v1/fiscal-profiles/{id}` com `description`.
 

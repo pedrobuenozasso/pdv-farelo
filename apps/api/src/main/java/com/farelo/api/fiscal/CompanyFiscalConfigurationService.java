@@ -33,7 +33,10 @@ public class CompanyFiscalConfigurationService {
      */
     @Transactional
     public CompanyFiscalConfiguration save(String cnpj, String legalName, String tradeName,
-                                            String stateRegistration, String address) {
+                                            String stateRegistration, String address,
+                                            String taxRegime, String street, String streetNumber,
+                                            String district, String cityCode, String city,
+                                            String postalCode) {
         CompanyFiscalConfiguration companyFiscalConfiguration = companyFiscalConfigurationRepository
                 .findFirstByOrderByCreatedAtAsc()
                 .orElseGet(() -> new CompanyFiscalConfiguration(cnpj, legalName));
@@ -43,6 +46,13 @@ public class CompanyFiscalConfigurationService {
         companyFiscalConfiguration.setTradeName(tradeName);
         companyFiscalConfiguration.setStateRegistration(stateRegistration);
         companyFiscalConfiguration.setAddress(address);
+        companyFiscalConfiguration.setTaxRegime(taxRegime);
+        companyFiscalConfiguration.setStreet(street);
+        companyFiscalConfiguration.setStreetNumber(streetNumber);
+        companyFiscalConfiguration.setDistrict(district);
+        companyFiscalConfiguration.setCityCode(cityCode);
+        companyFiscalConfiguration.setCity(city);
+        companyFiscalConfiguration.setPostalCode(postalCode);
 
         return companyFiscalConfigurationRepository.save(companyFiscalConfiguration);
     }

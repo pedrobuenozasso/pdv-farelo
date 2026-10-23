@@ -144,6 +144,56 @@ class CompanyFiscalConfigurationControllerIntegrationTests extends AbstractInteg
     }
 
     @Test
+    void putPersistsExplicitNfceIssuerFieldsWithoutDerivingThemFromFreeText() throws Exception {
+        mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "cnpj": "12.345.678/0001-90",
+                                  "legalName": "Farelo Comércio de Alimentos LTDA",
+                                  "address": "Texto legado",
+                                  "taxRegime": "1",
+                                  "street": "Rua das Flores",
+                                  "streetNumber": "123",
+                                  "district": "Centro",
+                                  "cityCode": "3550308",
+                                  "city": "São Paulo",
+                                  "postalCode": "01001000"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.taxRegime").value("1"))
+                .andExpect(jsonPath("$.street").value("Rua das Flores"))
+                .andExpect(jsonPath("$.cityCode").value("3550308"))
+                .andExpect(jsonPath("$.postalCode").value("01001000"));
+
+        CompanyFiscalConfiguration stored = companyFiscalConfigurationRepository
+                .findFirstByOrderByCreatedAtAsc().orElseThrow();
+        assertThat(stored.getTaxRegime()).isEqualTo("1");
+        assertThat(stored.getStreetNumber()).isEqualTo("123");
+        assertThat(stored.getDistrict()).isEqualTo("Centro");
+    }
+
+    @Test
+    void putRejectsMalformedIssuerCodes() throws Exception {
+        mockMvc.perform(put("/api/v1/company-fiscal-configuration")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "cnpj": "12.345.678/0001-90",
+                                  "legalName": "Farelo Comércio de Alimentos LTDA",
+                                  "taxRegime": "2",
+                                  "cityCode": "35503",
+                                  "postalCode": "01001"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+        assertThat(companyFiscalConfigurationRepository.count()).isZero();
+    }
+
+    @Test
     void getReturnsThePreviouslySetConfiguration() throws Exception {
         mockMvc.perform(put("/api/v1/company-fiscal-configuration")
                         .header("Authorization", "Bearer " + adminToken)

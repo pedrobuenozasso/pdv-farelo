@@ -15,8 +15,7 @@ import java.util.UUID;
  * client (no {@code {id}} path variable anywhere on this domain's
  * endpoints — see {@code CompanyFiscalConfigurationController}'s javadoc).
  *
- * <p>No tax-regime field here — {@link CompanyFiscalConfiguration} doesn't
- * have one yet, see that class's javadoc for why.
+ * The optional structured issuer fields remain null until explicitly reviewed.
  */
 public record CompanyFiscalConfigurationResponse(
         UUID id,
@@ -25,6 +24,13 @@ public record CompanyFiscalConfigurationResponse(
         String tradeName,
         String stateRegistration,
         String address,
+        String taxRegime,
+        String street,
+        String streetNumber,
+        String district,
+        String cityCode,
+        String city,
+        String postalCode,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
@@ -36,6 +42,13 @@ public record CompanyFiscalConfigurationResponse(
                 companyFiscalConfiguration.getTradeName(),
                 companyFiscalConfiguration.getStateRegistration(),
                 companyFiscalConfiguration.getAddress(),
+                companyFiscalConfiguration.getTaxRegime(),
+                companyFiscalConfiguration.getStreet(),
+                companyFiscalConfiguration.getStreetNumber(),
+                companyFiscalConfiguration.getDistrict(),
+                companyFiscalConfiguration.getCityCode(),
+                companyFiscalConfiguration.getCity(),
+                companyFiscalConfiguration.getPostalCode(),
                 companyFiscalConfiguration.getCreatedAt(),
                 companyFiscalConfiguration.getUpdatedAt());
     }

@@ -93,7 +93,9 @@ public class CompanyFiscalConfigurationController {
     public CompanyFiscalConfigurationResponse put(@Valid @RequestBody CompanyFiscalConfigurationRequest request) {
         CompanyFiscalConfiguration companyFiscalConfiguration = companyFiscalConfigurationService.save(
                 request.cnpj(), request.legalName(), request.tradeName(),
-                request.stateRegistration(), request.address());
+                request.stateRegistration(), request.address(), request.taxRegime(),
+                request.street(), request.streetNumber(), request.district(),
+                request.cityCode(), request.city(), request.postalCode());
         return CompanyFiscalConfigurationResponse.from(companyFiscalConfiguration);
     }
 

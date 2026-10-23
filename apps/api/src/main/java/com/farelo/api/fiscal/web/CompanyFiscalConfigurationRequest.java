@@ -1,6 +1,8 @@
 package com.farelo.api.fiscal.web;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 /**
  * Request body for {@code PUT /api/v1/company-fiscal-configuration}. Never
@@ -32,5 +34,12 @@ public record CompanyFiscalConfigurationRequest(
         @NotBlank String legalName,
         String tradeName,
         String stateRegistration,
-        String address) {
+        String address,
+        @Pattern(regexp = "[13]") String taxRegime,
+        @Size(max = 60) String street,
+        @Size(max = 60) String streetNumber,
+        @Size(max = 60) String district,
+        @Pattern(regexp = "[0-9]{7}") String cityCode,
+        @Size(max = 60) String city,
+        @Pattern(regexp = "[0-9]{8}") String postalCode) {
 }

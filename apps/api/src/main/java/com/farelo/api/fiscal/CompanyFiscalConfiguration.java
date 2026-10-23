@@ -117,6 +117,29 @@ public class CompanyFiscalConfiguration {
     @Column(name = "address")
     private String address;
 
+    // Nullable until the issuer's verified NFC-e registration is entered.
+    // A free-text address cannot be used to manufacture these XML fields.
+    @Column(name = "tax_regime", length = 1)
+    private String taxRegime;
+
+    @Column(name = "street", length = 60)
+    private String street;
+
+    @Column(name = "street_number", length = 60)
+    private String streetNumber;
+
+    @Column(name = "district", length = 60)
+    private String district;
+
+    @Column(name = "city_code", length = 7)
+    private String cityCode;
+
+    @Column(name = "city", length = 60)
+    private String city;
+
+    @Column(name = "postal_code", length = 8)
+    private String postalCode;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -187,6 +210,34 @@ public class CompanyFiscalConfiguration {
     public void setAddress(String address) {
         this.address = address;
     }
+
+    public String getTaxRegime() { return taxRegime; }
+
+    public void setTaxRegime(String taxRegime) { this.taxRegime = taxRegime; }
+
+    public String getStreet() { return street; }
+
+    public void setStreet(String street) { this.street = street; }
+
+    public String getStreetNumber() { return streetNumber; }
+
+    public void setStreetNumber(String streetNumber) { this.streetNumber = streetNumber; }
+
+    public String getDistrict() { return district; }
+
+    public void setDistrict(String district) { this.district = district; }
+
+    public String getCityCode() { return cityCode; }
+
+    public void setCityCode(String cityCode) { this.cityCode = cityCode; }
+
+    public String getCity() { return city; }
+
+    public void setCity(String city) { this.city = city; }
+
+    public String getPostalCode() { return postalCode; }
+
+    public void setPostalCode(String postalCode) { this.postalCode = postalCode; }
 
     public OffsetDateTime getCreatedAt() {
         return createdAt;

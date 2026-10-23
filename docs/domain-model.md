@@ -6004,6 +6004,17 @@ adicionais por unidade do item; os cálculos de cobrança existentes usam esse
 snapshot. A duplicação de item configurável replica preço e opções históricos;
 itens simples preservam o comportamento anterior de preço atual.
 
+## Dados estruturados do emitente para NFC-e (V63)
+
+`CompanyFiscalConfiguration` guarda agora CRT e endereço fiscal em campos
+separados, todos inicialmente nulos. Nenhum valor foi derivado do endereço
+legado em texto livre. `NfceIssuerMapper` só produz a entrada do construtor
+de XML quando cada campo foi preenchido explicitamente; o construtor ainda
+valida formato e o subconjunto de emissão suportado. A API conserva o `PUT`
+de substituição completa e os campos novos são opcionais para não transformar
+cadastros antigos em dados fiscais presumidos. Isto prepara a entrada do XML,
+mas não liga o fechamento de comanda à SEFAZ.
+
 ## Ambiente NFC-e SEFAZ-SP (FARELO-171)
 
 `SefazSpNfceEnvironment` escolhe os endereços fixos dos serviços NFC-e de
