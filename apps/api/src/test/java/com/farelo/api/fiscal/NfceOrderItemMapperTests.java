@@ -22,6 +22,8 @@ class NfceOrderItemMapperTests {
         product.setGtin(null);
         product.setFiscalUnit("CX");
         product.setPrice(new BigDecimal("9.00"));
+        profile.setNcm("21011200");
+        product.setFiscalProfile(null);
 
         NfceXmlBuilder.Item item = NfceOrderItemMapper.mapSimple(sold, "1");
 
@@ -30,6 +32,7 @@ class NfceOrderItemMapperTests {
         assertThat(item.unit()).isEqualTo("UN");
         assertThat(item.unitPrice()).isEqualByComparingTo("7.50");
         assertThat(item.total()).isEqualByComparingTo("15.00");
+        assertThat(item.ncm()).isEqualTo("21011110");
         assertThat(item.taxes().icmsCode()).isEqualTo("102");
     }
 
@@ -52,6 +55,16 @@ class NfceOrderItemMapperTests {
         assertThatThrownBy(() -> NfceOrderItemMapper.mapSimple(sold, "1"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("CST 99");
+    }
+
+    @Test
+    void rejectsHistoricalLineWithoutClassificationSnapshot() {
+        OrderItem sold = persisted(new OrderItem(null, product(completeProfile()), 1, BigDecimal.ONE));
+        ReflectionTestUtils.setField(sold, "fiscalNcmSnapshot", null);
+
+        assertThatThrownBy(() -> NfceOrderItemMapper.mapSimple(sold, "1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("classification snapshot");
     }
 
     private static OrderItem persisted(OrderItem item) {

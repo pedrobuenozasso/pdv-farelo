@@ -1,6 +1,7 @@
 package com.farelo.api.ordering;
 
 import com.farelo.api.catalog.Product;
+import com.farelo.api.fiscal.FiscalProfile;
 import jakarta.persistence.Column;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
@@ -96,6 +97,25 @@ public class OrderItem {
     @Column(name = "fiscal_unit_snapshot", length = 6)
     private String fiscalUnitSnapshot;
 
+    // A profile is mutable; the tax classification used for a sale must not
+    // change when an administrator edits or reassigns that profile later.
+    @Column(name = "fiscal_ncm_snapshot", length = 8)
+    private String fiscalNcmSnapshot;
+    @Column(name = "fiscal_cest_snapshot", length = 7)
+    private String fiscalCestSnapshot;
+    @Column(name = "fiscal_cfop_snapshot", length = 4)
+    private String fiscalCfopSnapshot;
+    @Column(name = "fiscal_cst_snapshot", length = 3)
+    private String fiscalCstSnapshot;
+    @Column(name = "fiscal_csosn_snapshot", length = 3)
+    private String fiscalCsosnSnapshot;
+    @Column(name = "fiscal_icms_origin_snapshot", length = 1)
+    private String fiscalIcmsOriginSnapshot;
+    @Column(name = "fiscal_pis_cst_snapshot", length = 2)
+    private String fiscalPisCstSnapshot;
+    @Column(name = "fiscal_cofins_cst_snapshot", length = 2)
+    private String fiscalCofinsCstSnapshot;
+
     @OneToMany(mappedBy = "orderItem", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
     private List<OrderItemOption> options = new ArrayList<>();
 
@@ -130,6 +150,17 @@ public class OrderItem {
         this.productNameSnapshot = product.getName();
         this.productGtinSnapshot = product.getGtin();
         this.fiscalUnitSnapshot = product.getFiscalUnit();
+        FiscalProfile profile = product.getFiscalProfile();
+        if (profile != null && profile.isActive()) {
+            this.fiscalNcmSnapshot = profile.getNcm();
+            this.fiscalCestSnapshot = profile.getCest();
+            this.fiscalCfopSnapshot = profile.getCfop();
+            this.fiscalCstSnapshot = profile.getCst();
+            this.fiscalCsosnSnapshot = profile.getCsosn();
+            this.fiscalIcmsOriginSnapshot = profile.getIcmsOrigin();
+            this.fiscalPisCstSnapshot = profile.getPisCst();
+            this.fiscalCofinsCstSnapshot = profile.getCofinsCst();
+        }
     }
 
     @PrePersist
@@ -180,6 +211,15 @@ public class OrderItem {
     public String getFiscalUnitSnapshot() {
         return fiscalUnitSnapshot;
     }
+
+    public String getFiscalNcmSnapshot() { return fiscalNcmSnapshot; }
+    public String getFiscalCestSnapshot() { return fiscalCestSnapshot; }
+    public String getFiscalCfopSnapshot() { return fiscalCfopSnapshot; }
+    public String getFiscalCstSnapshot() { return fiscalCstSnapshot; }
+    public String getFiscalCsosnSnapshot() { return fiscalCsosnSnapshot; }
+    public String getFiscalIcmsOriginSnapshot() { return fiscalIcmsOriginSnapshot; }
+    public String getFiscalPisCstSnapshot() { return fiscalPisCstSnapshot; }
+    public String getFiscalCofinsCstSnapshot() { return fiscalCofinsCstSnapshot; }
 
     public List<OrderItemOption> getOptions() {
         return List.copyOf(options);

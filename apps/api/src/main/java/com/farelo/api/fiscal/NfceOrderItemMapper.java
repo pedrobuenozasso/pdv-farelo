@@ -10,8 +10,8 @@ import java.util.Objects;
  * Configured options, discounts, cancelled lines and historical lines without
  * fiscal snapshots need a separate explicit representation; they are rejected
  * here so a catalog edit cannot silently change the product identity in the
- * sale's XML. Fiscal profile fields still need to be frozen when an issuance
- * attempt is prepared; this mapper alone does not guarantee that.
+ * sale's XML. Tax classification is also read from the sale snapshot, rather
+ * than a mutable product/profile association.
  */
 public final class NfceOrderItemMapper {
     private NfceOrderItemMapper() { }
@@ -29,31 +29,27 @@ public final class NfceOrderItemMapper {
         if (sold.getQuantity() <= 0 || sold.getUnitPrice() == null || sold.getUnitPrice().signum() < 0) {
             throw new IllegalArgumentException("sale line has invalid quantity or frozen price");
         }
-        FiscalProfile profile = sold.getProduct().getFiscalProfile();
-        if (profile == null || !profile.isActive()) {
-            throw new IllegalArgumentException("product has no active fiscal profile");
-        }
         if (!"1".equals(issuerCrt) && !"3".equals(issuerCrt)) {
             throw new IllegalArgumentException("unsupported issuer CRT");
         }
-        String icms = "1".equals(issuerCrt) ? profile.getCsosn() : profile.getCst();
-        if (icms == null || profile.getNcm() == null || profile.getCfop() == null
-                || profile.getIcmsOrigin() == null || profile.getPisCst() == null
-                || profile.getCofinsCst() == null) {
-            throw new IllegalArgumentException("fiscal profile is incomplete for NFC-e");
+        String icms = "1".equals(issuerCrt) ? sold.getFiscalCsosnSnapshot() : sold.getFiscalCstSnapshot();
+        if (icms == null || sold.getFiscalNcmSnapshot() == null || sold.getFiscalCfopSnapshot() == null
+                || sold.getFiscalIcmsOriginSnapshot() == null || sold.getFiscalPisCstSnapshot() == null
+                || sold.getFiscalCofinsCstSnapshot() == null) {
+            throw new IllegalArgumentException("sale line lacks a complete fiscal classification snapshot");
         }
         // CST 99 needs explicit PIS/COFINS amounts that this profile does not store.
-        if ("99".equals(profile.getPisCst()) || "99".equals(profile.getCofinsCst())) {
+        if ("99".equals(sold.getFiscalPisCstSnapshot()) || "99".equals(sold.getFiscalCofinsCstSnapshot())) {
             throw new IllegalArgumentException("contribution CST 99 requires explicit amounts");
         }
         BigDecimal quantity = BigDecimal.valueOf(sold.getQuantity());
         BigDecimal total = sold.getUnitPrice().multiply(quantity);
         return new NfceXmlBuilder.Item(
                 sold.getProduct().getId().toString(), sold.getProductNameSnapshot(),
-                sold.getProductGtinSnapshot(), profile.getNcm(), profile.getCest(),
-                profile.getCfop(), sold.getFiscalUnitSnapshot(), quantity,
+                sold.getProductGtinSnapshot(), sold.getFiscalNcmSnapshot(), sold.getFiscalCestSnapshot(),
+                sold.getFiscalCfopSnapshot(), sold.getFiscalUnitSnapshot(), quantity,
                 sold.getUnitPrice(), total,
-                new NfceXmlBuilder.Taxes(profile.getIcmsOrigin(), icms,
-                        profile.getPisCst(), profile.getCofinsCst()));
+                new NfceXmlBuilder.Taxes(sold.getFiscalIcmsOriginSnapshot(), icms,
+                        sold.getFiscalPisCstSnapshot(), sold.getFiscalCofinsCstSnapshot()));
     }
 }
