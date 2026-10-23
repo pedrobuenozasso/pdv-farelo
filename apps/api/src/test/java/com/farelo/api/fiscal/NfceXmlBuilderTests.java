@@ -37,11 +37,47 @@ class NfceXmlBuilderTests {
         assertEquals("NOTA FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL",
                 text(xml, "xProd"));
         assertEquals("12.50", text(xml, "vNF"));
+        assertEquals("0.00", text(xml, "vDesc"));
+        assertEquals(1, xml.getElementsByTagName("vDesc").getLength(),
+                "without discount only the mandatory total vDesc is emitted");
         assertEquals("12.50", text(xml, "vPag"));
         assertFalse(result.unsignedXml().contains("Cafe &amp; bolo &lt;especial&gt;"),
                 "first item is overwritten for homologation");
         assertFalse(result.unsignedXml().contains("Signature"));
         assertFalse(result.unsignedXml().contains("infNFeSupl"));
+    }
+
+    @Test
+    void writesExplicitItemAndInvoiceDiscountAndRequiresNetPayment() throws Exception {
+        NfceXmlBuilder.Draft source = draft("Cafe", "12.50", "12.50");
+        NfceXmlBuilder.Item item = source.items().get(0);
+        NfceXmlBuilder.Item discounted = withDiscount(item, "2.50");
+        NfceXmlBuilder.Draft accepted = new NfceXmlBuilder.Draft(source.issuer(), source.operation(),
+                source.series(), source.number(), source.randomCode(), source.issuedAt(),
+                List.of(discounted), new BigDecimal("10.00"));
+
+        Document xml = parse(builder.buildHomologation(accepted).unsignedXml());
+        assertEquals("12.50", text(xml, "vProd"));
+        assertEquals("10.00", text(xml, "vNF"));
+        assertEquals("10.00", text(xml, "vPag"));
+        assertEquals(2, xml.getElementsByTagName("vDesc").getLength());
+        assertEquals("2.50", xml.getElementsByTagName("vDesc").item(0).getTextContent());
+        assertEquals("2.50", xml.getElementsByTagName("vDesc").item(1).getTextContent());
+
+        NfceXmlBuilder.Draft grossPayment = new NfceXmlBuilder.Draft(source.issuer(), source.operation(),
+                source.series(), source.number(), source.randomCode(), source.issuedAt(),
+                List.of(discounted), new BigDecimal("12.50"));
+        assertThrows(IllegalArgumentException.class, () -> builder.buildHomologation(grossPayment));
+    }
+
+    @Test
+    void rejectsNegativeFractionalAndOversizedExplicitItemDiscounts() {
+        NfceXmlBuilder.Draft source = draft("Cafe", "12.50", "12.50");
+        NfceXmlBuilder.Item item = source.items().get(0);
+        for (String invalid : List.of("-0.01", "0.001", "12.51")) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> builder.buildHomologation(replaceItem(source, withDiscount(item, invalid))), invalid);
+        }
     }
 
     @Test
@@ -247,6 +283,12 @@ class NfceXmlBuilderTests {
     private static NfceXmlBuilder.Draft replaceItem(NfceXmlBuilder.Draft source, NfceXmlBuilder.Item item) {
         return new NfceXmlBuilder.Draft(source.issuer(), source.operation(), source.series(), source.number(),
                 source.randomCode(), source.issuedAt(), List.of(item), source.cashPaid());
+    }
+
+    private static NfceXmlBuilder.Item withDiscount(NfceXmlBuilder.Item item, String discount) {
+        return new NfceXmlBuilder.Item(item.code(), item.description(), item.gtin(), item.ncm(),
+                item.cest(), item.cfop(), item.unit(), item.quantity(), item.unitPrice(), item.total(),
+                item.taxes(), new BigDecimal(discount));
     }
 
     private static NfceXmlBuilder.Draft draft(String description, String itemTotal, String cashPaid) {

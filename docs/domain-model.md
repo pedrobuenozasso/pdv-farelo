@@ -6049,7 +6049,8 @@ item segue a regra oficial de ambiente sem valor fiscal.
 O subconjunto deliberado é estreito: CRT 1 com ICMS `ICMSSN102` ou CRT 3 com
 `ICMS40`, PIS/COFINS não tributados ou CST `99` explicitamente zerados,
 GTIN-8/12/13/14 válido ou `SEM GTIN` explicitamente cadastrado (valor ausente
-bloqueia a construção do XML), sem desconto/frete/troco e meios de pagamento `01` (dinheiro),
+bloqueia a construção do XML), desconto explícito por item (`vDesc`), sem
+frete/troco e meios de pagamento `01` (dinheiro),
 `17` (Pix), `04` (débito) e `03` (crédito), inclusive divisão em até 100
 linhas. Pix e cartões exigem grupo `card` com `tpIntegra` explícito; se
 integrado (`1`), CNPJ da instituição e código de autorização são obrigatórios.

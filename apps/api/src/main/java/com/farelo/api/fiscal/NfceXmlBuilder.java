@@ -43,13 +43,20 @@ public final class NfceXmlBuilder {
         }
     }
 
+    /** Item total is gross (qCom × vUnCom); discount is an explicit amount, not a percentage. */
     public record Item(String code, String description, String gtin, String ncm, String cest,
                        String cfop, String unit, BigDecimal quantity,
-                       BigDecimal unitPrice, BigDecimal total, Taxes taxes) {
+                       BigDecimal unitPrice, BigDecimal total, Taxes taxes, BigDecimal discount) {
+        public Item(String code, String description, String gtin, String ncm, String cest,
+                    String cfop, String unit, BigDecimal quantity,
+                    BigDecimal unitPrice, BigDecimal total, Taxes taxes) {
+            this(code, description, gtin, ncm, cest, cfop, unit, quantity, unitPrice, total, taxes, null);
+        }
+
         public Item(String code, String description, String gtin, String ncm,
                     String cfop, String unit, BigDecimal quantity,
                     BigDecimal unitPrice, BigDecimal total, Taxes taxes) {
-            this(code, description, gtin, ncm, null, cfop, unit, quantity, unitPrice, total, taxes);
+            this(code, description, gtin, ncm, null, cfop, unit, quantity, unitPrice, total, taxes, null);
         }
     }
 
@@ -185,6 +192,9 @@ public final class NfceXmlBuilder {
         element(xml, "uTrib", item.unit());
         element(xml, "qTrib", quantity(item.quantity()));
         element(xml, "vUnTrib", unitPrice(item.unitPrice()));
+        if (item.discount() != null && item.discount().signum() > 0) {
+            element(xml, "vDesc", money(item.discount()));
+        }
         element(xml, "indTot", "1");
         xml.writeEndElement();
         start(xml, "imposto");
@@ -216,15 +226,20 @@ public final class NfceXmlBuilder {
     }
 
     private static void writeTotals(XMLStreamWriter xml, List<Item> items) throws XMLStreamException {
-        String total = money(items.stream().map(Item::total).reduce(BigDecimal.ZERO, BigDecimal::add));
+        BigDecimal gross = items.stream().map(Item::total).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal discount = items.stream().map(Item::discount).filter(v -> v != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         start(xml, "total");
         start(xml, "ICMSTot");
         for (String tag : List.of("vBC", "vICMS", "vICMSDeson", "vFCP", "vBCST", "vST",
                 "vFCPST", "vFCPSTRet")) element(xml, tag, ZERO);
-        element(xml, "vProd", total);
-        for (String tag : List.of("vFrete", "vSeg", "vDesc", "vII", "vIPI", "vIPIDevol",
+        element(xml, "vProd", money(gross));
+        element(xml, "vFrete", ZERO);
+        element(xml, "vSeg", ZERO);
+        element(xml, "vDesc", money(discount));
+        for (String tag : List.of("vII", "vIPI", "vIPIDevol",
                 "vPIS", "vCOFINS", "vOutro")) element(xml, tag, ZERO);
-        element(xml, "vNF", total);
+        element(xml, "vNF", money(gross.subtract(discount)));
         xml.writeEndElement();
         xml.writeEndElement();
     }
@@ -307,6 +322,15 @@ public final class NfceXmlBuilder {
                     "item total exceeds XML numeric size");
             require(item.quantity().multiply(item.unitPrice()).setScale(2, RoundingMode.HALF_UP)
                     .compareTo(item.total()) == 0, "item amount differs from quantity times unit price");
+            if (item.discount() != null) {
+                require(item.discount().signum() >= 0 && item.discount().scale() <= 2,
+                        "item discount must be nonnegative with at most 2 decimals");
+                require(item.discount().precision() - item.discount().scale() <= 13,
+                        "item discount exceeds XML numeric size");
+                require(item.discount().compareTo(item.total()) <= 0,
+                        "item discount exceeds gross item amount");
+                total = total.subtract(item.discount());
+            }
             Taxes tax = item.taxes();
             require(tax.origin() != null && tax.origin().matches("[0-8]"), "invalid ICMS origin");
             require(("1".equals(e.crt()) ? List.of("102", "103", "300", "400")
