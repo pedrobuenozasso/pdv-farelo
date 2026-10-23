@@ -82,7 +82,7 @@ class NfceXmlBuilderTests {
     void rejectsInventedGtinAndMismatchedTaxRegime() {
         NfceXmlBuilder.Draft good = draft("Cafe", "12.50", "12.50");
         NfceXmlBuilder.Item item = good.items().get(0);
-        NfceXmlBuilder.Item badGtin = new NfceXmlBuilder.Item(item.code(), item.description(), "7891234567895",
+        NfceXmlBuilder.Item badGtin = new NfceXmlBuilder.Item(item.code(), item.description(), "7891234567896",
                 item.ncm(), item.cfop(), item.unit(), item.quantity(), item.unitPrice(), item.total(),
                 item.taxes());
         assertThrows(IllegalArgumentException.class, () -> builder.buildHomologation(replaceItem(good, badGtin)));
@@ -96,6 +96,24 @@ class NfceXmlBuilderTests {
                 item.total(), new NfceXmlBuilder.Taxes("0", "102", "99", "99"));
         assertThrows(IllegalArgumentException.class,
                 () -> builder.buildHomologation(replaceItem(good, realWorldPendingTax)));
+    }
+
+    @Test
+    void writesValidatedGtinInCommercialAndTaxableFieldsAndRejectsMissingValue() throws Exception {
+        NfceXmlBuilder.Draft source = draft("Cafe", "12.50", "12.50");
+        NfceXmlBuilder.Item item = source.items().get(0);
+        NfceXmlBuilder.Item coded = new NfceXmlBuilder.Item(item.code(), item.description(),
+                "7891234567895", item.ncm(), item.cfop(), item.unit(), item.quantity(),
+                item.unitPrice(), item.total(), item.taxes());
+        Document xml = parse(builder.buildHomologation(replaceItem(source, coded)).unsignedXml());
+        assertEquals("7891234567895", text(xml, "cEAN"));
+        assertEquals("7891234567895", text(xml, "cEANTrib"));
+
+        NfceXmlBuilder.Item pending = new NfceXmlBuilder.Item(item.code(), item.description(),
+                null, item.ncm(), item.cfop(), item.unit(), item.quantity(),
+                item.unitPrice(), item.total(), item.taxes());
+        assertThrows(IllegalArgumentException.class,
+                () -> builder.buildHomologation(replaceItem(source, pending)));
     }
 
     @Test

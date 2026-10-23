@@ -40,6 +40,7 @@ public record ProductResponse(
         String imageUrl,
         ProductionStation productionStation,
         UUID fiscalProfileId,
+        String gtin,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
@@ -57,6 +58,7 @@ public record ProductResponse(
                 product.getImageUrl(),
                 product.getProductionStation(),
                 product.getFiscalProfile() != null ? product.getFiscalProfile().getId() : null,
+                product.getGtin(),
                 product.getCreatedAt(),
                 product.getUpdatedAt());
     }

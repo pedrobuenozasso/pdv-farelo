@@ -43,5 +43,6 @@ public record ProductRequest(
         Boolean availableOnMenu,
         Boolean availableOnPos,
         ProductionStation productionStation,
-        UUID fiscalProfileId) {
+        UUID fiscalProfileId,
+        @ValidGtin String gtin) {
 }

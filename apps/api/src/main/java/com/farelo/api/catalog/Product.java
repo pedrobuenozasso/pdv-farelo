@@ -1,6 +1,7 @@
 package com.farelo.api.catalog;
 
 import com.farelo.api.fiscal.FiscalProfile;
+import com.farelo.api.fiscal.Gtin;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -46,6 +47,10 @@ public class Product {
 
     @Column(name = "description")
     private String description;
+
+    /** Null means fiscal barcode classification is pending; never infer SEM GTIN. */
+    @Column(name = "gtin", length = 14)
+    private String gtin;
 
     @Column(name = "display_order", nullable = false)
     private int displayOrder;
@@ -168,6 +173,17 @@ public class Product {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getGtin() {
+        return gtin;
+    }
+
+    public void setGtin(String gtin) {
+        if (gtin != null && !Gtin.isValid(gtin)) {
+            throw new IllegalArgumentException("GTIN must be SEM GTIN or a valid GTIN-8/12/13/14");
+        }
+        this.gtin = gtin;
     }
 
     public int getDisplayOrder() {

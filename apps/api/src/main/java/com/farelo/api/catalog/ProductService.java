@@ -51,7 +51,7 @@ public class ProductService {
     public Product create(
             String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
             Boolean availableOnMenu, Boolean availableOnPos, ProductionStation productionStation,
-            UUID fiscalProfileId) {
+            UUID fiscalProfileId, String gtin) {
         Category category = categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new CategoryNotFoundException(categoryId));
 
@@ -79,6 +79,7 @@ public class ProductService {
         // ProductService#update's javadoc, which spells this rule out for
         // the categoryId lookup's own intra-domain exception to it).
         product.setFiscalProfile(resolveFiscalProfile(fiscalProfileId));
+        product.setGtin(gtin);
 
         return productRepository.save(product);
     }
@@ -155,7 +156,7 @@ public class ProductService {
     public Product update(
             UUID id, String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
             boolean active, boolean availableOnMenu, boolean availableOnPos, ProductionStation productionStation,
-            UUID fiscalProfileId, UUID actorId) {
+            UUID fiscalProfileId, String gtin, UUID actorId) {
         Product product = getById(id);
         BigDecimal previousPrice = product.getPrice();
 
@@ -180,6 +181,9 @@ public class ProductService {
         product.setProductionStation(productionStation);
         // Same reasoning, now for fiscalProfile (FARELO-151).
         product.setFiscalProfile(fiscalProfile);
+        // Existing admin clients do not send GTIN yet. Keep the stored value
+        // on an omitted field instead of silently clearing fiscal data.
+        if (gtin != null) product.setGtin(gtin);
 
         Product saved = productRepository.save(product);
 

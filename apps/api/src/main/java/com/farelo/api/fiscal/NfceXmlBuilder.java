@@ -291,7 +291,7 @@ public final class NfceXmlBuilder {
             require(item != null && item.taxes() != null, "item and taxes are required");
             label(item.code(), 1, 60, "product code");
             label(item.description(), 1, 120, "product description");
-            require("SEM GTIN".equals(item.gtin()), "only explicit SEM GTIN is supported until GTIN validation");
+            require(Gtin.isValid(item.gtin()), "item GTIN must be explicit SEM GTIN or a valid GTIN-8/12/13/14");
             digits(item.ncm(), 8, "NCM");
             if (item.cest() != null) digits(item.cest(), 7, "CEST");
             digits(item.cfop(), 4, "CFOP");

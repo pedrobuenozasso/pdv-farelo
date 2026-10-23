@@ -212,6 +212,47 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
         // fiscalProfileId omitted from the request body above -> stays null
         // (FARELO-151, same "no default applied" reasoning).
         assertThat(persisted.get().getFiscalProfile()).isNull();
+        assertThat(persisted.get().getGtin()).isNull();
+    }
+
+    @Test
+    void storesExplicitGtinAndPreservesItWhenOlderClientOmitsItOnUpdate() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        String token = tokenFor(UserRole.ADMIN);
+        String create = """
+                {"name":"Refrigerante","price":8.00,"categoryId":"%s","gtin":"7891234567895"}
+                """.formatted(category.getId());
+        MvcResult result = mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(create))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.gtin").value("7891234567895"))
+                .andReturn();
+        UUID id = UUID.fromString(objectMapper.readTree(result.getResponse().getContentAsString()).get("id").asText());
+
+        String update = """
+                {"name":"Refrigerante 350ml","price":8.00,"categoryId":"%s",
+                 "active":true,"availableOnMenu":true,"availableOnPos":true}
+                """.formatted(category.getId());
+        mockMvc.perform(put("/api/v1/products/{id}", id)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(update))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gtin").value("7891234567895"));
+        assertThat(productRepository.findById(id).orElseThrow().getGtin()).isEqualTo("7891234567895");
+    }
+
+    @Test
+    void rejectsGtinWithWrongCheckDigit() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        String body = """
+                {"name":"Refrigerante","price":8.00,"categoryId":"%s","gtin":"7891234567896"}
+                """.formatted(category.getId());
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
     @Test

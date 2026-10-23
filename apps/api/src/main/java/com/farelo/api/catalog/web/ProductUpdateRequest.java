@@ -48,5 +48,6 @@ public record ProductUpdateRequest(
         @NotNull Boolean availableOnMenu,
         @NotNull Boolean availableOnPos,
         ProductionStation productionStation,
-        UUID fiscalProfileId) {
+        UUID fiscalProfileId,
+        @ValidGtin String gtin) {
 }
