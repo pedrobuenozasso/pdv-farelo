@@ -147,6 +147,7 @@ acima para o formato do header e das respostas `401`/`403`.
 | `productionStation` | string | não | Um de `BAR`/`KITCHEN` (FARELO-073). Sem default — ausente/`null` significa "sem estação atribuída" |
 | `fiscalProfileId` | UUID | não | (FARELO-151) Precisa apontar para um `FiscalProfile` existente quando enviado. Sem default — ausente/`null` significa "sem perfil fiscal atribuído" |
 | `gtin` | string | não | `SEM GTIN` explícito ou GTIN-8/12/13/14 com dígito verificador válido. Ausente/`null` significa pendente e bloqueia a montagem da NFC-e. |
+| `fiscalUnit` | string | não | Unidade comercial fiscal explícita (`UN`, `KG`, `CX` etc.), 1 a 6 letras maiúsculas ou dígitos. Ausente/`null` significa pendente; nenhuma unidade é inferida. |
 
 `availableOnMenu` controla se o produto aparece no cardápio QR
 (cliente-facing); `availableOnPos` controla se aparece no PDV
@@ -167,6 +168,8 @@ significa "ainda não classificado".
 `gtin` é guardado no produto sem ser inferido pelo nome ou categoria. O
 `PUT` preserva o GTIN atual quando esse campo não é enviado por clientes
 antigos; para alterá-lo, envie um valor explícito válido.
+`fiscalUnit` segue a mesma preservação no `PUT` quando omitido ou `null`;
+envie a string vazia (`""`) para limpar uma unidade incorreta.
 
 **Response — `201 Created`**
 

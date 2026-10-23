@@ -51,7 +51,7 @@ public class ProductService {
     public Product create(
             String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
             Boolean availableOnMenu, Boolean availableOnPos, ProductionStation productionStation,
-            UUID fiscalProfileId, String gtin) {
+            UUID fiscalProfileId, String gtin, String fiscalUnit) {
         Category category = categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new CategoryNotFoundException(categoryId));
 
@@ -80,6 +80,7 @@ public class ProductService {
         // the categoryId lookup's own intra-domain exception to it).
         product.setFiscalProfile(resolveFiscalProfile(fiscalProfileId));
         product.setGtin(gtin);
+        product.setFiscalUnit(fiscalUnit);
 
         return productRepository.save(product);
     }
@@ -156,7 +157,7 @@ public class ProductService {
     public Product update(
             UUID id, String name, String description, BigDecimal price, UUID categoryId, String imageUrl,
             boolean active, boolean availableOnMenu, boolean availableOnPos, ProductionStation productionStation,
-            UUID fiscalProfileId, String gtin, UUID actorId) {
+            UUID fiscalProfileId, String gtin, String fiscalUnit, UUID actorId) {
         Product product = getById(id);
         BigDecimal previousPrice = product.getPrice();
 
@@ -184,6 +185,9 @@ public class ProductService {
         // Existing admin clients do not send GTIN yet. Keep the stored value
         // on an omitted field instead of silently clearing fiscal data.
         if (gtin != null) product.setGtin(gtin);
+        // Null keeps values written by newer clients; "" explicitly clears
+        // an incorrect fiscal unit without risking older PUT payloads.
+        if (fiscalUnit != null) product.setFiscalUnit(fiscalUnit.isEmpty() ? null : fiscalUnit);
 
         Product saved = productRepository.save(product);
 

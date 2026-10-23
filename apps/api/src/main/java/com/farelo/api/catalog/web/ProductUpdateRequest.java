@@ -4,6 +4,7 @@ import com.farelo.api.catalog.ProductionStation;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -49,5 +50,6 @@ public record ProductUpdateRequest(
         @NotNull Boolean availableOnPos,
         ProductionStation productionStation,
         UUID fiscalProfileId,
-        @ValidGtin String gtin) {
+        @ValidGtin String gtin,
+        @Pattern(regexp = "|[A-Z0-9]{1,6}") String fiscalUnit) {
 }

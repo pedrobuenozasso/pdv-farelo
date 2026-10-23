@@ -52,6 +52,10 @@ public class Product {
     @Column(name = "gtin", length = 14)
     private String gtin;
 
+    /** Explicit NFC-e commercial unit; null means pending fiscal classification. */
+    @Column(name = "fiscal_unit", length = 6)
+    private String fiscalUnit;
+
     @Column(name = "display_order", nullable = false)
     private int displayOrder;
 
@@ -184,6 +188,17 @@ public class Product {
             throw new IllegalArgumentException("GTIN must be SEM GTIN or a valid GTIN-8/12/13/14");
         }
         this.gtin = gtin;
+    }
+
+    public String getFiscalUnit() {
+        return fiscalUnit;
+    }
+
+    public void setFiscalUnit(String fiscalUnit) {
+        if (fiscalUnit != null && !fiscalUnit.matches("[A-Z0-9]{1,6}")) {
+            throw new IllegalArgumentException("fiscal unit must be 1 to 6 uppercase letters or digits");
+        }
+        this.fiscalUnit = fiscalUnit;
     }
 
     public int getDisplayOrder() {

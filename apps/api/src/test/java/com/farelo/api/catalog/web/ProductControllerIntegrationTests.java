@@ -256,6 +256,56 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void storesFiscalUnitAndAllowsExplicitClearWhilePreservingItForOlderClients() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        String token = tokenFor(UserRole.ADMIN);
+        String create = """
+                {"name":"Suco","price":12.00,"categoryId":"%s","fiscalUnit":"UN"}
+                """.formatted(category.getId());
+        MvcResult result = mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(create))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.fiscalUnit").value("UN"))
+                .andReturn();
+        UUID id = UUID.fromString(objectMapper.readTree(result.getResponse().getContentAsString()).get("id").asText());
+
+        String oldClientUpdate = """
+                {"name":"Suco gelado","price":12.00,"categoryId":"%s",
+                 "active":true,"availableOnMenu":true,"availableOnPos":true}
+                """.formatted(category.getId());
+        mockMvc.perform(put("/api/v1/products/{id}", id)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(oldClientUpdate))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fiscalUnit").value("UN"));
+
+        String clear = """
+                {"name":"Suco gelado","price":12.00,"categoryId":"%s",
+                 "active":true,"availableOnMenu":true,"availableOnPos":true,"fiscalUnit":""}
+                """.formatted(category.getId());
+        mockMvc.perform(put("/api/v1/products/{id}", id)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(clear))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fiscalUnit").value(nullValue()));
+        assertThat(productRepository.findById(id).orElseThrow().getFiscalUnit()).isNull();
+    }
+
+    @Test
+    void rejectsMalformedFiscalUnit() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        String body = """
+                {"name":"Suco","price":12.00,"categoryId":"%s","fiscalUnit":"un"}
+                """.formatted(category.getId());
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
     void createsProductWithExplicitProductionStation() throws Exception {
         Category category = categoryRepository.save(new Category("Bebidas"));
 

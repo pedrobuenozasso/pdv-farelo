@@ -41,6 +41,7 @@ public record ProductResponse(
         ProductionStation productionStation,
         UUID fiscalProfileId,
         String gtin,
+        String fiscalUnit,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
@@ -59,6 +60,7 @@ public record ProductResponse(
                 product.getProductionStation(),
                 product.getFiscalProfile() != null ? product.getFiscalProfile().getId() : null,
                 product.getGtin(),
+                product.getFiscalUnit(),
                 product.getCreatedAt(),
                 product.getUpdatedAt());
     }

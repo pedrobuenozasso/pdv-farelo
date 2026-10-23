@@ -73,7 +73,8 @@ public class ProductController {
                 request.availableOnPos(),
                 request.productionStation(),
                 request.fiscalProfileId(),
-                request.gtin());
+                request.gtin(),
+                request.fiscalUnit());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/products/{id}")
@@ -123,6 +124,7 @@ public class ProductController {
                 request.productionStation(),
                 request.fiscalProfileId(),
                 request.gtin(),
+                request.fiscalUnit(),
                 principal.userId());
 
         return ProductResponse.from(product);
