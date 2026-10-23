@@ -60,10 +60,10 @@ export default function MenuPreviewPage() {
               </p>
             </div>
             <Link
-              href="/admin/products"
+              href="/admin/cardapio"
               className="border-line bg-surface hover:bg-bg-alt rounded-lg border px-4 py-2 text-sm font-semibold"
             >
-              Configurar produtos
+              Editar cardápio
             </Link>
           </div>
 

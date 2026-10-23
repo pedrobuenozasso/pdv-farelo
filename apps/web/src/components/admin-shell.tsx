@@ -74,6 +74,7 @@ const ADMIN_SECTIONS = [
   {
     label: "Cadastros",
     items: [
+      { href: "/admin/cardapio", label: "Cardápio" },
       { href: "/admin/categories", label: "Grupos / categorias" },
       { href: "/admin/products", label: "Produtos" },
       { href: "/admin/menu-preview", label: "Prévia do cardápio" },
