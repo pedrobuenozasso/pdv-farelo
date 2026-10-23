@@ -19,17 +19,21 @@ ticket isolado autoriza venda fiscal em produção.
 | FISC-08b | Identidade fiscal congelada no item vendido (`8403037`) | Nome, GTIN e unidade não mudam quando o cadastro é editado; itens históricos incompletos são recusados. |
 | FISC-08c | Conversão restrita de item simples (`8403037`) | Só item persistido, ativo, sem opções e com perfil explícito vira linha de NFC-e; CST 99 incompleto é recusado. |
 | FISC-09a | Cerca persistente para tentativa de envio (`c4fb82a`, `f115f98`) | XML assinado precisa estar persistido; uma tentativa iniciada não é reenviada automaticamente. |
+| FISC-08d1 | Desconto explícito no XML (`c8cfcbb`) | `vDesc` por item e total calculam `vNF` líquido; pagamentos precisam fechar esse total. |
+| FISC-08d2 | Diagnóstico de GTIN/unidade (`e012f8a`) | Admin não considera item pronto sem identidade fiscal completa. |
+| FISC-08e | Códigos fiscais congelados na venda (`42679ac`) | Mudanças posteriores no perfil não reclassificam uma comanda já criada. |
+| FISC-09b1 | Reserva de número por emitente, ambiente e série (`7ffcbaa`) | Sequência não tem seed; reserva é atômica e só roda após provisionamento explícito. |
 
 ## Próximos tickets, em ordem de dependência
 
-1. **FISC-08d — Fechar a montagem da venda.** Tratar opções e descontos
-   explicitamente no XML, montar a comanda completa com pagamentos registrados
-   e recusar qualquer total divergente. Congelar também os campos do perfil
-   fiscal na tentativa, antes de transmitir.
-2. **FISC-09b — Reconciliação.** Reservar número/chave com sequência segura,
-   transmitir uma vez, consultar a chave após resposta incerta e registrar
-   autorização ou rejeição confirmada. A cerca persistente de FISC-09a ainda
-   não está ligada ao transporte ou ao fechamento do caixa.
+1. **FISC-08f — Fechar a montagem da venda.** Alocar descontos registrados
+   por item, tratar opções explicitamente, montar a comanda completa com os
+   pagamentos do ledger e recusar qualquer total divergente. As peças de XML
+   e snapshots existem, mas a orquestração não está pronta.
+2. **FISC-09b — Reconciliação.** Provisionar número inicial conferido, gerar
+   chave e XML assinado, transmitir uma vez, consultar a chave após resposta
+   incerta e registrar autorização ou rejeição confirmada. A cerca persistente
+   ainda não está ligada ao transporte ou ao fechamento do caixa.
 3. **FISC-10 — Ensaio real de homologação.** Com classificação por item
    revisada, dados do emitente e A1 protegidos, obter autorização e ensaiar
    consulta, rejeição e cancelamento. Conferir XML, DANFE/QR Code e total.
