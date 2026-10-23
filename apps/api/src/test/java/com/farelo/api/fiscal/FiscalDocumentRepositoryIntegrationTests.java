@@ -30,14 +30,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * registry maintained across this suite (see e.g. {@code
  * PaymentRepositoryIntegrationTests}: 44-45, 48, 67-69; {@code
  * PaymentControllerIntegrationTests}: 4-7, 46-47, 49, 60-66, 70-77, 92).
- * {@code SEEDED_COMMAND_NUMBER} (21) is shared by {@link
- * #savesAndFindsFiscalDocumentWithDefaults()}, {@link
- * #savesEveryFiscalDocumentStatus()} and {@link
- * #persistsMutatedIdentifyingFields()} — safe, since none of those three
- * assert an exact row *count* for that command, only look up specific rows
- * by their own id, so accumulation across methods (JUnit gives no ordering
- * guarantee between test methods in a class) never affects their
- * assertions. {@link
+ * {@code SEEDED_COMMAND_NUMBER} (21) is shared by tests whose changes are
+ * rolled back after each method. This matters now that access_key is unique:
+ * several recorder tests intentionally reuse the same signed XML fixture.
+ * {@link
  * #findByCommandOrderByCreatedAtAscReturnsOldestFirstScopedToCommand()}
  * *does* assert an exact count ({@code hasSize(2)}), so it cannot share
  * {@code SEEDED_COMMAND_NUMBER} — it gets its own untouched pair, {@code
@@ -46,14 +42,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * EMPTY_COMMAND_NUMBER} (23) is likewise dedicated to the "command with no
  * fiscal documents" test, for the same "must stay pristine" reason.
  *
- * <p>No {@code @BeforeEach} table cleanup — same reasoning as {@code
- * PaymentRepositoryIntegrationTests}/{@code
- * InventoryMovementRepositoryIntegrationTests}: every test scopes its
- * assertions to its own dedicated command, so leftover rows from other test
- * classes sharing the singleton Postgres container (see {@link
- * AbstractIntegrationTest}) never affect an assertion here.
+ * <p>Each method rolls back its fixture; no table cleanup is needed.
  */
 @SpringBootTest
+@Transactional
 class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
 
     private static final int SEEDED_COMMAND_NUMBER = 21;
