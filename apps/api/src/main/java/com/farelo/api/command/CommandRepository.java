@@ -20,6 +20,11 @@ public interface CommandRepository extends JpaRepository<Command, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<Command> findFirstByNumberOrderByCycleNumberDesc(int number);
 
+    /** Serializes fiscal-document creation for one visit, not just a physical number. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM Command c WHERE c.id = :id")
+    Optional<Command> findByIdForUpdate(@Param("id") UUID id);
+
     List<Command> findByNumberOrderByCycleNumberDesc(int number);
 
     @Query("SELECT c FROM Command c WHERE c.cycleNumber = "
