@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
 import { AdminShell } from "@/components/admin-shell";
@@ -68,6 +68,18 @@ const schema = z
       .trim()
       .regex(/^[0-9]{3}$/, "CSOSN: 3 dígitos")
       .or(z.literal("")),
+    icmsOrigin: z
+      .string()
+      .trim()
+      .regex(/^[0-8]$/, "Origem ICMS: 0 a 8")
+      .or(z.literal("")),
+    cest: z
+      .string()
+      .trim()
+      .regex(/^[0-9]{7}$/, "CEST: 7 dígitos")
+      .or(z.literal("")),
+    pisCst: z.enum(["", "04", "06", "07", "08", "09", "99"]),
+    cofinsCst: z.enum(["", "04", "06", "07", "08", "09", "99"]),
     active: z.boolean(),
   })
   .refine((value) => !value.cst || !value.csosn, {
@@ -85,6 +97,10 @@ function formValues(profile?: FiscalProfile): FormValues {
     cfop: profile?.cfop ?? "",
     cst: profile?.cst ?? "",
     csosn: profile?.csosn ?? "",
+    icmsOrigin: profile?.icmsOrigin ?? "",
+    cest: profile?.cest ?? "",
+    pisCst: (profile?.pisCst as FormValues["pisCst"]) ?? "",
+    cofinsCst: (profile?.cofinsCst as FormValues["cofinsCst"]) ?? "",
     active: profile?.active ?? true,
   };
 }
@@ -97,6 +113,10 @@ function toInput(values: FormValues): FiscalProfileInput {
     cfop: values.cfop || null,
     cst: values.cst || null,
     csosn: values.csosn || null,
+    icmsOrigin: values.icmsOrigin || null,
+    cest: values.cest || null,
+    pisCst: values.pisCst || null,
+    cofinsCst: values.cofinsCst || null,
   };
 }
 
@@ -114,6 +134,7 @@ function FiscalProfileForm({
     register,
     handleSubmit,
     reset,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -139,7 +160,15 @@ function FiscalProfileForm({
     { name: "cfop" as const, label: "CFOP", hint: "4 dígitos" },
     { name: "cst" as const, label: "CST", hint: "2 ou 3 dígitos" },
     { name: "csosn" as const, label: "CSOSN", hint: "3 dígitos" },
+    { name: "icmsOrigin" as const, label: "Origem ICMS", hint: "0 a 8" },
+    {
+      name: "cest" as const,
+      label: "CEST, quando aplicável",
+      hint: "7 dígitos",
+    },
   ];
+  const pisCst = useWatch({ control, name: "pisCst" });
+  const cofinsCst = useWatch({ control, name: "cofinsCst" });
 
   return (
     <form
@@ -179,6 +208,27 @@ function FiscalProfileForm({
           </label>
         ))}
       </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(["pisCst", "cofinsCst"] as const).map((name) => (
+          <label key={name} className="flex flex-col gap-1 text-sm font-medium">
+            {name === "pisCst" ? "PIS CST" : "COFINS CST"}
+            <select className={inputClass} {...register(name)}>
+              <option value="">Não informado</option>
+              {["04", "06", "07", "08", "09", "99"].map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+      {(pisCst === "99" || cofinsCst === "99") && (
+        <p role="alert" className="text-red text-sm">
+          CST 99 exige base, alíquota e valor explícitos no XML. Este cadastro
+          ainda não possui esses valores; confira antes de tentar emitir.
+        </p>
+      )}
       {profile && (
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" {...register("active")} />
@@ -245,8 +295,18 @@ export default function FiscalProfilesPage() {
     const profile = profileById.get(product.fiscalProfileId);
     if (!profile) return "Perfil fiscal não encontrado";
     if (!profile.active) return "Perfil fiscal inativo";
-    if (!profile.ncm || !profile.cfop || (!profile.cst && !profile.csosn)) {
+    if (
+      !profile.ncm ||
+      !profile.cfop ||
+      (!profile.cst && !profile.csosn) ||
+      !profile.icmsOrigin ||
+      !profile.pisCst ||
+      !profile.cofinsCst
+    ) {
       return "Perfil com códigos pendentes";
+    }
+    if (profile.pisCst === "99" || profile.cofinsCst === "99") {
+      return "CST 99: valores não cadastrados";
     }
     return null;
   };
@@ -388,6 +448,11 @@ export default function FiscalProfilesPage() {
                     <p className="text-ink-soft mt-1 text-xs">
                       NCM {profile.ncm ?? "—"} · CFOP {profile.cfop ?? "—"} ·
                       CST {profile.cst ?? "—"} · CSOSN {profile.csosn ?? "—"}
+                    </p>
+                    <p className="text-ink-soft mt-1 text-xs">
+                      Origem ICMS {profile.icmsOrigin ?? "—"} · CEST{" "}
+                      {profile.cest ?? "—"} · PIS CST {profile.pisCst ?? "—"} ·
+                      COFINS CST {profile.cofinsCst ?? "—"}
                     </p>
                   </div>
                   <Badge tone={profile.active ? "green" : "red"}>

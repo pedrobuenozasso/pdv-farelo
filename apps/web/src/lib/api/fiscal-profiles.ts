@@ -8,6 +8,10 @@ export type FiscalProfile = {
   cfop: string | null;
   cst: string | null;
   csosn: string | null;
+  icmsOrigin: string | null;
+  cest: string | null;
+  pisCst: string | null;
+  cofinsCst: string | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -20,6 +24,10 @@ export type FiscalProfileInput = {
   cfop: string | null;
   cst: string | null;
   csosn: string | null;
+  icmsOrigin: string | null;
+  cest: string | null;
+  pisCst: string | null;
+  cofinsCst: string | null;
 };
 
 const URL = "/api/v1/fiscal-profiles";
