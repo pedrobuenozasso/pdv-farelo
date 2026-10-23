@@ -61,6 +61,9 @@ public final class HomologationNfcePreparationService {
                 || key == null || certificate == null) {
             throw new IllegalArgumentException("explicit NFC-e data and A1 credentials are required");
         }
+        // ICP-Brasil identifies the legal entity in SAN otherName OID 2.16.76.1.3.3.
+        // Check before reserving a sequence value; signer verifies key/cert match later.
+        IcpBrasilCertificateIdentity.requireIssuerCnpj(certificate, input.issuer().cnpj());
         return transaction.execute(status -> prepareInTransaction(input, key, certificate));
     }
 

@@ -56,6 +56,26 @@ class HomologationNfcePreparationServiceTests {
         assertEquals(0, fixture.reservations.get());
     }
 
+    @Test
+    void wrongCertificateCnpjFailsBeforeNumberReservation() throws Exception {
+        Fixture fixture = new Fixture(xml -> { });
+        var other = TestIcpBrasilCertificate.issue(fixture.pair, "11222333000182");
+        assertThrows(IllegalArgumentException.class, () -> fixture.service.prepare(
+                fixture.input, fixture.pair.getPrivate(), other));
+        assertEquals(0, fixture.reservations.get());
+        assertEquals(0, fixture.saves.get());
+    }
+
+    @Test
+    void certificateWithoutCnpjFailsBeforeNumberReservation() throws Exception {
+        Fixture fixture = new Fixture(xml -> { });
+        var noCnpj = NfceXmlSignerTests.selfSignedTestCertificate(fixture.pair);
+        assertThrows(IllegalArgumentException.class, () -> fixture.service.prepare(
+                fixture.input, fixture.pair.getPrivate(), noCnpj));
+        assertEquals(0, fixture.reservations.get());
+        assertEquals(0, fixture.saves.get());
+    }
+
     private static final class Fixture {
         final Command command = new Command(1);
         final FiscalDocument document = new FiscalDocument(command);
@@ -71,7 +91,7 @@ class HomologationNfcePreparationServiceTests {
             var generator = KeyPairGenerator.getInstance("RSA");
             generator.initialize(2048);
             pair = generator.generateKeyPair();
-            certificate = NfceXmlSignerTests.selfSignedTestCertificate(pair);
+            certificate = TestIcpBrasilCertificate.issue(pair, "11222333000181");
             ReflectionTestUtils.setField(command, "id", UUID.randomUUID());
             ReflectionTestUtils.setField(document, "id", UUID.randomUUID());
             issuer = new NfceXmlBuilder.Issuer("11222333000181", "Empresa Exemplo LTDA",
