@@ -779,7 +779,6 @@ function ProductEditRow({
   const {
     register,
     handleSubmit,
-    setError,
     formState: { errors, isSubmitting },
   } = useForm<ProductEditFormValues>({
     resolver: zodResolver(productEditFormSchema),
@@ -812,7 +811,7 @@ function ProductEditRow({
         availableOnPos: values.availableOnPos,
         productionStation: values.productionStation || undefined,
         fiscalProfileId: values.fiscalProfileId || null,
-        gtin: values.gtin || undefined,
+        gtin: values.gtin,
         fiscalUnit: values.fiscalUnit,
       }),
     onSuccess: () => {
@@ -822,13 +821,6 @@ function ProductEditRow({
   });
 
   const onSubmit = handleSubmit((values) => {
-    if (product.gtin && !values.gtin) {
-      setError("gtin", {
-        message:
-          "A API ainda não permite remover GTIN; substitua pelo código correto ou SEM GTIN.",
-      });
-      return;
-    }
     updateProductMutation.mutate(values);
   });
 
@@ -975,8 +967,8 @@ function ProductEditRow({
             </div>
           </div>
           <p className="text-ink-soft text-xs">
-            GTIN deve ser informado ou marcado como SEM GTIN após conferência;
-            unidade fiscal vazia remove o valor anterior.
+            Após conferência, informe o código ou marque SEM GTIN. Deixar GTIN
+            ou unidade fiscal vazios remove o valor anterior.
           </p>
 
           <div className="flex flex-wrap items-center gap-6 text-sm font-medium">
