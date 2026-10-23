@@ -28,6 +28,7 @@ ticket isolado autoriza venda fiscal em produção.
 | FISC-09b3 | Validação explícita por XSD (`b437090`) | XML é recusado se o pacote oficial não tiver sido instalado; DTD e busca remota ficam bloqueados. |
 | FISC-08f | Montagem da comanda fechada (`e60eb3b`) | Linhas congeladas, descontos e pagamentos compõem rascunho de homologação; opções sem regra fiscal e totais divergentes são recusados. |
 | FISC-09c | Preparação assinada (`068a1e6`) | Reserva, assinatura, QR e XML persistido ocorrem na mesma transação; o serviço não transmite nem é registrado como bean. |
+| FISC-09d1 | Identidade do A1 e rollback (`424aca2`) | CNPJ ICP-Brasil do certificado deve coincidir com emitente antes da reserva; teste de rollback/constraint em PostgreSQL. |
 
 ## Próximos tickets, em ordem de dependência
 
@@ -35,9 +36,9 @@ ticket isolado autoriza venda fiscal em produção.
    e variantes com base no preço final e na classificação aprovada; até lá,
    itens com opções são recusados pela montagem fiscal.
 2. **FISC-09d — Operação de homologação.** Criar o documento pendente com
-   unicidade por comanda, conferir o CNPJ do A1 com o emitente, instalar XSD
-   oficial e custódia do A1, provisionar numeração inicial conferida e ensaiar
-   rollback/constraints no PostgreSQL antes de ligar o fluxo explícito.
+   unicidade por comanda, instalar XSD oficial e custódia do A1, provisionar
+   numeração inicial conferida e executar o teste de rollback/constraints no
+   PostgreSQL antes de ligar o fluxo explícito.
 3. **FISC-10 — Ensaio real de homologação.** Com classificação por item
    revisada, dados do emitente e A1 protegidos, obter autorização e ensaiar
    consulta, rejeição e cancelamento. Conferir XML, DANFE/QR Code e total.
