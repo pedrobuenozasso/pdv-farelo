@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiErrorMessage } from "@/lib/api/client";
+import { getCompanyFiscalConfiguration } from "@/lib/api/company-fiscal-configuration";
 import {
   createFiscalProfile,
   listFiscalProfiles,
@@ -20,8 +21,10 @@ import {
   type FiscalProfile,
   type FiscalProfileInput,
 } from "@/lib/api/fiscal-profiles";
+import { listProducts, type Product } from "@/lib/api/products";
 
 const QUERY_KEY = ["fiscal-profiles"];
+const PRODUCTS_QUERY_KEY = ["products"];
 const inputClass =
   "rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-primary";
 
@@ -204,6 +207,35 @@ export default function FiscalProfilesPage() {
     queryKey: QUERY_KEY,
     queryFn: listFiscalProfiles,
   });
+  const productsQuery = useQuery({
+    queryKey: PRODUCTS_QUERY_KEY,
+    queryFn: listProducts,
+  });
+  const companyQuery = useQuery({
+    queryKey: ["company-fiscal-configuration"],
+    queryFn: getCompanyFiscalConfiguration,
+  });
+  const activePosProducts = (productsQuery.data ?? []).filter(
+    (product) => product.active && product.availableOnPos,
+  );
+  const profileById = new Map(
+    (profilesQuery.data ?? []).map((profile) => [profile.id, profile]),
+  );
+  const fiscalIssue = (product: Product): string | null => {
+    if (!product.fiscalProfileId) return "Sem perfil fiscal";
+    const profile = profileById.get(product.fiscalProfileId);
+    if (!profile) return "Perfil fiscal não encontrado";
+    if (!profile.active) return "Perfil fiscal inativo";
+    if (!profile.ncm || !profile.cfop || (!profile.cst && !profile.csosn)) {
+      return "Perfil com códigos pendentes";
+    }
+    return null;
+  };
+  const productsWithIssues = activePosProducts
+    .map((product) => ({ product, issue: fiscalIssue(product) }))
+    .filter((entry): entry is { product: Product; issue: string } =>
+      Boolean(entry.issue),
+    );
 
   return (
     <AuthGuard allow={["ADMIN"]}>
@@ -221,6 +253,77 @@ export default function FiscalProfilesPage() {
               ao perfil correto.
             </p>
           </div>
+          <Card>
+            <h2 className="font-semibold">
+              Pendências para conferência fiscal
+            </h2>
+            <p className="text-ink-soft mt-1 text-sm">
+              Este diagnóstico confere somente cadastro e preenchimento. Códigos
+              presentes não significam classificação aprovada nem NFC-e pronta
+              para emissão.
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="border-line rounded-lg border p-3">
+                <p className="text-ink-soft text-xs">Dados do emitente</p>
+                {companyQuery.isPending ? (
+                  <p className="mt-1 text-sm">Consultando...</p>
+                ) : companyQuery.isError ? (
+                  <p className="text-red mt-1 text-sm">
+                    Não foi possível consultar.
+                  </p>
+                ) : companyQuery.data ? (
+                  <p className="mt-1 text-sm">
+                    Cadastrado: {companyQuery.data.legalName} · CNPJ{" "}
+                    {companyQuery.data.cnpj}. Conferir dados completos antes de
+                    emitir.
+                  </p>
+                ) : (
+                  <p className="text-red mt-1 text-sm">Cadastro ausente.</p>
+                )}
+              </div>
+              <div className="border-line rounded-lg border p-3">
+                <p className="text-ink-soft text-xs">Produtos ativos no PDV</p>
+                {productsQuery.isPending || profilesQuery.isPending ? (
+                  <p className="mt-1 text-sm">Consultando...</p>
+                ) : productsQuery.isError || profilesQuery.isError ? (
+                  <p className="text-red mt-1 text-sm">
+                    Não foi possível consultar.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-sm">
+                    {productsWithIssues.length} de {activePosProducts.length}{" "}
+                    com pendência de cadastro fiscal.
+                  </p>
+                )}
+              </div>
+            </div>
+            {!productsQuery.isPending &&
+              !profilesQuery.isPending &&
+              !productsQuery.isError &&
+              !profilesQuery.isError &&
+              productsWithIssues.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold">Produtos a revisar</h3>
+                  <ul className="divide-line border-line mt-2 max-h-64 divide-y overflow-y-auto rounded-lg border">
+                    {productsWithIssues.map(({ product, issue }) => (
+                      <li
+                        key={product.id}
+                        className="flex justify-between gap-3 px-3 py-2 text-sm"
+                      >
+                        <span>{product.name}</span>
+                        <span className="text-ink-soft shrink-0">{issue}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <Link
+                    href="/admin/products"
+                    className="text-primary mt-2 inline-block text-sm font-semibold"
+                  >
+                    Abrir produtos para associar perfis →
+                  </Link>
+                </div>
+              )}
+          </Card>
           <Card>
             <h2 className="mb-4 font-semibold">Novo perfil fiscal</h2>
             <FiscalProfileForm onSaved={() => undefined} />
