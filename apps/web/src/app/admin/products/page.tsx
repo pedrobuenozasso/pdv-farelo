@@ -71,6 +71,20 @@ const productFormSchema = z.object({
   availableOnPos: z.boolean(),
   productionStation: z.enum(["", "BAR", "KITCHEN"]),
   fiscalProfileId: z.string(),
+  gtin: z
+    .string()
+    .trim()
+    .refine(
+      (value) =>
+        !value ||
+        value === "SEM GTIN" ||
+        /^(?:[0-9]{8}|[0-9]{12}|[0-9]{13}|[0-9]{14})$/.test(value),
+      "Use GTIN-8/12/13/14 ou SEM GTIN",
+    ),
+  fiscalUnit: z
+    .string()
+    .trim()
+    .regex(/^$|^[A-Z0-9]{1,6}$/, "Use 1 a 6 letras maiúsculas ou números"),
 });
 
 type ProductFormValues = z.infer<typeof productFormSchema>;
@@ -209,6 +223,8 @@ export default function ProductsAdminPage() {
       availableOnPos: true,
       productionStation: "",
       fiscalProfileId: "",
+      gtin: "",
+      fiscalUnit: "",
     },
   });
 
@@ -232,6 +248,8 @@ export default function ProductsAdminPage() {
       availableOnPos: values.availableOnPos,
       productionStation: values.productionStation || undefined,
       fiscalProfileId: values.fiscalProfileId || null,
+      gtin: values.gtin || null,
+      fiscalUnit: values.fiscalUnit || null,
     });
   });
 
@@ -427,6 +445,48 @@ export default function ProductsAdminPage() {
                     </p>
                   )}
                 </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label
+                    htmlFor="gtin"
+                    className="flex flex-col gap-1 text-sm font-medium"
+                  >
+                    GTIN fiscal
+                    <input
+                      id="gtin"
+                      className={inputClass}
+                      placeholder="Código ou SEM GTIN"
+                      {...register("gtin")}
+                    />
+                    {errors.gtin && (
+                      <span className="text-red text-xs">
+                        {errors.gtin.message}
+                      </span>
+                    )}
+                  </label>
+                  <label
+                    htmlFor="fiscalUnit"
+                    className="flex flex-col gap-1 text-sm font-medium"
+                  >
+                    Unidade comercial fiscal
+                    <input
+                      id="fiscalUnit"
+                      className={inputClass}
+                      maxLength={6}
+                      placeholder="Ex.: UN, KG, CX"
+                      {...register("fiscalUnit")}
+                    />
+                    {errors.fiscalUnit && (
+                      <span className="text-red text-xs">
+                        {errors.fiscalUnit.message}
+                      </span>
+                    )}
+                  </label>
+                </div>
+                <p className="text-ink-soft text-xs">
+                  Informe os valores conforme o cadastro fiscal do item. Campo
+                  vazio permanece pendente.
+                </p>
 
                 <div className="flex flex-wrap items-center gap-6 text-sm font-medium">
                   <label className="flex items-center gap-2">
@@ -719,6 +779,7 @@ function ProductEditRow({
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<ProductEditFormValues>({
     resolver: zodResolver(productEditFormSchema),
@@ -733,6 +794,8 @@ function ProductEditRow({
       availableOnPos: product.availableOnPos,
       productionStation: product.productionStation ?? "",
       fiscalProfileId: product.fiscalProfileId ?? "",
+      gtin: product.gtin ?? "",
+      fiscalUnit: product.fiscalUnit ?? "",
     },
   });
 
@@ -749,6 +812,8 @@ function ProductEditRow({
         availableOnPos: values.availableOnPos,
         productionStation: values.productionStation || undefined,
         fiscalProfileId: values.fiscalProfileId || null,
+        gtin: values.gtin || undefined,
+        fiscalUnit: values.fiscalUnit,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
@@ -757,6 +822,13 @@ function ProductEditRow({
   });
 
   const onSubmit = handleSubmit((values) => {
+    if (product.gtin && !values.gtin) {
+      setError("gtin", {
+        message:
+          "A API ainda não permite remover GTIN; substitua pelo código correto ou SEM GTIN.",
+      });
+      return;
+    }
     updateProductMutation.mutate(values);
   });
 
@@ -878,7 +950,34 @@ function ProductEditRow({
                   ))}
               </select>
             </div>
+            <div className="flex min-w-[180px] flex-1 flex-col gap-1">
+              <input
+                aria-label="GTIN fiscal"
+                className={inputClass}
+                placeholder="GTIN ou SEM GTIN"
+                {...register("gtin")}
+              />
+              {errors.gtin && (
+                <p className="text-red text-xs">{errors.gtin.message}</p>
+              )}
+            </div>
+            <div className="flex min-w-[160px] flex-1 flex-col gap-1">
+              <input
+                aria-label="Unidade comercial fiscal"
+                className={inputClass}
+                maxLength={6}
+                placeholder="Unidade fiscal (UN, KG...)"
+                {...register("fiscalUnit")}
+              />
+              {errors.fiscalUnit && (
+                <p className="text-red text-xs">{errors.fiscalUnit.message}</p>
+              )}
+            </div>
           </div>
+          <p className="text-ink-soft text-xs">
+            GTIN deve ser informado ou marcado como SEM GTIN após conferência;
+            unidade fiscal vazia remove o valor anterior.
+          </p>
 
           <div className="flex flex-wrap items-center gap-6 text-sm font-medium">
             <label className="flex items-center gap-2">
