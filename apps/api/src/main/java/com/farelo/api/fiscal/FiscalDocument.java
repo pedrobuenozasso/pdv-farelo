@@ -133,6 +133,13 @@ public class FiscalDocument {
     @Column(name = "series")
     private Integer series;
 
+    @Column(name = "issuer_cnpj", length = 14)
+    private String issuerCnpj;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "fiscal_environment", length = 12)
+    private FiscalNumberEnvironment fiscalEnvironment;
+
     @Column(name = "access_key", length = 44)
     private String accessKey;
 
@@ -241,6 +248,16 @@ public class FiscalDocument {
 
     public void setSeries(Integer series) {
         this.series = series;
+    }
+
+    public String getIssuerCnpj() { return issuerCnpj; }
+
+    public void setIssuerCnpj(String issuerCnpj) { this.issuerCnpj = issuerCnpj; }
+
+    public FiscalNumberEnvironment getFiscalEnvironment() { return fiscalEnvironment; }
+
+    public void setFiscalEnvironment(FiscalNumberEnvironment fiscalEnvironment) {
+        this.fiscalEnvironment = fiscalEnvironment;
     }
 
     public String getAccessKey() {
