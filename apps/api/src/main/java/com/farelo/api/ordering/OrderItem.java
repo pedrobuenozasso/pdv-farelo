@@ -85,6 +85,17 @@ public class OrderItem {
     @Column(name = "unit_price", nullable = false, precision = 10, scale = 2)
     private BigDecimal unitPrice;
 
+    // Fiscal description and barcode are captured with the sale. Catalog edits
+    // must not silently rewrite the meaning of an existing order item.
+    @Column(name = "product_name_snapshot")
+    private String productNameSnapshot;
+
+    @Column(name = "product_gtin_snapshot", length = 14)
+    private String productGtinSnapshot;
+
+    @Column(name = "fiscal_unit_snapshot", length = 6)
+    private String fiscalUnitSnapshot;
+
     @OneToMany(mappedBy = "orderItem", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
     private List<OrderItemOption> options = new ArrayList<>();
 
@@ -116,6 +127,9 @@ public class OrderItem {
         this.product = product;
         this.quantity = quantity;
         this.unitPrice = unitPrice;
+        this.productNameSnapshot = product.getName();
+        this.productGtinSnapshot = product.getGtin();
+        this.fiscalUnitSnapshot = product.getFiscalUnit();
     }
 
     @PrePersist
@@ -153,6 +167,18 @@ public class OrderItem {
 
     public BigDecimal getUnitPrice() {
         return unitPrice;
+    }
+
+    public String getProductNameSnapshot() {
+        return productNameSnapshot;
+    }
+
+    public String getProductGtinSnapshot() {
+        return productGtinSnapshot;
+    }
+
+    public String getFiscalUnitSnapshot() {
+        return fiscalUnitSnapshot;
     }
 
     public List<OrderItemOption> getOptions() {
