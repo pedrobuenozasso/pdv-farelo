@@ -311,6 +311,12 @@ export default function FiscalProfilesPage() {
                 ) : (
                   <p className="text-red mt-1 text-sm">Cadastro ausente.</p>
                 )}
+                <Link
+                  href="/admin/fiscal-company"
+                  className="text-primary mt-2 inline-block text-sm font-semibold"
+                >
+                  Revisar dados da empresa →
+                </Link>
               </div>
               <div className="border-line rounded-lg border p-3">
                 <p className="text-ink-soft text-xs">Produtos ativos no PDV</p>

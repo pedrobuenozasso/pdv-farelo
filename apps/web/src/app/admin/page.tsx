@@ -9,6 +9,7 @@ import { useSession } from "@/lib/use-session";
 const ADMIN_ONLY_LINKS = new Set<string>([
   "/admin/users",
   "/admin/fiscal-profiles",
+  "/admin/fiscal-company",
 ]);
 
 const READY_AREAS = [
@@ -21,6 +22,7 @@ const READY_AREAS = [
       { href: "/admin/categories", label: "Grupos / categorias" },
       { href: "/admin/users", label: "Usuários e permissões" },
       { href: "/admin/fiscal-profiles", label: "Perfis fiscais" },
+      { href: "/admin/fiscal-company", label: "Dados fiscais da empresa" },
     ],
   },
   {

@@ -80,6 +80,7 @@ const ADMIN_SECTIONS = [
       { href: "/admin/menu-preview", label: "Prévia do cardápio" },
       { href: "/admin/users", label: "Usuários" },
       { href: "/admin/fiscal-profiles", label: "Perfis fiscais" },
+      { href: "/admin/fiscal-company", label: "Dados fiscais da empresa" },
     ],
   },
   {
@@ -95,6 +96,7 @@ const ADMIN_SECTIONS = [
 const ADMIN_ONLY_LINKS = new Set<string>([
   "/admin/users",
   "/admin/fiscal-profiles",
+  "/admin/fiscal-company",
 ]);
 
 export function AdminShell({ children }: { children: ReactNode }) {

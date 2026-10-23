@@ -16,6 +16,21 @@ export type CompanyFiscalConfiguration = {
   postalCode?: string | null;
 };
 
+export type CompanyFiscalConfigurationInput = {
+  cnpj: string;
+  legalName: string;
+  tradeName: string | null;
+  stateRegistration: string | null;
+  address: string | null;
+  taxRegime: string | null;
+  street: string | null;
+  streetNumber: string | null;
+  district: string | null;
+  cityCode: string | null;
+  city: string | null;
+  postalCode: string | null;
+};
+
 // The API returns 404 only when no configuration has ever been saved.
 // Authentication, network, and server failures must remain visible as errors.
 export async function getCompanyFiscalConfiguration(): Promise<CompanyFiscalConfiguration | null> {
@@ -34,5 +49,16 @@ export async function getCompanyFiscalConfiguration(): Promise<CompanyFiscalConf
       return null;
     }
   }
+  return parseResponse<CompanyFiscalConfiguration>(response);
+}
+
+export async function putCompanyFiscalConfiguration(
+  input: CompanyFiscalConfigurationInput,
+): Promise<CompanyFiscalConfiguration> {
+  const response = await fetch("/api/v1/company-fiscal-configuration", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
   return parseResponse<CompanyFiscalConfiguration>(response);
 }
