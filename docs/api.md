@@ -1202,6 +1202,7 @@ Header `Location: /api/v1/ingredients/{id}`.
 }
 ```
 
+
 `minimumStock` é `null` quando nenhum limite foi configurado.
 
 **Erros**
@@ -2530,9 +2531,9 @@ Primeiro endpoint do domínio `fiscal`. Sem `active` no corpo — um perfil
 novo sempre começa `true`, mesmo padrão de `Category`/`Ingredient`. Desde o
 FARELO-152, aceita `ncm`; desde o FARELO-153, aceita `cfop` também. Desde o
 FARELO-154, aceita `cst`/`csosn` — o terceiro e último dos três campos
-fiscais nomeados como tickets próprios (seção 24 do prompt mestre); qualquer
-outro dado fiscal previsto nessa seção (CEST, origem, cBenef, ICMS, CBS,
-IBS) continua deliberadamente fora de escopo, sem ticket nomeado ainda.
+fiscais nomeados como tickets próprios (seção 24 do prompt mestre). O preparo
+da NFC-e acrescentou origem ICMS, CEST e CST próprios de PIS e COFINS. Esses
+campos seguem opcionais até a classificação real de cada perfil.
 
 `cst`/`csosn` **são mutuamente exclusivos** — um perfil fiscal é configurado
 para um regime tributário (CST = Regime Normal, CSOSN = Simples Nacional),
@@ -2562,6 +2563,10 @@ subseção FARELO-154, para o raciocínio completo dessa decisão de modelagem
 | `cfop` | string | não | (FARELO-153) CFOP — sempre exatamente 4 dígitos numéricos (`@Pattern`, `^[0-9]{4}$`); omitido/`null` = "sem CFOP configurado" |
 | `cst` | string | não | (FARELO-154) CST (Regime Normal) — 2 a 3 dígitos numéricos (`@Pattern`, `^[0-9]{2,3}$`; formato mais frouxo que `ncm`/`cfop` porque a tabela CST varia por tipo de tributo — ICMS/IPI/PIS/COFINS têm tabelas próprias). Omitido/`null` = "sem CST configurado". **Mutuamente exclusivo com `csosn`** — enviar os dois no mesmo request é rejeitado |
 | `csosn` | string | não | (FARELO-154) CSOSN (Simples Nacional) — sempre exatamente 3 dígitos numéricos (`@Pattern`, `^[0-9]{3}$`, mesma confiança de formato que `ncm`/`cfop` — tabela nacional única). Omitido/`null` = "sem CSOSN configurado". **Mutuamente exclusivo com `cst`** — enviar os dois no mesmo request é rejeitado |
+| `icmsOrigin` | string | não | Origem ICMS, um dígito de `0` a `8`; sem default. |
+| `cest` | string | não | CEST de sete dígitos, quando aplicável; sem inferência a partir do NCM. |
+| `pisCst` | string | não | `04`, `06`, `07`, `08`, `09` ou `99`, apenas do subconjunto aceito no XML atual. |
+| `cofinsCst` | string | não | Mesmos códigos aceitos para COFINS, informado separadamente de PIS. |
 
 **Response — `201 Created`**
 
@@ -2581,6 +2586,9 @@ Header `Location: /api/v1/fiscal-profiles/{id}`.
   "updatedAt": "2026-09-02T13:00:00Z"
 }
 ```
+
+A resposta também inclui `icmsOrigin`, `cest`, `pisCst` e `cofinsCst`,
+com `null` enquanto não houver classificação explícita.
 
 **Erros**
 
@@ -2673,6 +2681,7 @@ torná-lo opcional na criação.
 | `cfop` | string | não | (FARELO-153) Sempre exatamente 4 dígitos numéricos (`@Pattern`, `^[0-9]{4}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um CFOP configurado anteriormente de volta para "sem CFOP configurado", mesmo comportamento de `ncm`/`description` acima |
 | `cst` | string | não | (FARELO-154) 2 a 3 dígitos numéricos (`@Pattern`, `^[0-9]{2,3}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um CST configurado anteriormente. **Mutuamente exclusivo com `csosn`** |
 | `csosn` | string | não | (FARELO-154) Sempre exatamente 3 dígitos numéricos (`@Pattern`, `^[0-9]{3}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um CSOSN configurado anteriormente. **Mutuamente exclusivo com `cst`** |
+| `icmsOrigin`, `cest`, `pisCst`, `cofinsCst` | string | não | Quando omitidos por clientes existentes, conservam os valores cadastrados; valores enviados devem respeitar os formatos descritos no POST. |
 
 **Response — `200 OK`**
 

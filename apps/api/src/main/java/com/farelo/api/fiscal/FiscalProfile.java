@@ -204,6 +204,21 @@ public class FiscalProfile {
     @Column(name = "csosn", length = 3)
     private String csosn;
 
+    /** Explicit ICMS origin; null means the profile is not ready for NFC-e. */
+    @Column(name = "icms_origin", length = 1)
+    private String icmsOrigin;
+
+    /** Optional seven-digit CEST; never inferred from NCM. */
+    @Column(name = "cest", length = 7)
+    private String cest;
+
+    /** PIS and COFINS use separate CST tables from the legacy ICMS CST. */
+    @Column(name = "pis_cst", length = 2)
+    private String pisCst;
+
+    @Column(name = "cofins_cst", length = 2)
+    private String cofinsCst;
+
     @Column(name = "active", nullable = false)
     private boolean active = true;
 
@@ -283,6 +298,38 @@ public class FiscalProfile {
 
     public void setCsosn(String csosn) {
         this.csosn = csosn;
+    }
+
+    public String getIcmsOrigin() {
+        return icmsOrigin;
+    }
+
+    public void setIcmsOrigin(String icmsOrigin) {
+        this.icmsOrigin = icmsOrigin;
+    }
+
+    public String getCest() {
+        return cest;
+    }
+
+    public void setCest(String cest) {
+        this.cest = cest;
+    }
+
+    public String getPisCst() {
+        return pisCst;
+    }
+
+    public void setPisCst(String pisCst) {
+        this.pisCst = pisCst;
+    }
+
+    public String getCofinsCst() {
+        return cofinsCst;
+    }
+
+    public void setCofinsCst(String cofinsCst) {
+        this.cofinsCst = cofinsCst;
     }
 
     public boolean isActive() {

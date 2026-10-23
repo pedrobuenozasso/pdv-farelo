@@ -54,7 +54,8 @@ public class FiscalProfileController {
             @Valid @RequestBody FiscalProfileRequest request,
             UriComponentsBuilder uriComponentsBuilder) {
         FiscalProfile fiscalProfile = fiscalProfileService.create(
-                request.name(), request.description(), request.ncm(), request.cfop(), request.cst(), request.csosn());
+                request.name(), request.description(), request.ncm(), request.cfop(), request.cst(), request.csosn(),
+                request.icmsOrigin(), request.cest(), request.pisCst(), request.cofinsCst());
 
         URI location = uriComponentsBuilder
                 .path("/api/v1/fiscal-profiles/{id}")
@@ -85,7 +86,8 @@ public class FiscalProfileController {
     public FiscalProfileResponse update(@PathVariable UUID id, @Valid @RequestBody FiscalProfileUpdateRequest request) {
         FiscalProfile fiscalProfile = fiscalProfileService.update(
                 id, request.name(), request.description(), request.active(), request.ncm(), request.cfop(),
-                request.cst(), request.csosn());
+                request.cst(), request.csosn(), request.icmsOrigin(), request.cest(),
+                request.pisCst(), request.cofinsCst());
         return FiscalProfileResponse.from(fiscalProfile);
     }
 

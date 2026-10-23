@@ -185,6 +185,52 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(persisted.get().getDescription()).isNull();
     }
 
+    @Test
+    void storesExplicitNfceCodesAndKeepsThemWhenOlderClientUpdatesProfile() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/fiscal-profiles")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Bebida","icmsOrigin":"0","cest":"0300100",
+                                 "pisCst":"07","cofinsCst":"07"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.icmsOrigin").value("0"))
+                .andExpect(jsonPath("$.cest").value("0300100"))
+                .andExpect(jsonPath("$.pisCst").value("07"))
+                .andExpect(jsonPath("$.cofinsCst").value("07"))
+                .andReturn();
+        UUID id = UUID.fromString(objectMapper.readTree(created.getResponse().getContentAsString())
+                .get("id").asText());
+
+        mockMvc.perform(put("/api/v1/fiscal-profiles/{id}", id)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Bebida atualizada","active":true}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.icmsOrigin").value("0"))
+                .andExpect(jsonPath("$.cest").value("0300100"));
+        FiscalProfile persisted = fiscalProfileRepository.findById(id).orElseThrow();
+        assertThat(persisted.getPisCst()).isEqualTo("07");
+        assertThat(persisted.getCofinsCst()).isEqualTo("07");
+    }
+
+    @Test
+    void rejectsMalformedOrUnsupportedNfceProfileCodes() throws Exception {
+        for (String invalidField : new String[] {
+                "\"icmsOrigin\":\"9\"", "\"cest\":\"123\"",
+                "\"pisCst\":\"01\"", "\"cofinsCst\":\"00\""}) {
+            mockMvc.perform(post("/api/v1/fiscal-profiles")
+                            .header("Authorization", "Bearer " + adminToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Inválido\"," + invalidField + "}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        }
+    }
+
     // FARELO-152.
     @Test
     void createsFiscalProfileWithValidNcm() throws Exception {

@@ -63,6 +63,10 @@ public record FiscalProfileRequest(
         @Pattern(regexp = "^[0-9]{8}$", message = "ncm must be exactly 8 numeric digits") String ncm,
         @Pattern(regexp = "^[0-9]{4}$", message = "cfop must be exactly 4 numeric digits") String cfop,
         @Pattern(regexp = "^[0-9]{2,3}$", message = "cst must be 2 to 3 numeric digits") String cst,
-        @Pattern(regexp = "^[0-9]{3}$", message = "csosn must be exactly 3 numeric digits") String csosn)
+        @Pattern(regexp = "^[0-9]{3}$", message = "csosn must be exactly 3 numeric digits") String csosn,
+        @Pattern(regexp = "^[0-8]$", message = "icmsOrigin must be a digit from 0 to 8") String icmsOrigin,
+        @Pattern(regexp = "^[0-9]{7}$", message = "cest must be exactly 7 numeric digits") String cest,
+        @Pattern(regexp = "^(04|06|07|08|09|99)$", message = "unsupported PIS CST") String pisCst,
+        @Pattern(regexp = "^(04|06|07|08|09|99)$", message = "unsupported COFINS CST") String cofinsCst)
         implements FiscalProfileCstCsosnCarrier {
 }

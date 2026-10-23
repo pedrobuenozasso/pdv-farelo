@@ -27,6 +27,10 @@ public record FiscalProfileResponse(
         String cfop,
         String cst,
         String csosn,
+        String icmsOrigin,
+        String cest,
+        String pisCst,
+        String cofinsCst,
         boolean active,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
@@ -40,6 +44,10 @@ public record FiscalProfileResponse(
                 fiscalProfile.getCfop(),
                 fiscalProfile.getCst(),
                 fiscalProfile.getCsosn(),
+                fiscalProfile.getIcmsOrigin(),
+                fiscalProfile.getCest(),
+                fiscalProfile.getPisCst(),
+                fiscalProfile.getCofinsCst(),
                 fiscalProfile.isActive(),
                 fiscalProfile.getCreatedAt(),
                 fiscalProfile.getUpdatedAt());
