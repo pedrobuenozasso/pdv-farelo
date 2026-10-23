@@ -13,7 +13,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiErrorMessage } from "@/lib/api/client";
-import { getCompanyFiscalConfiguration } from "@/lib/api/company-fiscal-configuration";
+import {
+  getCompanyFiscalConfiguration,
+  type CompanyFiscalConfiguration,
+} from "@/lib/api/company-fiscal-configuration";
 import {
   createFiscalProfile,
   listFiscalProfiles,
@@ -25,6 +28,17 @@ import { listProducts, type Product } from "@/lib/api/products";
 
 const QUERY_KEY = ["fiscal-profiles"];
 const PRODUCTS_QUERY_KEY = ["products"];
+const issuerFields: { key: keyof CompanyFiscalConfiguration; label: string }[] =
+  [
+    { key: "stateRegistration", label: "inscrição estadual" },
+    { key: "taxRegime", label: "regime tributário" },
+    { key: "street", label: "logradouro" },
+    { key: "streetNumber", label: "número" },
+    { key: "district", label: "bairro" },
+    { key: "cityCode", label: "código IBGE do município" },
+    { key: "city", label: "município" },
+    { key: "postalCode", label: "CEP" },
+  ];
 const inputClass =
   "rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-primary";
 
@@ -215,6 +229,11 @@ export default function FiscalProfilesPage() {
     queryKey: ["company-fiscal-configuration"],
     queryFn: getCompanyFiscalConfiguration,
   });
+  const missingIssuerFields = companyQuery.data
+    ? issuerFields
+        .filter(({ key }) => !companyQuery.data?.[key]?.trim())
+        .map(({ label }) => label)
+    : [];
   const activePosProducts = (productsQuery.data ?? []).filter(
     (product) => product.active && product.availableOnPos,
   );
@@ -272,11 +291,23 @@ export default function FiscalProfilesPage() {
                     Não foi possível consultar.
                   </p>
                 ) : companyQuery.data ? (
-                  <p className="mt-1 text-sm">
-                    Cadastrado: {companyQuery.data.legalName} · CNPJ{" "}
-                    {companyQuery.data.cnpj}. Conferir dados completos antes de
-                    emitir.
-                  </p>
+                  <div className="mt-1 text-sm">
+                    <p>
+                      {companyQuery.data.legalName} · CNPJ{" "}
+                      {companyQuery.data.cnpj}
+                    </p>
+                    {missingIssuerFields.length > 0 ? (
+                      <p className="text-red mt-1">
+                        Cadastro incompleto: faltam{" "}
+                        {missingIssuerFields.join(", ")}.
+                      </p>
+                    ) : (
+                      <p className="text-ink-soft mt-1">
+                        Campos do emitente preenchidos; conferir com os
+                        documentos oficiais antes de emitir.
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <p className="text-red mt-1 text-sm">Cadastro ausente.</p>
                 )}

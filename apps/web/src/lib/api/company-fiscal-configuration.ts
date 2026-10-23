@@ -7,6 +7,13 @@ export type CompanyFiscalConfiguration = {
   tradeName: string | null;
   stateRegistration: string | null;
   address: string | null;
+  taxRegime?: string | null;
+  street?: string | null;
+  streetNumber?: string | null;
+  district?: string | null;
+  cityCode?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
 };
 
 // The API returns 404 only when no configuration has ever been saved.
