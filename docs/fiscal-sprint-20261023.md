@@ -23,17 +23,21 @@ ticket isolado autoriza venda fiscal em produção.
 | FISC-08d2 | Diagnóstico de GTIN/unidade (`e012f8a`) | Admin não considera item pronto sem identidade fiscal completa. |
 | FISC-08e | Códigos fiscais congelados na venda (`42679ac`) | Mudanças posteriores no perfil não reclassificam uma comanda já criada. |
 | FISC-09b1 | Reserva de número por emitente, ambiente e série (`7ffcbaa`) | Sequência não tem seed; reserva é atômica e só roda após provisionamento explícito. |
+| FISC-08g | Revisão fiscal do cardápio no Admin (`504ecbc`) | Os 39 itens cruzados mostram evidência e confiança do vínculo sem aplicar códigos automaticamente. |
+| FISC-09b2 | Cerca e reconciliação da transmissão (`dd1ce10`) | Envio em homologação exige tentativa durável e XSD; resposta incerta é consultada pela chave, sem reenvio. |
+| FISC-09b3 | Validação explícita por XSD (`b437090`) | XML é recusado se o pacote oficial não tiver sido instalado; DTD e busca remota ficam bloqueados. |
+| FISC-08f | Montagem da comanda fechada (`e60eb3b`) | Linhas congeladas, descontos e pagamentos compõem rascunho de homologação; opções sem regra fiscal e totais divergentes são recusados. |
+| FISC-09c | Preparação assinada (`068a1e6`) | Reserva, assinatura, QR e XML persistido ocorrem na mesma transação; o serviço não transmite nem é registrado como bean. |
 
 ## Próximos tickets, em ordem de dependência
 
-1. **FISC-08f — Fechar a montagem da venda.** Alocar descontos registrados
-   por item, tratar opções explicitamente, montar a comanda completa com os
-   pagamentos do ledger e recusar qualquer total divergente. As peças de XML
-   e snapshots existem, mas a orquestração não está pronta.
-2. **FISC-09b — Reconciliação.** Provisionar número inicial conferido, gerar
-   chave e XML assinado, transmitir uma vez, consultar a chave após resposta
-   incerta e registrar autorização ou rejeição confirmada. A cerca persistente
-   ainda não está ligada ao transporte ou ao fechamento do caixa.
+1. **FISC-08h — Opções vendidas.** Definir o tratamento fiscal dos adicionais
+   e variantes com base no preço final e na classificação aprovada; até lá,
+   itens com opções são recusados pela montagem fiscal.
+2. **FISC-09d — Operação de homologação.** Criar o documento pendente com
+   unicidade por comanda, conferir o CNPJ do A1 com o emitente, instalar XSD
+   oficial e custódia do A1, provisionar numeração inicial conferida e ensaiar
+   rollback/constraints no PostgreSQL antes de ligar o fluxo explícito.
 3. **FISC-10 — Ensaio real de homologação.** Com classificação por item
    revisada, dados do emitente e A1 protegidos, obter autorização e ensaiar
    consulta, rejeição e cancelamento. Conferir XML, DANFE/QR Code e total.
