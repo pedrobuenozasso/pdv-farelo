@@ -290,31 +290,37 @@ export default function FiscalProfilesPage() {
   const profileById = new Map(
     (profilesQuery.data ?? []).map((profile) => [profile.id, profile]),
   );
-  const fiscalIssue = (product: Product): string | null => {
-    if (!product.fiscalProfileId) return "Sem perfil fiscal";
-    const profile = profileById.get(product.fiscalProfileId);
-    if (!profile) return "Perfil fiscal não encontrado";
-    if (!profile.active) return "Perfil fiscal inativo";
-    if (
-      !profile.ncm ||
-      !profile.cfop ||
-      (!profile.cst && !profile.csosn) ||
-      !profile.icmsOrigin ||
-      !profile.pisCst ||
-      !profile.cofinsCst
-    ) {
-      return "Perfil com códigos pendentes";
+  const fiscalIssues = (product: Product): string[] => {
+    const issues: string[] = [];
+    if (!product.gtin) issues.push("GTIN pendente");
+    if (!product.fiscalUnit) issues.push("Unidade fiscal pendente");
+
+    if (!product.fiscalProfileId) {
+      issues.push("Sem perfil fiscal");
+    } else {
+      const profile = profileById.get(product.fiscalProfileId);
+      if (!profile) issues.push("Perfil fiscal não encontrado");
+      else if (!profile.active) issues.push("Perfil fiscal inativo");
+      else {
+        if (
+          !profile.ncm ||
+          !profile.cfop ||
+          (!profile.cst && !profile.csosn) ||
+          !profile.icmsOrigin ||
+          !profile.pisCst ||
+          !profile.cofinsCst
+        )
+          issues.push("Perfil com códigos pendentes");
+        if (profile.pisCst === "99" || profile.cofinsCst === "99") {
+          issues.push("CST 99: valores não cadastrados");
+        }
+      }
     }
-    if (profile.pisCst === "99" || profile.cofinsCst === "99") {
-      return "CST 99: valores não cadastrados";
-    }
-    return null;
+    return issues;
   };
   const productsWithIssues = activePosProducts
-    .map((product) => ({ product, issue: fiscalIssue(product) }))
-    .filter((entry): entry is { product: Product; issue: string } =>
-      Boolean(entry.issue),
-    );
+    .map((product) => ({ product, issues: fiscalIssues(product) }))
+    .filter(({ issues }) => issues.length > 0);
 
   return (
     <AuthGuard allow={["ADMIN"]}>
@@ -402,13 +408,15 @@ export default function FiscalProfilesPage() {
                 <div className="mt-4">
                   <h3 className="text-sm font-semibold">Produtos a revisar</h3>
                   <ul className="divide-line border-line mt-2 max-h-64 divide-y overflow-y-auto rounded-lg border">
-                    {productsWithIssues.map(({ product, issue }) => (
+                    {productsWithIssues.map(({ product, issues }) => (
                       <li
                         key={product.id}
-                        className="flex justify-between gap-3 px-3 py-2 text-sm"
+                        className="flex flex-wrap justify-between gap-1 px-3 py-2 text-sm"
                       >
                         <span>{product.name}</span>
-                        <span className="text-ink-soft shrink-0">{issue}</span>
+                        <span className="text-ink-soft">
+                          {issues.join(" · ")}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -416,7 +424,7 @@ export default function FiscalProfilesPage() {
                     href="/admin/products"
                     className="text-primary mt-2 inline-block text-sm font-semibold"
                   >
-                    Abrir produtos para associar perfis →
+                    Abrir produtos para revisar GTIN, unidade e perfil →
                   </Link>
                 </div>
               )}
