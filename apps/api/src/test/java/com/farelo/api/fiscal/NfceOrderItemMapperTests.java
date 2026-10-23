@@ -40,7 +40,7 @@ class NfceOrderItemMapperTests {
 
         assertThatThrownBy(() -> NfceOrderItemMapper.mapSimple(sold, "1"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("snapshot");
+                .hasMessageContaining("immutable fiscal product data");
     }
 
     @Test
