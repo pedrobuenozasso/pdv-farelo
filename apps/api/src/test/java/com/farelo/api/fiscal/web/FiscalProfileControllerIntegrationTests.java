@@ -186,7 +186,7 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
-    void storesExplicitNfceCodesAndKeepsThemWhenOlderClientUpdatesProfile() throws Exception {
+    void storesExplicitNfceCodesAndAllowsClearingIncorrectValuesOnUpdate() throws Exception {
         MvcResult created = mockMvc.perform(post("/api/v1/fiscal-profiles")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -207,14 +207,19 @@ class FiscalProfileControllerIntegrationTests extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Bebida atualizada","active":true}
+                                {"name":"Bebida atualizada","active":true,
+                                 "icmsOrigin":null,"cest":null,"pisCst":null,"cofinsCst":null}
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.icmsOrigin").value("0"))
-                .andExpect(jsonPath("$.cest").value("0300100"));
+                .andExpect(jsonPath("$.icmsOrigin").value(nullValue()))
+                .andExpect(jsonPath("$.cest").value(nullValue()))
+                .andExpect(jsonPath("$.pisCst").value(nullValue()))
+                .andExpect(jsonPath("$.cofinsCst").value(nullValue()));
         FiscalProfile persisted = fiscalProfileRepository.findById(id).orElseThrow();
-        assertThat(persisted.getPisCst()).isEqualTo("07");
-        assertThat(persisted.getCofinsCst()).isEqualTo("07");
+        assertThat(persisted.getIcmsOrigin()).isNull();
+        assertThat(persisted.getCest()).isNull();
+        assertThat(persisted.getPisCst()).isNull();
+        assertThat(persisted.getCofinsCst()).isNull();
     }
 
     @Test

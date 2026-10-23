@@ -2681,7 +2681,7 @@ torná-lo opcional na criação.
 | `cfop` | string | não | (FARELO-153) Sempre exatamente 4 dígitos numéricos (`@Pattern`, `^[0-9]{4}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um CFOP configurado anteriormente de volta para "sem CFOP configurado", mesmo comportamento de `ncm`/`description` acima |
 | `cst` | string | não | (FARELO-154) 2 a 3 dígitos numéricos (`@Pattern`, `^[0-9]{2,3}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um CST configurado anteriormente. **Mutuamente exclusivo com `csosn`** |
 | `csosn` | string | não | (FARELO-154) Sempre exatamente 3 dígitos numéricos (`@Pattern`, `^[0-9]{3}$`) quando enviado. **Substituição completa**: omitir o campo (ou enviar `null`) *limpa* um CSOSN configurado anteriormente. **Mutuamente exclusivo com `cst`** |
-| `icmsOrigin`, `cest`, `pisCst`, `cofinsCst` | string | não | Quando omitidos por clientes existentes, conservam os valores cadastrados; valores enviados devem respeitar os formatos descritos no POST. |
+| `icmsOrigin`, `cest`, `pisCst`, `cofinsCst` | string | não | Substituição completa: omitir ou enviar `null` limpa o valor anterior; valores enviados devem respeitar os formatos descritos no POST. |
 
 **Response — `200 OK`**
 

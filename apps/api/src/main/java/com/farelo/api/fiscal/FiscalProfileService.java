@@ -56,12 +56,11 @@ public class FiscalProfileService {
         fiscalProfile.setCfop(cfop);
         fiscalProfile.setCst(cst);
         fiscalProfile.setCsosn(csosn);
-        // Older Admin clients do not yet send these NFC-e fields. Keep any
-        // approved values on an omitted input instead of silently clearing them.
-        if (icmsOrigin != null) fiscalProfile.setIcmsOrigin(icmsOrigin);
-        if (cest != null) fiscalProfile.setCest(cest);
-        if (pisCst != null) fiscalProfile.setPisCst(pisCst);
-        if (cofinsCst != null) fiscalProfile.setCofinsCst(cofinsCst);
+        // PUT is a full replacement: explicit null clears an incorrect code.
+        fiscalProfile.setIcmsOrigin(icmsOrigin);
+        fiscalProfile.setCest(cest);
+        fiscalProfile.setPisCst(pisCst);
+        fiscalProfile.setCofinsCst(cofinsCst);
 
         return fiscalProfileRepository.save(fiscalProfile);
     }
