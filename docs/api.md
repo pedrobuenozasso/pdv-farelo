@@ -167,7 +167,8 @@ significa "ainda não classificado".
 
 `gtin` é guardado no produto sem ser inferido pelo nome ou categoria. O
 `PUT` preserva o GTIN atual quando esse campo não é enviado por clientes
-antigos; para alterá-lo, envie um valor explícito válido.
+antigos; para alterá-lo, envie um valor explícito válido, ou `""` para
+limpar um código incorreto.
 `fiscalUnit` segue a mesma preservação no `PUT` quando omitido ou `null`;
 envie a string vazia (`""`) para limpar uma unidade incorreta.
 

@@ -182,9 +182,9 @@ public class ProductService {
         product.setProductionStation(productionStation);
         // Same reasoning, now for fiscalProfile (FARELO-151).
         product.setFiscalProfile(fiscalProfile);
-        // Existing admin clients do not send GTIN yet. Keep the stored value
-        // on an omitted field instead of silently clearing fiscal data.
-        if (gtin != null) product.setGtin(gtin);
+        // Omission/null preserves old-client data; "" explicitly clears an
+        // incorrect GTIN, just as it does for the fiscal unit below.
+        if (gtin != null) product.setGtin(gtin.isEmpty() ? null : gtin);
         // Null keeps values written by newer clients; "" explicitly clears
         // an incorrect fiscal unit without risking older PUT payloads.
         if (fiscalUnit != null) product.setFiscalUnit(fiscalUnit.isEmpty() ? null : fiscalUnit);

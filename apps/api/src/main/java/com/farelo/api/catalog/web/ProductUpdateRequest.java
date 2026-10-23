@@ -50,6 +50,6 @@ public record ProductUpdateRequest(
         @NotNull Boolean availableOnPos,
         ProductionStation productionStation,
         UUID fiscalProfileId,
-        @ValidGtin String gtin,
+        @ValidGtin(allowEmpty = true) String gtin,
         @Pattern(regexp = "|[A-Z0-9]{1,6}") String fiscalUnit) {
 }

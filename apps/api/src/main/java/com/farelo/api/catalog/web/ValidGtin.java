@@ -18,11 +18,19 @@ public @interface ValidGtin {
     String message() default "must be SEM GTIN or a valid GTIN-8/12/13/14";
     Class<?>[] groups() default {};
     Class<? extends Payload>[] payload() default {};
+    boolean allowEmpty() default false;
 
     final class Validator implements ConstraintValidator<ValidGtin, String> {
+        private boolean allowEmpty;
+
+        @Override
+        public void initialize(ValidGtin annotation) {
+            allowEmpty = annotation.allowEmpty();
+        }
+
         @Override
         public boolean isValid(String value, ConstraintValidatorContext context) {
-            return value == null || Gtin.isValid(value);
+            return value == null || (allowEmpty && value.isEmpty()) || Gtin.isValid(value);
         }
     }
 }

@@ -216,7 +216,7 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
-    void storesExplicitGtinAndPreservesItWhenOlderClientOmitsItOnUpdate() throws Exception {
+    void storesExplicitGtinAndAllowsClearWhilePreservingItForOlderClients() throws Exception {
         Category category = categoryRepository.save(new Category("Bebidas"));
         String token = tokenFor(UserRole.ADMIN);
         String create = """
@@ -240,6 +240,17 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.gtin").value("7891234567895"));
         assertThat(productRepository.findById(id).orElseThrow().getGtin()).isEqualTo("7891234567895");
+
+        String clear = """
+                {"name":"Refrigerante 350ml","price":8.00,"categoryId":"%s",
+                 "active":true,"availableOnMenu":true,"availableOnPos":true,"gtin":""}
+                """.formatted(category.getId());
+        mockMvc.perform(put("/api/v1/products/{id}", id)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(clear))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gtin").value(nullValue()));
+        assertThat(productRepository.findById(id).orElseThrow().getGtin()).isNull();
     }
 
     @Test
@@ -251,6 +262,15 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/products")
                         .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        String emptyCode = """
+                {"name":"Refrigerante","price":8.00,"categoryId":"%s","gtin":""}
+                """.formatted(category.getId());
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON).content(emptyCode))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
