@@ -4,7 +4,10 @@ Em 24/10/2026, os tickets verificáveis foram publicados em
 [GitHub Issues](https://github.com/pedrobuenozasso/pdv-farelo/issues). O estado
 de cada ticket deve ser acompanhado **no GitHub**: fechar somente depois de
 validar os critérios de aceite e registrar commit/ensaio. Esta lista é um
-índice para outra conversa, não substitui o estado ao vivo dos issues.
+índice para outra conversa, não substitui o estado ao vivo dos issues. Em
+24/10, #5 e #14 foram fechados com teste e deploy; #16 tem implementação na
+branch, mas sem teste de integração/deploy; #20 tem checagem manual aprovada,
+mas ainda sem alertas.
 
 ## Operação primeiro
 
