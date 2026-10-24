@@ -7,9 +7,11 @@ import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandRepository;
 import com.farelo.api.ordering.Order;
 import com.farelo.api.ordering.OrderRepository;
+import com.farelo.api.ordering.OrderStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
@@ -86,6 +88,27 @@ class PrintJobRepositoryIntegrationTests extends AbstractIntegrationTest {
 
         assertThat(printJobRepository.findById(failedJob.getId()).orElseThrow().getStatus())
                 .isEqualTo(PrintJobStatus.FAILED);
+    }
+
+    @Test
+    @Transactional
+    void pendingQueueDoesNotDeliverTicketsForCancelledOrders() {
+        Command command = commandRepository.findByNumber(SEEDED_COMMAND_NUMBER).orElseThrow();
+        Order cancelledOrder = orderRepository.saveAndFlush(new Order(command));
+        Order liveOrder = orderRepository.saveAndFlush(new Order(command));
+        PrintJob staleTicket = printJobRepository.saveAndFlush(new PrintJob(cancelledOrder, SAMPLE_CONTENT));
+        PrintJob liveTicket = printJobRepository.saveAndFlush(new PrintJob(liveOrder, SAMPLE_CONTENT));
+
+        cancelledOrder.setStatus(OrderStatus.CANCELLED);
+        orderRepository.saveAndFlush(cancelledOrder);
+
+        var pendingIds = printJobRepository.findByStatusOrderByCreatedAtAsc(
+                        PrintJobStatus.PENDING, OrderStatus.CANCELLED).stream()
+                .map(PrintJob::getId)
+                .toList();
+
+        assertThat(pendingIds).contains(liveTicket.getId());
+        assertThat(pendingIds).doesNotContain(staleTicket.getId());
     }
 
     /**

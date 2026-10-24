@@ -362,7 +362,8 @@ public class PrintJobService {
      */
     @Transactional(readOnly = true)
     public List<PrintJob> listPending() {
-        return printJobRepository.findByStatusOrderByCreatedAtAsc(PrintJobStatus.PENDING);
+        return printJobRepository.findByStatusOrderByCreatedAtAsc(
+                PrintJobStatus.PENDING, OrderStatus.CANCELLED);
     }
 
     // Used by markPrinted/markFailed below, and by their shared transition

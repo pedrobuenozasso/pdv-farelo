@@ -2,6 +2,7 @@ package com.farelo.api.printing;
 
 import com.farelo.api.command.Command;
 import com.farelo.api.ordering.Order;
+import com.farelo.api.ordering.OrderStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -40,8 +41,11 @@ public interface PrintJobRepository extends JpaRepository<PrintJob, UUID> {
     // (the FARELO-055 lesson, documented on OrderRepository) — LEFT JOIN
     // FETCH does that for both without requiring either to be non-null.
     @Query("SELECT p FROM PrintJob p LEFT JOIN FETCH p.order LEFT JOIN FETCH p.command "
-            + "WHERE p.status = :status ORDER BY p.createdAt ASC")
-    List<PrintJob> findByStatusOrderByCreatedAtAsc(@Param("status") PrintJobStatus status);
+            + "WHERE p.status = :status AND (p.order IS NULL OR p.order.status <> :cancelledOrder) "
+            + "ORDER BY p.createdAt ASC")
+    List<PrintJob> findByStatusOrderByCreatedAtAsc(
+            @Param("status") PrintJobStatus status,
+            @Param("cancelledOrder") OrderStatus cancelledOrder);
 
     // Backs PrintJobService#getById (FARELO-077, used by markPrinted/
     // markFailed/retry) — same LEFT JOIN FETCH reasoning as
