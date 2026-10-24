@@ -29,11 +29,9 @@ import java.util.List;
  *
  * <p>{@code printOnConfirm} (FARELO-319, "Imprimir ao confirmar") is a
  * {@code Boolean} wrapper, not a primitive {@code boolean} — a request
- * that omits the field entirely (the common case — most callers never
- * think about this checkbox) must default to {@code true} (see {@link
- * #printOnConfirmOrDefault()}), not silently coerce to Jackson's
- * primitive-boolean default of {@code false}, which would invert the
- * feature's own stated default.
+ * that omits the field entirely defaults to {@code false} while physical
+ * printing is not validated. Callers can opt in explicitly after their
+ * printer integration has been approved.
  */
 public record CreateOrderRequest(
         @NotNull Integer commandNumber,
@@ -44,7 +42,7 @@ public record CreateOrderRequest(
         Boolean printOnConfirm) {
 
     public boolean printOnConfirmOrDefault() {
-        return printOnConfirm == null || printOnConfirm;
+        return Boolean.TRUE.equals(printOnConfirm);
     }
 
 }

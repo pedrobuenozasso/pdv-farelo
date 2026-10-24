@@ -596,6 +596,7 @@ backend.
 | `items[].quantity` | int | sim | `> 0` (`@Positive`) |
 | `customerName` | string | não | Sem validação de formato — dado de contato para o atendente, não verificação de identidade |
 | `customerPhone` | string | não | Sem validação de formato (YAGNI) |
+| `printOnConfirm` | boolean | não | Omitido ou `false` não solicita impressão automática; `true` é opt-in explícito após validação da impressora. A mesma regra vale para `POST /api/v1/orders/balcao`. |
 
 **Comanda precisa aceitar novos pedidos**: apenas `AVAILABLE` e `OPEN` são
 válidos. Se a comanda estiver `AVAILABLE`, o próprio ato de criar o

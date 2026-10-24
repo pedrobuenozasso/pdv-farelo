@@ -175,13 +175,13 @@ class OrderCreationIdempotencyIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
-    void omittedAndExplicitTruePrintFlagAreSameEffectiveRequest() throws Exception {
+    void omittedAndExplicitFalsePrintFlagAreSameEffectiveRequest() throws Exception {
         Product product = productWithRecipe();
         String key = UUID.randomUUID().toString();
         String body = commandBody(product, 1);
         MvcResult first = submit("/api/v1/orders", body, key, null);
-        String explicitTrue = body.substring(0, body.lastIndexOf('}')) + ", \"printOnConfirm\": true}";
-        MvcResult retry = submit("/api/v1/orders", explicitTrue, key, null);
+        String explicitFalse = body.substring(0, body.lastIndexOf('}')) + ", \"printOnConfirm\": false}";
+        MvcResult retry = submit("/api/v1/orders", explicitFalse, key, null);
         assertThat(retry.getResponse().getContentAsString()).isEqualTo(first.getResponse().getContentAsString());
     }
 

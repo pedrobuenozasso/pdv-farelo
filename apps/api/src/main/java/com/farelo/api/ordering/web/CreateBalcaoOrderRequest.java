@@ -15,8 +15,8 @@ import java.util.List;
  * same optional {@code customerName}/{@code customerPhone} snapshot pair
  * every order creation flow accepts, and the same optional {@code note}
  * (FARELO-316)/{@code printOnConfirm} (FARELO-319) fields — see {@link
- * CreateOrderRequest#printOnConfirmOrDefault()}'s javadoc for why that one
- * is a {@code Boolean} wrapper.
+ * CreateOrderRequest#printOnConfirmOrDefault()}'s javadoc for the safe
+ * default while physical printing remains unvalidated.
  */
 public record CreateBalcaoOrderRequest(
         @NotEmpty @Valid List<OrderItemRequest> items,
@@ -26,7 +26,7 @@ public record CreateBalcaoOrderRequest(
         Boolean printOnConfirm) {
 
     public boolean printOnConfirmOrDefault() {
-        return printOnConfirm == null || printOnConfirm;
+        return Boolean.TRUE.equals(printOnConfirm);
     }
 
 }

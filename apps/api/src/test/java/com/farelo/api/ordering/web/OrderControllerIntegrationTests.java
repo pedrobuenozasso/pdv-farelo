@@ -1422,6 +1422,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.type").value("BALCAO"))
                 .andExpect(jsonPath("$.commandNumber").value(nullValue()))
                 .andExpect(jsonPath("$.status").value("CREATED"))
+                .andExpect(jsonPath("$.printOnConfirm").value(false))
                 .andExpect(jsonPath("$.items", hasSize(1)))
                 .andExpect(jsonPath("$.customerName").value("Cliente Balcão"))
                 .andReturn();
@@ -1733,10 +1734,9 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
-    // FARELO-319: "Imprimir ao confirmar" — defaults to true when omitted,
-    // and is honored/persisted when explicitly sent false.
+    // CORE-05: physical printing is opt-in until the USB agent is validated.
     @Test
-    void createsOrderWithPrintOnConfirmDefaultingToTrue() throws Exception {
+    void createsOrderWithPrintOnConfirmDefaultingToFalse() throws Exception {
         Product espresso = createActiveProduct(new BigDecimal("7.50"));
 
         String body = """
@@ -1750,7 +1750,7 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.printOnConfirm").value(true));
+                .andExpect(jsonPath("$.printOnConfirm").value(false));
     }
 
     @Test
@@ -1776,6 +1776,25 @@ class OrderControllerIntegrationTests extends AbstractIntegrationTest {
                 result.getResponse().getContentAsString(), OrderResponse.class);
         Order persisted = orderRepository.findById(response.id()).orElseThrow();
         assertThat(persisted.isPrintOnConfirm()).isFalse();
+    }
+
+    @Test
+    void createsOrderWithPrintOnConfirmExplicitlyTrue() throws Exception {
+        Product espresso = createActiveProduct(new BigDecimal("7.50"));
+
+        String body = """
+                {
+                  "commandNumber": %d,
+                  "items": [{"productId": "%s", "quantity": 1}],
+                  "printOnConfirm": true
+                }
+                """.formatted(COMMAND_AVAILABLE, espresso.getId());
+
+        mockMvc.perform(postOrder()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.printOnConfirm").value(true));
     }
 
 }
