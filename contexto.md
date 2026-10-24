@@ -1,10 +1,12 @@
 # Contexto de continuidade — Farelo OS
 
-Atualizado em 24/10/2026. Leia este arquivo antes de retomar o projeto em outra conversa. Ele registra o estado observado, não concede autorização para emitir documentos fiscais ou publicar serviços na internet. **Não colocar senha, certificado A1, `.env`, chave SSH, XML de cliente ou dump do banco no Git/chat.**
+Atualizado em 24/10/2026. Leia este arquivo antes de retomar o projeto em outra conversa. Ele registra o estado observado; a autorização para ensaiar homologação deve ser distinguida de habilitar emissão em produção ou publicar serviços na internet. **Não colocar senha, certificado A1, `.env`, chave SSH, XML de cliente ou dump do banco no Git/chat.**
 
 ## Objetivo e decisões do proprietário
 
 Substituir o Sischef por um PDV próprio para a cafeteria Farelo de Bolo e começar testes de operação real com segurança. O fluxo usado hoje é **Comanda/mesa**; cartão e PIX passam por **maquininha separada**, sem TEF. Há dois papéis principais: `adm.farelodebolo` (Admin com acesso amplo) e `caixa.farelodebolo` (operação de caixa). As senhas não estão neste repositório. O proprietário quer avançar autonomamente no que for técnico e receber somente decisões que dependam dele ou da contabilidade.
+
+Em 24/10, o proprietário estava na cafeteria com um PC Windows e pediu ensaio de pedido, conferência e emissão fiscal; ofereceu acesso por terminal. Pode-se avançar na conexão privada e nos testes presenciais. A transmissão fiscal de **homologação** ainda depende dos pré-requisitos abaixo; nenhum serviço de emissão está ligado ao caixa e não houve autorização de NFC-e de produção.
 
 ## Onde está o código e como está o Git
 
