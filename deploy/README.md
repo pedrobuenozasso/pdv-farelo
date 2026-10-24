@@ -1,8 +1,8 @@
 # Farelo OS na VPS Contabo
 
-Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. A API continua
-na versão `f522695`; a Web usa `f83fda0`. O atalho `/opt/farelo-os/current`
-aponta para `/opt/farelo-os/releases/f83fda0`. Os segredos ficam somente na VPS em
+Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 24/10/2026,
+a API usa `a13c6e6` e a Web usa `c21de37`. O atalho `/opt/farelo-os/current`
+aponta para `/opt/farelo-os/releases/a13c6e6`. Os segredos ficam somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
 
@@ -31,6 +31,33 @@ docker compose --env-file /opt/farelo-os/shared/.env -f /opt/farelo-os/current/d
 docker compose --env-file /opt/farelo-os/shared/.env -f /opt/farelo-os/current/deploy/compose.yml logs --tail=100 api
 curl -fsS http://127.0.0.1:3000/
 ```
+
+O release `92f14f5` atualizou a API para não entregar tickets de pedidos
+cancelados à fila da impressora. O release `c21de37` atualizou apenas a Web:
+pedidos internos de comanda/balcão enviam `printOnConfirm: false`, e os
+controles de impressão ainda não validados foram retirados do PDV. O KDS
+continua recebendo os pedidos. Em 24/10, os 913 testes da API passaram em
+PostgreSQL descartável; lint, TypeScript e build Web passaram. API, Web e banco
+ficaram ativos após o deploy, com `/login` HTTP 200. A imagem Web atual foi
+marcada `farelo-os-web:c21de37`. O backup anterior a `92f14f5` está em
+`/opt/farelo-os/shared/backups/pre-operational-92f14f5-20261024.dump`, com
+catálogo validado. Para voltar apenas a Web anterior, reconstruir a imagem do
+release `92f14f5` e recriar somente o serviço `web`; não restaurar o banco.
+O volume XSD está montado na API em `/opt/farelo-os/xsd`, mas o fluxo fiscal
+ainda não consome o pacote. O ensaio físico reprovou o layout de impressão;
+não ligar o Edge Agent antes de validar o fluxo e a fila.
+
+`a13c6e6` mudou o padrão de impressão automática na criação de pedidos:
+omitir `printOnConfirm` agora vale `false` nas rotas de comanda e balcão.
+`true` explícito continua aceito. A suíte backend inteira passou com **914
+testes**, sem falhas, em PostgreSQL descartável. A API foi recriada sozinha,
+retornou `UP`, e `/login` respondeu 200; Web e banco seguiram ativos. O backup
+`/opt/farelo-os/shared/backups/pre-core05-a13c6e6-20261024.dump` foi validado
+com `pg_restore --list` (modo 600), e a imagem anterior da API está marcada
+`farelo-os-api:pre-a13c6e6`. Para voltar apenas a API, marcar essa imagem
+como `farelo-os-api:latest` e recriar só `api` usando o Compose do release
+`c21de37`; depois verificar saúde e apontar `current` para `c21de37`. Não
+restaurar o banco para reverter somente esta mudança sem migração.
 
 Para reverter apenas a API `f522695` para `cfb6b05`, na VPS:
 

@@ -25,8 +25,11 @@ da tabela continuam necessários.
 O PDV interno passou a criar pedidos de comanda/balcão com
 `printOnConfirm: false` e sem ações de reenvio para uma impressora que ainda
 não está ligada. Isso não impede a fila do KDS de mostrar o pedido. O cardápio
-QR do Farelo e clientes diretos da API ainda usam o padrão `true` se omitirem
-o campo; essa rota exige revisão antes de atender clientes no novo QR.
+QR do Farelo e clientes diretos da API usam o padrão seguro `false` quando
+omitirem o campo desde o release `a13c6e6`, que passou nos 914 testes backend
+em PostgreSQL descartável e foi implantado na VPS em 24/10. `true` explícito
+continua disponível para quando a impressora for validada. O ticket CORE-05
+registra a alteração; ela não comprova a qualidade do papel impresso.
 
 Ordem de trabalho: (1) impedir efeito colateral de testes e fechar o fluxo
 comanda/produção/caixa; (2) corrigir os problemas concretos de interface trazidos
