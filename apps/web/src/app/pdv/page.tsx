@@ -72,13 +72,11 @@ import {
   type PaymentIntent,
   type PaymentMethod,
 } from "@/lib/api/payments";
-import { printConference } from "@/lib/api/print-jobs";
 import { listProducts, type Product } from "@/lib/api/products";
 import { listProductSteps, type ProductStep } from "@/lib/api/product-steps";
 import { getTableOccupancy, listTables } from "@/lib/api/tables";
 import { cn } from "@/lib/cn";
 import { decodeUserId } from "@/lib/auth";
-import { printConferenceInBrowser } from "@/lib/browser-conference";
 import { parseMoneyCents } from "@/lib/money-input";
 import { useSession } from "@/lib/use-session";
 
@@ -538,8 +536,6 @@ function CommandDetail({
         {command ? (
           <PaymentPanel
             commandNumber={number}
-            orders={ordersQuery.data ?? []}
-            printReady={ordersQuery.isSuccess && balanceQuery.isSuccess}
             totalOwed={totalOwed}
             totalDiscount={totalDiscount}
             totalPaid={totalPaid}
@@ -1523,8 +1519,6 @@ function CustomerCard({
 
 function PaymentPanel({
   commandNumber,
-  orders,
-  printReady,
   totalOwed,
   totalDiscount,
   totalPaid,
@@ -1532,8 +1526,6 @@ function PaymentPanel({
   openSignal,
 }: {
   commandNumber: number;
-  orders: Order[];
-  printReady: boolean;
   totalOwed: number;
   totalDiscount: number;
   totalPaid: number;
@@ -1826,14 +1818,6 @@ function PaymentPanel({
       </div>
 
       <DiscountButton commandNumber={commandNumber} totalOwed={totalOwed} />
-
-      <PrintConferenceButton
-        commandNumber={commandNumber}
-        orders={orders}
-        ready={printReady}
-        totalOwed={totalOwed}
-        totalDiscount={totalDiscount}
-      />
 
       {lastChangeGiven !== null ? (
         <div className="border-line bg-primary-soft text-primary-dark rounded-2xl border p-3 text-center text-sm font-bold">
@@ -2257,85 +2241,6 @@ function DiscountButton({
         </Button>
       </div>
     </form>
-  );
-}
-
-// FARELO-211/212: queues a COMMAND_CHECK PrintJob for the comanda — the
-// actual printing happens asynchronously via the Edge Agent (same as
-// every kitchen ticket), so this button only confirms the job was queued,
-// not that paper has come out of a printer yet.
-function PrintConferenceButton({
-  commandNumber,
-  orders,
-  ready,
-  totalOwed,
-  totalDiscount,
-}: {
-  commandNumber: number;
-  orders: Order[];
-  ready: boolean;
-  totalOwed: number;
-  totalDiscount: number;
-}) {
-  const [browserPrintError, setBrowserPrintError] = useState(false);
-  const printConferenceMutation = useMutation({
-    mutationFn: () => printConference(commandNumber),
-  });
-
-  const errorMessage = apiErrorMessage(
-    printConferenceMutation.error,
-    "Não foi possível enviar a conferência para impressão.",
-  );
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Button
-        variant="outline"
-        disabled={
-          !ready ||
-          !orders.some(
-            (order) =>
-              order.status !== "CANCELLED" &&
-              order.items.some((item) => !item.cancelled),
-          )
-        }
-        onClick={() => {
-          setBrowserPrintError(
-            !printConferenceInBrowser({
-              commandNumber,
-              orders,
-              totalOwed,
-              totalDiscount,
-            }),
-          );
-        }}
-      >
-        Imprimir neste computador (USB)
-      </Button>
-      {browserPrintError ? (
-        <p className="text-red text-center text-xs">
-          Não foi possível abrir a impressão. Permita pop-ups para este site e
-          tente novamente.
-        </p>
-      ) : null}
-      <Button
-        variant="outline"
-        disabled={printConferenceMutation.isPending}
-        onClick={() => printConferenceMutation.mutate()}
-      >
-        {printConferenceMutation.isPending
-          ? "Enviando..."
-          : "Enviar conferência para fila"}
-      </Button>
-      {printConferenceMutation.isSuccess ? (
-        <p className="text-ink-faint text-center text-xs">
-          Conferência enviada para impressão.
-        </p>
-      ) : null}
-      {errorMessage ? (
-        <p className="text-red text-center text-xs">{errorMessage}</p>
-      ) : null}
-    </div>
   );
 }
 
