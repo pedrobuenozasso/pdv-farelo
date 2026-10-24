@@ -29,16 +29,18 @@ ticket isolado autoriza venda fiscal em produção.
 | FISC-08f | Montagem da comanda fechada (`e60eb3b`) | Linhas congeladas, descontos e pagamentos compõem rascunho de homologação; opções sem regra fiscal e totais divergentes são recusados. |
 | FISC-09c | Preparação assinada (`068a1e6`) | Reserva, assinatura, QR e XML persistido ocorrem na mesma transação; o serviço não transmite nem é registrado como bean. |
 | FISC-09d1 | Identidade do A1 e rollback (`424aca2`) | CNPJ ICP-Brasil do certificado deve coincidir com emitente antes da reserva; teste de rollback/constraint em PostgreSQL. |
+| FISC-09d2 | Documento pendente por comanda (`f522695`) | Comanda fechada gera um documento pendente; duas chamadas concorrentes reutilizam a mesma linha; reemissão exige decisão explícita. Sem endpoint nem envio. |
 
 ## Próximos tickets, em ordem de dependência
 
 1. **FISC-08h — Opções vendidas.** Definir o tratamento fiscal dos adicionais
    e variantes com base no preço final e na classificação aprovada; até lá,
    itens com opções são recusados pela montagem fiscal.
-2. **FISC-09d — Operação de homologação.** Criar o documento pendente com
-   unicidade por comanda, instalar XSD oficial e custódia do A1, provisionar
-   numeração inicial conferida e executar o teste de rollback/constraints no
-   PostgreSQL antes de ligar o fluxo explícito.
+2. **FISC-09d — Operação de homologação.** Integrar o documento pendente ao
+   fluxo explícito, reforçar a unicidade no banco se outros caminhos de escrita
+   forem permitidos, instalar XSD oficial e custódia do A1 e provisionar
+   numeração inicial conferida antes de ligar o fluxo. O rollback e a
+   concorrência já foram testados no PostgreSQL.
 3. **FISC-10 — Ensaio real de homologação.** Com classificação por item
    revisada, dados do emitente e A1 protegidos, obter autorização e ensaiar
    consulta, rejeição e cancelamento. Conferir XML, DANFE/QR Code e total.
@@ -46,7 +48,7 @@ ticket isolado autoriza venda fiscal em produção.
    indisponibilidade, recuperação, numeração de produção, guarda de XML e
    rollback. Só então habilitar emissão no fechamento real.
 
-Em 23/10, a VPS ainda tinha **0 perfis fiscais, 0 configuração do emitente,
+Em 24/10, a VPS ainda tinha **0 perfis fiscais, 0 configuração do emitente,
 0 produtos com perfil, 0 passos de opções e 0 documentos fiscais**; 39 itens
 estavam visíveis no PDV interno. Esses números vêm de consultas de contagem,
 sem dados pessoais ou segredos. O A1 permanece fora do Git e da VPS. A conexão

@@ -1,7 +1,7 @@
 # Farelo OS na VPS Contabo
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. O código da
-versão `cfb6b05` está em `/opt/farelo-os/releases/cfb6b05`, com o atalho
+versão `f522695` está em `/opt/farelo-os/releases/f522695`, com o atalho
 `/opt/farelo-os/current`. Os segredos ficam somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
@@ -32,7 +32,15 @@ docker compose --env-file /opt/farelo-os/shared/.env -f /opt/farelo-os/current/d
 curl -fsS http://127.0.0.1:3000/
 ```
 
-Para reverter apenas o patch da API `cfb6b05` para `7138766`, na VPS:
+Para reverter apenas a API `f522695` para `cfb6b05`, na VPS:
+
+```bash
+docker image tag farelo-os-api:pre-f522695 farelo-os-api:latest
+docker compose --env-file /opt/farelo-os/shared/.env -f /opt/farelo-os/releases/cfb6b05/deploy/compose.yml up -d --no-build --no-deps api
+ln -sfnT /opt/farelo-os/releases/cfb6b05 /opt/farelo-os/current
+```
+
+Para reverter a API `cfb6b05` para `7138766`, na VPS:
 
 ```bash
 docker image tag farelo-os-api:pre-cfb6b05 farelo-os-api:latest
@@ -64,6 +72,8 @@ Conferir `http://127.0.0.1:3000/login` e a saúde da API após a reversão. As m
 `7138766` acrescentou revisão fiscal dos 39 itens do cardápio no Admin, montagem de rascunho da comanda fechada, preparação do XML assinado com validação XSD explícita e transmissão de homologação protegida contra duplicidade. Os serviços de preparação e transmissão são explícitos, sem endpoint ou acionamento no fechamento do caixa. Sem nova migração. Os 906 testes do backend passaram em PostgreSQL descartável na VPS; o build de produção da Web passou. Backup validado em `/opt/farelo-os/shared/backups/pre-fiscal-7138766-20261023.dump` (modo 600, 95909 bytes), imagens anteriores preservadas como `pre-7138766`. API `UP`, login HTTP 200, Flyway V70. Contagens: 52 produtos, 0 perfis, 0 emitente, 0 sequências, 0 documentos, 0 tentativas; nenhuma nota transmitida.
 
 `cfb6b05` atualizou somente a API com a conferência do CNPJ do certificado ICP-Brasil contra o emitente antes da reserva de número. O teste em PostgreSQL descartável confirmou rollback de número e XML em falha de validação e unicidade de identidade fiscal; os testes específicos passaram (8/8). API `UP`, login HTTP 200. Sem migração nova ou transmissão de nota. A imagem anterior da API está preservada como `pre-cfb6b05`.
+
+`f522695` acrescentou criação controlada de um documento fiscal pendente por comanda fechada. O bloqueio da comanda impede que duas solicitações simultâneas criem documentos diferentes; uma reemissão exige caminho explícito. Os **912 testes** do backend passaram em PostgreSQL descartável na VPS, inclusive o teste de concorrência. Backup pré-atualização validado em `/opt/farelo-os/shared/backups/pre-fiscal-f522695-20261023.dump` (modo 600); imagem anterior preservada como `pre-f522695`. API `UP`, login HTTP 200, sem migração, endpoint fiscal novo ou transmissão de nota. Contagens após deploy: 52 produtos, 0 perfis, 0 emitente, 0 sequências, 0 documentos e 0 tentativas.
 
 O release `ac2f37c` aplicou 55 migrações Flyway em 16/10/2026; `dc09445` ativou a política explícita de acesso da API. Em 17/10, `edfabc1` foi implantado sem nova migração. A API respondeu `UP`, o login HTTP 200, e a fila de impressão respondeu 401 sem chave de dispositivo, 200 com chave e 401 na rota de funcionários sem JWT. A chave está somente em `/opt/farelo-os/shared/.env` e precisa ser configurada no Edge Agent da estação física antes do teste de impressão. As imagens anteriores foram preservadas com as tags `dc09445` para reversão. O primeiro administrador usa
 `adm.farelodebolo` sem e-mail; a senha foi inserida diretamente no Terminal e

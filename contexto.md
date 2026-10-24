@@ -1,6 +1,6 @@
 # Contexto de continuidade — Farelo OS
 
-Atualizado em 23/10/2026. Leia este arquivo antes de retomar o projeto em outra conversa. Ele registra o estado observado, não concede autorização para emitir documentos fiscais ou publicar serviços na internet. **Não colocar senha, certificado A1, `.env`, chave SSH, XML de cliente ou dump do banco no Git/chat.**
+Atualizado em 24/10/2026. Leia este arquivo antes de retomar o projeto em outra conversa. Ele registra o estado observado, não concede autorização para emitir documentos fiscais ou publicar serviços na internet. **Não colocar senha, certificado A1, `.env`, chave SSH, XML de cliente ou dump do banco no Git/chat.**
 
 ## Objetivo e decisões do proprietário
 
@@ -10,15 +10,15 @@ Substituir o Sischef por um PDV próprio para a cafeteria Farelo de Bolo e come�
 
 - Checkout de trabalho deste histórico: `/Users/pedrobueno/Documents/ChatGPT/Farelo PDV Codex/pdv-farelo-admin-login`.
 - Branch de trabalho: `codex/admin-username-login`, publicada em [GitHub](https://github.com/pedrobuenozasso/pdv-farelo/tree/codex/admin-username-login). Neste checkout, `origin` aponta para o repositório local `/Users/pedrobueno/pdv-farelo` e `github` aponta para o repositório online. A branch acompanha `github/codex/admin-username-login`. O `gh auth` estava inválido nesta data, mas `git push` HTTPS com a credencial do Mac funcionou; outra máquina pode exigir login próprio.
-- Não assumir que `main` contém este trabalho: em 23/10, a branch tinha mais de 100 commits após o ancestral `a196df2`. Conferir `git status`, `git log`, `git branch -vv` e o remoto antes de fazer merge ou novo deploy.
+- Não assumir que `main` contém este trabalho: em 24/10, a branch tinha mais de 100 commits após o ancestral `a196df2`. Conferir `git status`, `git log`, `git branch -vv` e o remoto antes de fazer merge ou novo deploy.
 - `AGENTS.md` descreve convenções. `docs/architecture.md`, `docs/domain-model.md` e `docs/api.md` contêm a arquitetura e contratos; alguns trechos antigos ainda dizem que a VPS não foi implantada. Para o estado operacional atual, preferir este arquivo e `deploy/README.md`.
 
 ## VPS privada em execução
 
 - Acesso SSH por chave já configurado no Mac sob o alias `farelo-vps`. O túnel SSH para a Web reconecta por LaunchAgent no login do Mac. O app abre localmente em `http://127.0.0.1:3000`; na VPS a porta 3000 está vinculada só a `127.0.0.1`. API e PostgreSQL não têm porta pública.
-- Implantação Docker Compose em `/opt/farelo-os`. O symlink `/opt/farelo-os/current` apontava para `/opt/farelo-os/releases/cfb6b05` na última verificação. API, Web e PostgreSQL estavam ativos; login HTTP 200; Flyway V70.
+- Implantação Docker Compose em `/opt/farelo-os`. O symlink `/opt/farelo-os/current` apontava para `/opt/farelo-os/releases/f522695` na última verificação de 24/10. API, Web e PostgreSQL estavam ativos; login HTTP 200; Flyway V70. O release alterou apenas a API.
 - Contagens observadas: **52 produtos**, **0 perfis fiscais**, **0 configurações do emitente**, **0 sequências de numeração**, **0 documentos fiscais**, **0 tentativas de transmissão**. Confirmar de novo antes de qualquer carga.
-- Segredos operacionais ficam só em `/opt/farelo-os/shared/.env` na VPS, modo 600. O A1 e sua senha continuam fora da VPS e do Git. O backup anterior à versão `7138766` está em `/opt/farelo-os/shared/backups/pre-fiscal-7138766-20261023.dump`, com `pg_restore --list` validado. **Backup externo automático e restauração periódica ainda faltam.**
+- Segredos operacionais ficam só em `/opt/farelo-os/shared/.env` na VPS, modo 600. O A1 e sua senha continuam fora da VPS e do Git. O backup anterior à versão `f522695` está em `/opt/farelo-os/shared/backups/pre-fiscal-f522695-20261023.dump`, com `pg_restore --list` validado. **Backup externo automático e restauração periódica ainda faltam.**
 - O Compose que realmente roda nessa implantação privada está em `deploy/compose.yml`; o preparo futuro de domínio/Caddy está em `infra/`. `deploy/README.md` traz operação e rollback. Para novos releases: testar, criar backup, preservar tag de imagem, atualizar API primeiro, verificar saúde, atualizar Web e só então mover `current`.
 
 ## Cardápio, migração e telas
@@ -32,15 +32,16 @@ Substituir o Sischef por um PDV próprio para a cafeteria Farelo de Bolo e come�
 
 - Backend tem perfis fiscais, emitente estruturado, campos GTIN/unidade, snapshots fiscais do item vendido, cálculo de descontos em centavos, reserva atômica de numeração por CNPJ/ambiente/série, XML NFC-e de homologação, assinatura, QR v3, clientes mTLS/SEFAZ-SP, parser de autorização/rejeição, consulta por chave, preparação de cancelamento e cerca persistente contra reenvio após resposta incerta.
 - `NfceCommandDraftService` monta um rascunho de **comanda fechada** a partir de itens, descontos e pagamentos persistidos. Recusa itens sem classificação/snapshot, pedidos não confirmados, opções sem regra fiscal e valores divergentes.
+- `FiscalDocumentStartService` cria um único documento pendente por comanda fechada, com bloqueio da linha da comanda em PostgreSQL. Duas requisições simultâneas reutilizam o mesmo documento; um documento já processado exige reemissão explícita. Ainda não há endpoint para esse serviço.
 - `HomologationNfcePreparationService` e `HomologationFiscalSubmissionWorkflow` são **fluxos explícitos, sem bean/endpoint e sem ligação ao fechamento do caixa**. A preparação confere CNPJ do certificado ICP-Brasil, reserva número, assina, adiciona QR, valida XSD e persiste XML; a transmissão grava a tentativa antes da rede e reconcilia resultado incerto por chave sem reenvio automático. **Nenhuma NFC-e foi enviada.**
-- Testes do release principal: 906 testes backend aprovados em PostgreSQL descartável na VPS; build de produção Web aprovado. Patch `cfb6b05`: 8 testes específicos aprovados, inclusive rollback de número/XML e unicidade no PostgreSQL. API saudável após deploy. Os testes não substituem homologação real da SEFAZ.
+- Release `f522695`: **912 testes backend** aprovados em PostgreSQL descartável na VPS (zero falhas); teste específico de concorrência aprovado; build de produção Web do release anterior aprovado. API saudável após deploy. Os testes não substituem homologação real da SEFAZ.
 - Há fixtures públicas do pacote XSD oficial 010f em `apps/api/src/test/resources/nfe-xsd/` para testes. O validador de runtime exige um XSD oficial instalado explicitamente e não busca esquemas pela rede. **O pacote de runtime ainda não foi instalado/validado para emissão**; a tentativa recente de download oficial não terminou. Não usar cópia de terceiros sem validação da origem e versão.
-- Em 23/10 não havia emitente, perfil de produto, numeração ou documento no banco. Não ligar emissão nem iniciar numeração sem dados conferidos, backup e ensaio de homologação.
+- Em 24/10 não havia emitente, perfil de produto, numeração ou documento no banco. Não ligar emissão nem iniciar numeração sem dados conferidos, backup e ensaio de homologação.
 
 ## Pendências em ordem de execução
 
 1. **Farelo + contabilidade:** conferir o emitente atual (CNPJ, IE, CRT, razão social, endereço), o vínculo e classificação de cada item ativo (incluindo NCM, CFOP, CEST quando aplicável, origem/tributos, GTIN ou `SEM GTIN`, unidade), as variantes/adicionais e série/próximo número em cada ambiente. A lista individual está em `docs/fiscal-pendencias-do-proprietario-20261023.md`. Não copiar automaticamente códigos históricos do Sischef.
-2. **Engenharia fiscal:** obter/validar XSD oficial vigente para runtime; criar documento pendente com unicidade por comanda; provisionar numeração conferida; preparar custódia do A1 e senha fora do Git; tratar fiscalmente opções de produtos; integrar o fluxo explícito sem perder a cerca de envio. Conferir `docs/fiscal-sprint-20261023.md`.
+2. **Engenharia fiscal:** obter/validar XSD oficial vigente para runtime; integrar o novo documento pendente ao fluxo explícito; reforçar a unicidade no banco se houver outros caminhos de escrita; provisionar numeração conferida; preparar custódia do A1 e senha fora do Git; tratar fiscalmente opções de produtos; preservar a cerca de envio. Conferir `docs/fiscal-sprint-20261023.md`.
 3. **Homologação real:** com dados aprovados e A1 protegido, testar autorização, rejeição, resposta incerta/consulta, cancelamento, XML/DANFE/QR e totais da comanda com maquininha separada. Guardar XML e protocolos e definir recuperação/contingência antes de habilitar produção.
 4. **Operação vendável:** validar caixa e impressão no local, cardápio/preços/opções com a equipe, backup externo com teste de restauração, monitoramento, domínio/HTTPS quando houver acesso externo, segurança da VPS e plano de retorno ao Sischef se o piloto falhar. Não expor PostgreSQL, API interna nem painel administrativo sem proteção.
 
