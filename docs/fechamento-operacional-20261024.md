@@ -22,6 +22,12 @@ pulados. O build Web com webpack, lint e TypeScript passaram após remover os
 botões de impressão não validados. Isso verifica o código; os passos de bancada
 da tabela continuam necessários.
 
+O PDV interno passou a criar pedidos de comanda/balcão com
+`printOnConfirm: false` e sem ações de reenvio para uma impressora que ainda
+não está ligada. Isso não impede a fila do KDS de mostrar o pedido. O cardápio
+QR do Farelo e clientes diretos da API ainda usam o padrão `true` se omitirem
+o campo; essa rota exige revisão antes de atender clientes no novo QR.
+
 Ordem de trabalho: (1) impedir efeito colateral de testes e fechar o fluxo
 comanda/produção/caixa; (2) corrigir os problemas concretos de interface trazidos
 pela equipe; (3) completar fiscal de homologação e produção; (4) integrar a
