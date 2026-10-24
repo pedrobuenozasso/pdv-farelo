@@ -7,14 +7,26 @@ privada neste arquivo.
 
 ## Acesso a partir do Windows da cafeteria
 
-A Web da VPS escuta apenas em `127.0.0.1:3000` do servidor. Para acessá-la do
-Windows sem torná-la pública, criar uma chave SSH própria no PC e instalar
-**somente a chave pública** em uma conta restrita a encaminhar a porta 3000.
-Conferir a impressão digital ED25519 do servidor antes de aceitar o primeiro
-acesso: `SHA256:s4+iJTV1NdyIIO9UyUQSRzAq+i2JmJD/CFHe5uFPFPw`. Depois de
-instalada a chave pública e testada a conta, usar um túnel local e abrir
-`http://127.0.0.1:3000/login`. Não copiar a chave privada do Mac para o PC nem
-expor a porta 3000 à internet.
+A Web da VPS escuta apenas em `127.0.0.1:3000` do servidor. Em 24/10, a chave
+**pública** do PC foi instalada na conta `farelo-tunnel`. Essa conta exige chave,
+não aceita senha nem terminal e só pode encaminhar localmente para
+`127.0.0.1:3000` da VPS. O acesso administrativo por chave foi conferido após
+o reload do SSH; o túnel com a chave privada do Windows ainda precisa ser
+ensaiado no próprio PC. Conferir a impressão digital ED25519 do servidor
+antes de aceitar o primeiro acesso:
+`SHA256:s4+iJTV1NdyIIO9UyUQSRzAq+i2JmJD/CFHe5uFPFPw`.
+
+No PowerShell do Windows, executar:
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\farelo_vps" -o ExitOnForwardFailure=yes -N -L 3000:127.0.0.1:3000 farelo-tunnel@209.126.6.77
+```
+
+Deixar a janela aberta enquanto usar o PDV e abrir
+`http://127.0.0.1:3000/login`. Se a porta 3000 do Windows já estiver ocupada,
+trocar apenas o primeiro `3000` do argumento `-L` por `3001` e abrir
+`http://127.0.0.1:3001/login`. Não copiar a chave privada do Mac para o PC nem
+expor a porta 3000 da VPS à internet.
 
 ## Fluxo a validar na bancada
 

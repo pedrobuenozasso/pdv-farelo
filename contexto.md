@@ -29,7 +29,7 @@ Em 24/10, o proprietário estava na cafeteria com um PC Windows e pediu ensaio d
 - `/admin/fiscal-review` mostra o cruzamento dos 39 itens com o Sischef: 12 vínculos de alta confiança, 18 médios, 4 ambíguos, 5 sem vínculo seguro. É **somente leitura**; não aplicar NCM, CFOP, CEST, CSOSN, GTIN ou unidade por semelhança de nome. Os 13 itens extras pausados não estão nesse cruzamento.
 - Os relatórios de origem ficam fora deste Git em `../sischef-extraction/`. Eles incluem dados históricos e não devem ser publicados integralmente sem revisão. Dentro do Git há apenas o subconjunto de produto/evidência em `apps/web/src/data/fiscal-candidates-20261023.json` e a lista de decisões em `apps/web/src/data/fiscal-review-decisions-20261023.md`.
 - Telas administrativas e caixa existem, mas **não houve validação presencial ponta a ponta** de venda, fechamento, impressão física, equipamento e operação sem Sischef. O login do Caixa precisa de ensaio final; não inserir credenciais em testes ou documentação.
-- O roteiro de teste na cafeteria está em `docs/ensaio-presencial-20261024.md`. Para o PC Windows, foi solicitada ao proprietário apenas uma chave SSH **pública**; criar uma conta de túnel restrita e testar o acesso antes de usar `/pdv`. A chave privada do Mac não deve ser copiada.
+- O roteiro de teste na cafeteria está em `docs/ensaio-presencial-20261024.md`. A chave SSH **pública** do PC Windows foi instalada na conta `farelo-tunnel` da VPS, limitada a encaminhar `127.0.0.1:3000`; o acesso administrativo e o `sshd -t` passaram após o reload. **Ainda falta testar o túnel no próprio Windows**. A chave privada do Mac não deve ser copiada.
 
 ## Fiscal: implementado e limites exatos
 
