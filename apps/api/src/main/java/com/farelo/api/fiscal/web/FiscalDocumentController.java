@@ -2,6 +2,7 @@ package com.farelo.api.fiscal.web;
 
 import com.farelo.api.fiscal.FiscalDocument;
 import com.farelo.api.fiscal.FiscalDocumentService;
+import com.farelo.api.fiscal.FiscalPendingCommandService;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.rbac.RequireRole;
 import jakarta.validation.Valid;
@@ -21,12 +22,10 @@ import java.util.UUID;
  * /api/v1/commands/{number}/fiscal-documents/{id}/transition}
  * (FARELO-157). Same "minimal read-only listing first" precedent already
  * followed by {@code InventoryMovement}/{@code Notification}/{@code
- * AuditLog}/{@code Payment} at their own first tickets:
- * {@link com.farelo.api.fiscal.FiscalDocument} is a system-generated fact
- * (once something eventually produces one — Epic 12), not something an
- * Admin configures, so there is no {@code POST}/{@code PUT} surface for
- * *creating* or freely editing one here (contrast {@code FiscalProfile}/
- * {@code CompanyFiscalConfiguration}, both Admin-configured lookup values).
+ * AuditLog}/{@code Payment} at their own first tickets. The explicit
+ * {@code POST .../pending} now creates or reuses an untouched placeholder
+ * for a closed paid sale; it does not prepare or emit NFC-e, and there is
+ * no free-form create/edit surface.
  *
  * <p><b>Placement note</b>: this is a command-scoped URL, but lives in the
  * {@code fiscal} domain ({@code com.farelo.api.fiscal.web}), not in {@code
@@ -103,9 +102,12 @@ import java.util.UUID;
 public class FiscalDocumentController {
 
     private final FiscalDocumentService fiscalDocumentService;
+    private final FiscalPendingCommandService pendingCommandService;
 
-    public FiscalDocumentController(FiscalDocumentService fiscalDocumentService) {
+    public FiscalDocumentController(FiscalDocumentService fiscalDocumentService,
+                                    FiscalPendingCommandService pendingCommandService) {
         this.fiscalDocumentService = fiscalDocumentService;
+        this.pendingCommandService = pendingCommandService;
     }
 
     // {number} is the command's business identifier, same convention as
@@ -117,6 +119,12 @@ public class FiscalDocumentController {
         return fiscalDocumentService.listByCommand(number).stream()
                 .map(FiscalDocumentResponse::from)
                 .toList();
+    }
+
+    @PostMapping("/{number}/fiscal-documents/pending")
+    @RequireRole({UserRole.ADMIN, UserRole.MANAGER})
+    public FiscalPendingDocumentResponse startPending(@PathVariable int number) {
+        return FiscalPendingDocumentResponse.from(pendingCommandService.start(number));
     }
 
     // FARELO-157: manual transition endpoint — see class javadoc,

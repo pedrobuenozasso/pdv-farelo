@@ -2820,10 +2820,10 @@ antigo primeiro (`createdAt` asc). (FARELO-156, "Criar FiscalDocument")
 **Requer: `ADMIN`, `MANAGER`**. Sem token válido retorna `401
 UNAUTHENTICATED`; outros papéis recebem `403 FORBIDDEN`.
 
-Somente leitura — nada neste código produz um `FiscalDocument` de verdade
-ainda (isso é Epic 12, "NFC-e", gated em "Somente iniciar após validação
-contábil"). O controller fica no pacote `fiscal`, pois o domínio já depende
-de `command`.
+Este GET é somente leitura. Um POST explícito descrito abaixo agora pode
+registrar um placeholder `PENDING`; nenhuma NFC-e é preparada ou transmitida
+por esse comando. O controller fica no pacote `fiscal`, pois o domínio já
+depende de `command`.
 
 Sem paginação — mesma lógica YAGNI já aplicada em
 `GET /api/v1/commands/{number}/payments`/`GET
@@ -2868,6 +2868,32 @@ documento fiscal.
 
 - `404 Not Found` — `number` não corresponde a nenhuma comanda existente,
   `code: "COMMAND_NOT_FOUND"` (mesmo formato dos demais endpoints).
+
+### `POST /api/v1/commands/{number}/fiscal-documents/pending`
+
+Cria ou reutiliza o único documento fiscal **pendente e ainda não usado** da
+visita atual da comanda. Requer `ADMIN` ou `MANAGER` (401 sem login, 403
+para os demais papéis). Não recebe corpo nem chave de idempotência: a
+identidade da visita, protegida por bloqueio de linha no PostgreSQL, é a
+chave natural. Repetições e chamadas concorrentes devolvem o mesmo `id`.
+
+Pré-condições: visita atual fechada; nenhum pedido em `CREATED`; total
+positivo de itens ativos e saldo positivo após descontos; pagamentos
+registrados cobrindo esse saldo. Produto sem classificação fiscal ainda pode
+originar o placeholder, mas a preparação da NFC-e continuará bloqueada até
+que os dados fiscais sejam completados e validados. Uma comanda sem venda,
+inteiramente cancelada, com desconto integral ou com pagamento insuficiente
+não produz documento.
+
+**Response — `200 OK`**: `{ "id": "<uuid>", "commandNumber": 1,
+"status": "PENDING", "createdAt": "2026-10-24T13:00:00Z" }`. Não inclui
+XML, certificado, número fiscal nem chave de acesso. Esta ação não reserva
+numeração, assina XML, chama SEFAZ ou altera o caixa.
+
+- `404 COMMAND_NOT_FOUND`: número de comanda inexistente.
+- `409 FISCAL_DOCUMENT_NOT_ELIGIBLE`: pré-condição da venda/visita não atendida.
+- `409 FISCAL_DOCUMENT_ALREADY_STARTED`: a visita já possui documento usado
+  ou processado; reemissão exige outro fluxo revisado.
 
 ### `POST /api/v1/commands/{number}/fiscal-documents/{id}/transition`
 

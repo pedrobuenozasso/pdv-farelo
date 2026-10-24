@@ -32,7 +32,8 @@ public class FiscalDocumentStartService {
         Command command = commands.findByIdForUpdate(commandId)
                 .orElseThrow(() -> new IllegalArgumentException("command was not found"));
         if (command.getStatus() != CommandStatus.CLOSED) {
-            throw new IllegalStateException("fiscal document requires a closed command");
+            throw new FiscalDocumentStartException("FISCAL_DOCUMENT_NOT_ELIGIBLE",
+                    "Fiscal document requires a closed comanda");
         }
         List<FiscalDocument> existing = documents.findByCommandOrderByCreatedAtAsc(command);
         if (existing.size() == 1 && unused(existing.get(0))) {
@@ -41,7 +42,8 @@ public class FiscalDocumentStartService {
         if (!existing.isEmpty()) {
             // Reissue after rejection/cancellation requires a separately
             // reviewed policy; never make a second document implicitly.
-            throw new IllegalStateException("command already has a fiscal document");
+            throw new FiscalDocumentStartException("FISCAL_DOCUMENT_ALREADY_STARTED",
+                    "Comanda already has a fiscal document");
         }
         return documents.saveAndFlush(new FiscalDocument(command));
     }
@@ -54,6 +56,14 @@ public class FiscalDocumentStartService {
                 && document.getFiscalEnvironment() == null
                 && document.getAccessKey() == null
                 && document.getXmlContent() == null
-                && document.getProtocolNumber() == null;
+                && document.getProtocolNumber() == null
+                && document.getAuthorizedAt() == null
+                && document.getRejectionCode() == null
+                && document.getRejectionReason() == null
+                && document.getRejectionResponseXml() == null
+                && document.getCancellationProtocolNumber() == null
+                && document.getCancelledAt() == null
+                && document.getCancellationEventXml() == null
+                && document.getCancellationResponseXml() == null;
     }
 }
