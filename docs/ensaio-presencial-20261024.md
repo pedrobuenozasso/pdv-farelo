@@ -11,9 +11,10 @@ A Web da VPS escuta apenas em `127.0.0.1:3000` do servidor. Em 24/10, a chave
 **pública** do PC foi instalada na conta `farelo-tunnel`. Essa conta exige chave,
 não aceita senha nem terminal e só pode encaminhar localmente para
 `127.0.0.1:3000` da VPS. O acesso administrativo por chave foi conferido após
-o reload do SSH; o túnel com a chave privada do Windows ainda precisa ser
-ensaiado no próprio PC. Conferir a impressão digital ED25519 do servidor
-antes de aceitar o primeiro acesso:
+o reload do SSH. Em 24/10, o Windows autenticou pela chave e o proprietário
+abriu a tela de login pelo túnel local na porta **3000**. O login do Caixa e o
+fluxo de venda ainda precisam de ensaio. Conferir a impressão digital ED25519
+do servidor antes de aceitar o primeiro acesso:
 `SHA256:s4+iJTV1NdyIIO9UyUQSRzAq+i2JmJD/CFHe5uFPFPw`.
 
 No PowerShell do Windows, executar:
