@@ -41,9 +41,14 @@ expor a porta 3000 da VPS à internet.
 2. Abrir uma comanda de teste identificada pela equipe. Adicionar um item do
    cardápio com preço conhecido e confirmar o pedido. Conferir item, preço,
    quantidade, estado do pedido e fila de impressão de cozinha/bar.
-3. Usar **Imprimir Conferência** no PDV. Conferir no papel nome, quantidade,
-   preços, desconto se houver e total. Verificar também a fila de impressão
-   em `/admin/print-jobs` com o ADM caso a impressora não responda.
+3. A Epson TM-T20X da cafeteria está conectada por USB ao Windows, enquanto o
+   Edge Agent atual envia ESC/POS somente por TCP. Para o ensaio presencial,
+   usar **Imprimir neste computador (USB)** no PDV, escolher a Epson no diálogo
+   do Edge e conferir no papel itens, preços, desconto e total. Essa opção não
+   cria `PrintJob` e não comprova a impressão automática da cozinha. **Enviar
+   conferência para fila** apenas cria um `PrintJob` pendente; não repetir o
+   clique porque a fila poderá imprimir os trabalhos acumulados quando um
+   agente físico for ligado. Verificar `/admin/print-jobs` com o ADM.
 4. Registrar o pagamento pelo mesmo meio recebido na maquininha separada.
    Conferir que o valor pago fecha exatamente o total da comanda antes de
    escolher **Fechar comanda**. Não lançar um pagamento de cartão ou PIX sem
