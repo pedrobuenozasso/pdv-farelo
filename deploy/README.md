@@ -1,8 +1,8 @@
 # Farelo OS na VPS Contabo
 
-Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. O código da
-versão `f522695` está em `/opt/farelo-os/releases/f522695`, com o atalho
-`/opt/farelo-os/current`. Os segredos ficam somente na VPS em
+Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. A API continua
+na versão `f522695`; a Web usa `f83fda0`. O atalho `/opt/farelo-os/current`
+aponta para `/opt/farelo-os/releases/f83fda0`. Os segredos ficam somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
 
@@ -75,7 +75,11 @@ Conferir `http://127.0.0.1:3000/login` e a saúde da API após a reversão. As m
 
 `f522695` acrescentou criação controlada de um documento fiscal pendente por comanda fechada. O bloqueio da comanda impede que duas solicitações simultâneas criem documentos diferentes; uma reemissão exige caminho explícito. Os **912 testes** do backend passaram em PostgreSQL descartável na VPS, inclusive o teste de concorrência. Backup pré-atualização validado em `/opt/farelo-os/shared/backups/pre-fiscal-f522695-20261023.dump` (modo 600); imagem anterior preservada como `pre-f522695`. API `UP`, login HTTP 200, sem migração, endpoint fiscal novo ou transmissão de nota. Contagens após deploy: 52 produtos, 0 perfis, 0 emitente, 0 sequências, 0 documentos e 0 tentativas.
 
-Em 24/10, o pacote público `PL_010f_v1.04.zip` foi baixado do Portal Nacional da NF-e, verificado pelo SHA-256 `b8589490a58a09a993a80e6ac4d7ed10f20892061ecfc56719337098d4b95998` e extraído em `/opt/farelo-os/shared/xsd/PL_010f_v1.04/`. Esta branch prepara a montagem somente leitura em `/opt/farelo-os/xsd` do contêiner da API; **a VPS ainda executa o Compose do release `f522695`, sem esse volume**, para preservar o ensaio presencial. O XSD tampouco foi fornecido aos serviços explícitos de homologação. Nenhum serviço foi reiniciado por essa preparação.
+Em 24/10, o pacote público `PL_010f_v1.04.zip` foi baixado do Portal Nacional da NF-e, verificado pelo SHA-256 `b8589490a58a09a993a80e6ac4d7ed10f20892061ecfc56719337098d4b95998` e extraído em `/opt/farelo-os/shared/xsd/PL_010f_v1.04/`. A montagem somente leitura em `/opt/farelo-os/xsd` está no Compose de `f83fda0`; **o contêiner API existente não foi recriado com esse volume** para preservar o ensaio presencial. O XSD tampouco foi fornecido aos serviços explícitos de homologação.
+
+`f83fda0` atualizou **somente a Web** para permitir imprimir a conferência não fiscal pelo diálogo do Edge na Epson USB da cafeteria. A nova Web respondeu HTTP 200 em `/login`; API e banco não foram reiniciados. O Compose apontado por `/opt/farelo-os/current` agora contém a montagem XSD, mas o contêiner API existente ainda não foi recriado com ela. O teste em papel depende do usuário no Windows. Dois tickets de cozinha estavam pendentes na fila em 24/10; conferir antes de ligar qualquer Edge Agent.
+
+A imagem Web do código anterior foi reconstruída do release `f522695` e guardada como `farelo-os-web:pre-f83fda0`. Para voltar somente a Web, na VPS: `docker image tag farelo-os-web:pre-f83fda0 farelo-os-web:latest` e `docker compose --env-file /opt/farelo-os/shared/.env -f /opt/farelo-os/releases/f522695/deploy/compose.yml up -d --no-build --no-deps web`. Não reverter API nem banco por causa de uma falha apenas na impressão do navegador.
 
 O release `ac2f37c` aplicou 55 migrações Flyway em 16/10/2026; `dc09445` ativou a política explícita de acesso da API. Em 17/10, `edfabc1` foi implantado sem nova migração. A API respondeu `UP`, o login HTTP 200, e a fila de impressão respondeu 401 sem chave de dispositivo, 200 com chave e 401 na rota de funcionários sem JWT. A chave está somente em `/opt/farelo-os/shared/.env` e precisa ser configurada no Edge Agent da estação física antes do teste de impressão. As imagens anteriores foram preservadas com as tags `dc09445` para reversão. O primeiro administrador usa
 `adm.farelodebolo` sem e-mail; a senha foi inserida diretamente no Terminal e
