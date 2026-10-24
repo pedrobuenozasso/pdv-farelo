@@ -12,8 +12,11 @@ A Web da VPS escuta apenas em `127.0.0.1:3000` do servidor. Em 24/10, a chave
 não aceita senha nem terminal e só pode encaminhar localmente para
 `127.0.0.1:3000` da VPS. O acesso administrativo por chave foi conferido após
 o reload do SSH. Em 24/10, o Windows autenticou pela chave e o proprietário
-abriu a tela de login pelo túnel local na porta **3000**. O login do Caixa e o
-fluxo de venda ainda precisam de ensaio. Conferir a impressão digital ED25519
+abriu a tela de login pelo túnel local na porta **3000**. Em seguida entrou com
+`caixateste` (papel CASHIER); o acesso ao PDV foi confirmado pelo proprietário.
+O login de `caixa.farelodebolo`, cuja senha foi esquecida, e o fluxo de venda
+ainda precisam de ensaio. A conta de teste não deve ser desativada antes de
+restabelecer e testar o acesso principal. Conferir a impressão digital ED25519
 do servidor antes de aceitar o primeiro acesso:
 `SHA256:s4+iJTV1NdyIIO9UyUQSRzAq+i2JmJD/CFHe5uFPFPw`.
 
@@ -31,9 +34,10 @@ expor a porta 3000 da VPS à internet.
 
 ## Fluxo a validar na bancada
 
-1. Entrar em `/login` com o usuário `caixa.farelodebolo`. Confirmar que o
-   operador chega a `/pdv` e que telas administrativas seguem a política de
-   acesso esperada. Testar o ADM separadamente, sem anotar as senhas.
+1. O acesso inicial com `caixateste` foi confirmado em 24/10. Restabelecer a
+   senha de `caixa.farelodebolo` por um fluxo seguro e entrar com esse usuário
+   em `/login`; confirmar `/pdv` e a política de acesso às telas
+   administrativas. Testar o ADM separadamente, sem anotar as senhas.
 2. Abrir uma comanda de teste identificada pela equipe. Adicionar um item do
    cardápio com preço conhecido e confirmar o pedido. Conferir item, preço,
    quantidade, estado do pedido e fila de impressão de cozinha/bar.
