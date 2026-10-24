@@ -1,8 +1,8 @@
 # Farelo OS na VPS Contabo
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 24/10/2026,
-a API usa `a13c6e6` e a Web usa `c21de37`. O atalho `/opt/farelo-os/current`
-aponta para `/opt/farelo-os/releases/a13c6e6`. Os segredos ficam somente na VPS em
+a API usa `0882bb6` e a Web usa `c21de37`. O atalho `/opt/farelo-os/current`
+aponta para `/opt/farelo-os/releases/0882bb6`. Os segredos ficam somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
 
@@ -58,6 +58,17 @@ com `pg_restore --list` (modo 600), e a imagem anterior da API está marcada
 como `farelo-os-api:latest` e recriar só `api` usando o Compose do release
 `c21de37`; depois verificar saúde e apontar `current` para `c21de37`. Não
 restaurar o banco para reverter somente esta mudança sem migração.
+
+`0882bb6` adicionou uma fábrica explícita para carregar o pacote oficial XSD
+montado somente leitura em `/opt/farelo-os/xsd/PL_010f_v1.04`, conferindo os
+cinco arquivos por SHA-256 antes da preparação fiscal. Não cria endpoint, bean
+nem envio de NFC-e. **917 testes backend** passaram em PostgreSQL descartável;
+API `UP`, `/login` HTTP 200 e arquivo XSD legível dentro do contêiner após
+o deploy somente da API. Backup anterior validado em
+`/opt/farelo-os/shared/backups/pre-fisc05-0882bb6-20261024.dump` (modo 600);
+imagem anterior marcada `farelo-os-api:pre-0882bb6`. Reversão: remarcar essa
+imagem como `latest`, recriar apenas `api` com o Compose de `a13c6e6` e
+apontar `current` para `a13c6e6` depois de conferir a saúde. Sem migração.
 
 Para reverter apenas a API `f522695` para `cfb6b05`, na VPS:
 
