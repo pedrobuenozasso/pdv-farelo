@@ -38,7 +38,8 @@ ticket isolado autoriza venda fiscal em produção.
    itens com opções são recusados pela montagem fiscal.
 2. **FISC-09d — Operação de homologação.** Integrar o documento pendente ao
    fluxo explícito, reforçar a unicidade no banco se outros caminhos de escrita
-   forem permitidos, instalar XSD oficial e custódia do A1 e provisionar
+   forem permitidos, montar e conectar o XSD oficial já preparado na VPS,
+   concluir a custódia do A1 e provisionar
    numeração inicial conferida antes de ligar o fluxo. O rollback e a
    concorrência já foram testados no PostgreSQL.
 3. **FISC-10 — Ensaio real de homologação.** Com classificação por item
@@ -56,3 +57,10 @@ mTLS só obteve WSDLs; nenhuma NFC-e foi transmitida.
 
 Os endpoints e ambientes de São Paulo devem ser conferidos novamente no dia
 do ensaio contra a [página oficial de WebServices da SEFAZ-SP](https://portal.fazenda.sp.gov.br/servicos/nfce/Paginas/WebServices.aspx).
+
+Em 24/10, o ZIP oficial `PL_010f_v1.04.zip` foi baixado do
+[Portal Nacional da NF-e](https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=BMPFMBoln3w%3D),
+teve seu SHA-256 conferido com a fixture existente e foi extraído em
+`/opt/farelo-os/shared/xsd/PL_010f_v1.04/` na VPS. Ainda falta montar esse
+diretório no contêiner e passar o XSD ao validador do fluxo explícito; não
+interpretar o download como liberação de emissão.

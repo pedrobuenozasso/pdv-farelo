@@ -11,7 +11,7 @@ Estado em 24/10/2026: o release `f522695` está na VPS privada. O caixa **não**
 
 ## Trabalho técnico que permanece com a equipe
 
-- Instalar e verificar um pacote XSD oficial, versionado, sem busca de esquema na internet em tempo de emissão.
+- Montar no contêiner e conectar ao validador o pacote XSD oficial 010f já baixado, verificado e extraído na VPS; reconfirmar sua vigência no dia do ensaio. Não buscar esquemas pela internet em tempo de emissão.
 - Concluir a custódia do A1, integrar a criação controlada de documentos pendentes ao fluxo explícito e provisionar a numeração com valores conferidos. A checagem do CNPJ do certificado, o rollback da preparação e a concorrência na criação do documento já passaram nos testes.
 - Executar homologação real, consulta de resposta incerta, rejeição e cancelamento; conferir XML, DANFE e QR Code.
 - Implementar contingência, guarda/backup externo de XML e procedimento de recuperação antes de habilitar emissão em produção.
