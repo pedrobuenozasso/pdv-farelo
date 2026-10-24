@@ -61,6 +61,10 @@ do ensaio contra a [página oficial de WebServices da SEFAZ-SP](https://portal.f
 Em 24/10, o ZIP oficial `PL_010f_v1.04.zip` foi baixado do
 [Portal Nacional da NF-e](https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=BMPFMBoln3w%3D),
 teve seu SHA-256 conferido com a fixture existente e foi extraído em
-`/opt/farelo-os/shared/xsd/PL_010f_v1.04/` na VPS. Ainda falta montar esse
-diretório no contêiner e passar o XSD ao validador do fluxo explícito; não
-interpretar o download como liberação de emissão.
+`/opt/farelo-os/shared/xsd/PL_010f_v1.04/` na VPS. A API tem montagem somente
+leitura em `/opt/farelo-os/xsd`, e a preparação explícita pode ser construída
+por `HomologationNfcePreparationService.usingMountedOfficialSchemas(...)`.
+Essa fábrica fixa a versão 010f v1.04 e confere SHA-256 dos cinco XSD necessários;
+pacote ausente ou alterado impede a construção do serviço. Isso não registra
+bean, endpoint ou transmissão, nem libera emissão. Confirmar a versão oficial
+vigente no dia do ensaio antes de usar o fluxo.

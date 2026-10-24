@@ -36,6 +36,14 @@ public final class HomologationNfcePreparationService {
                 Objects.requireNonNull(validator, "validator")::validate, manager);
     }
 
+    /** Explicit operator path: the mounted, pinned package must pass integrity checks first. */
+    public static HomologationNfcePreparationService usingMountedOfficialSchemas(
+            FiscalDocumentRepository documents, FiscalNumberReservationService numbering,
+            NfceCommandDraftService drafts, PlatformTransactionManager manager) {
+        return new HomologationNfcePreparationService(documents, numbering, drafts,
+                NfceOfficialSchemaPackage.loadMounted(), manager);
+    }
+
     // Package scope allows deterministic, credential-free unit tests.
     HomologationNfcePreparationService(FiscalDocumentRepository documents,
             FiscalNumberReservationService numbering, NfceCommandDraftService drafts,
