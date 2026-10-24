@@ -7,12 +7,16 @@ contagens/idade das filas outbox, impressão e fiscal. A saída contém apenas
 estados, contagens e idades; stderr de Docker, curl e PostgreSQL é suprimido
 para evitar revelar dados operacionais.
 
-Na VPS, executar manualmente como operador que pode ler `.env` e acessar
-Docker:
+Após incluir este diretório em um release da VPS, executar manualmente como
+operador que pode ler `.env` e acessar Docker:
 
 ```bash
 bash /opt/farelo-os/current/deploy/monitoring/check-private-vps.sh
 ```
+
+Em 24/10/2026, o script foi testado por uma cópia temporária em `/tmp` e
+removido em seguida; o release `0882bb6` ativo ainda não contém este
+diretório. O código está na branch `codex/admin-username-login`.
 
 Código de saída `0` indica que os limites passaram; `1` indica falha em
 algum check. Um `print_pending_eligible` acima de zero é informativo enquanto
