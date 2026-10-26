@@ -1,8 +1,8 @@
 # Farelo OS na VPS Contabo
 
-Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 24/10/2026,
-a API usa `0882bb6` e a Web usa `c21de37`. O atalho `/opt/farelo-os/current`
-aponta para `/opt/farelo-os/releases/0882bb6`. Os segredos ficam somente na VPS em
+Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 26/10/2026,
+a API usa `d058180` e a Web usa `c21de37`. O atalho `/opt/farelo-os/current`
+aponta para `/opt/farelo-os/releases/d058180`. Os segredos ficam somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
 
@@ -69,6 +69,22 @@ o deploy somente da API. Backup anterior validado em
 imagem anterior marcada `farelo-os-api:pre-0882bb6`. Reversão: remarcar essa
 imagem como `latest`, recriar apenas `api` com o Compose de `a13c6e6` e
 apontar `current` para `a13c6e6` depois de conferir a saúde. Sem migração.
+
+`d058180` expõe a criação idempotente de documento fiscal **pendente** para
+comanda fechada e paga, apenas para ADMIN/MANAGER. Corrige a precisão do
+horário de criação para manter a resposta estável entre chamadas. **925 testes
+backend** passaram, sem falhas/erros/pulados, em PostgreSQL descartável numa
+rede isolada, sem montar o socket Docker no contêiner de testes. O backup
+`/opt/farelo-os/shared/backups/pre-fisc07-d058180-20261026.dump` foi validado
+com `pg_restore --list` e está em modo 600. A imagem anterior da API está
+marcada `farelo-os-api:pre-d058180`; a Web e o banco não foram recriados. API
+`UP`, `/login` HTTP 200, checagem operacional manual OK, nenhuma pendência
+fiscal. O banco temporário de teste foi removido. **Não há reserva de número,
+uso do A1, XML ou transmissão de NFC-e por esta rota.** Para reverter só a API,
+remarcar `farelo-os-api:pre-d058180` como `farelo-os-api:latest`, recriar apenas
+`api` com o Compose de `0882bb6`, verificar saúde e apontar `current` para
+`0882bb6`. Não restaurar o banco para reverter apenas esta mudança sem
+migration.
 
 Para reverter apenas a API `f522695` para `cfb6b05`, na VPS:
 

@@ -5,8 +5,7 @@ Em 24/10/2026, os tickets verificáveis foram publicados em
 de cada ticket deve ser acompanhado **no GitHub**: fechar somente depois de
 validar os critérios de aceite e registrar commit/ensaio. Esta lista é um
 índice para outra conversa, não substitui o estado ao vivo dos issues. Em
-24/10, #5 e #14 foram fechados com teste e deploy; #16 tem implementação na
-branch, mas sem teste de integração/deploy; #20 tem checagem manual aprovada,
+26/10, #5, #14 e #16 foram fechados com teste e deploy; #20 tem checagem manual aprovada,
 mas ainda sem alertas.
 
 ## Operação primeiro
@@ -32,7 +31,7 @@ mas ainda sem alertas.
 13. [FISC-04: série e número](https://github.com/pedrobuenozasso/pdv-farelo/issues/13) — Farelo/contabilidade.
 14. [FISC-05: XSD no fluxo](https://github.com/pedrobuenozasso/pdv-farelo/issues/14) — engenharia.
 15. [FISC-06: custódia do A1](https://github.com/pedrobuenozasso/pdv-farelo/issues/15) — engenharia + inserção segura pelo proprietário.
-16. [FISC-07: comando de documento pendente](https://github.com/pedrobuenozasso/pdv-farelo/issues/16) — engenharia.
+16. [FISC-07: comando de documento pendente](https://github.com/pedrobuenozasso/pdv-farelo/issues/16) — concluído na API `d058180`; não transmite NFC-e.
 17. [FISC-08: homologação real](https://github.com/pedrobuenozasso/pdv-farelo/issues/17) — depende dos anteriores.
 18. [FISC-09: contingência e produção](https://github.com/pedrobuenozasso/pdv-farelo/issues/18) — depende da homologação.
 
