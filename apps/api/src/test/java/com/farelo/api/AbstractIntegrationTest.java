@@ -4,13 +4,20 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
+import java.net.URI;
+
 /**
- * Base class for tests that need a real PostgreSQL instance. Uses the
- * Testcontainers "singleton container" pattern: a single instance is
- * started once and shared by every subclass in the test run, and is
- * reaped automatically by Testcontainers when the JVM exits.
+ * Base class for tests that need a real PostgreSQL instance. By default it
+ * uses the Testcontainers "singleton container" pattern: one instance is
+ * shared by every subclass and reaped when the JVM exits.
  *
- * <p>Requires Docker to be available locally.
+ * <p>Requires Docker locally by default. When the local Docker daemon is
+ * unavailable, tests may use an explicitly isolated PostgreSQL database
+ * through a loopback-only tunnel by setting all three
+ * {@code FARELO_TEST_JDBC_URL}, {@code FARELO_TEST_DB_USER} and
+ * {@code FARELO_TEST_DB_PASSWORD}. The database must be named
+ * {@code farelo_integration_test}; this guard rejects ordinary production
+ * URLs. The external database must still be created solely for tests.
  *
  * <p><strong>{@code OutboxWorker}'s and {@code NotificationWorker}'s real
  * {@code @Scheduled} triggers are disabled for every test context by
@@ -50,17 +57,61 @@ import org.testcontainers.containers.PostgreSQLContainer;
  */
 public abstract class AbstractIntegrationTest {
 
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+    private static final String EXTERNAL_URL = System.getenv("FARELO_TEST_JDBC_URL");
+    private static final PostgreSQLContainer<?> POSTGRES;
 
     static {
-        POSTGRES.start();
+        if (EXTERNAL_URL == null) {
+            POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+            POSTGRES.start();
+        } else {
+            requireDisposableLoopbackDatabase(EXTERNAL_URL);
+            requirePresent("FARELO_TEST_DB_USER");
+            requirePresent("FARELO_TEST_DB_PASSWORD");
+            POSTGRES = null;
+        }
+    }
+
+    private static void requireDisposableLoopbackDatabase(String jdbcUrl) {
+        try {
+            if (!jdbcUrl.startsWith("jdbc:postgresql://")) {
+                throw new IllegalArgumentException("Not a PostgreSQL JDBC URL");
+            }
+            URI uri = URI.create(jdbcUrl.substring("jdbc:".length()));
+            String host = uri.getHost();
+            String database = uri.getPath();
+            if (!("127.0.0.1".equals(host) || "localhost".equals(host))
+                    || uri.getPort() <= 0 || uri.getPort() == 5432
+                    || !"/farelo_integration_test".equals(database)
+                    || uri.getQuery() != null || uri.getFragment() != null
+                    || uri.getUserInfo() != null) {
+                throw new IllegalArgumentException("Not an isolated loopback test database");
+            }
+        } catch (RuntimeException ex) {
+            throw new IllegalStateException("FARELO_TEST_JDBC_URL must target loopback, a non-default port, "
+                    + "and database farelo_integration_test", ex);
+        }
+    }
+
+    private static String requirePresent(String name) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(name + " must be set for the external test database");
+        }
+        return value;
     }
 
     @DynamicPropertySource
     static void overridePostgresProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", POSTGRES::getUsername);
-        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        if (POSTGRES == null) {
+            registry.add("spring.datasource.url", () -> EXTERNAL_URL);
+            registry.add("spring.datasource.username", () -> requirePresent("FARELO_TEST_DB_USER"));
+            registry.add("spring.datasource.password", () -> requirePresent("FARELO_TEST_DB_PASSWORD"));
+        } else {
+            registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+            registry.add("spring.datasource.username", POSTGRES::getUsername);
+            registry.add("spring.datasource.password", POSTGRES::getPassword);
+        }
         // See class javadoc — an hour is effectively "never" for a test
         // run, without literally disabling @EnableScheduling (which would
         // need a conditional wrapper around it in FareloApiApplication

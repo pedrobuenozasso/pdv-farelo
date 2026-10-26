@@ -61,6 +61,15 @@ mvn test
 Os testes de contexto e de integração (Flyway/Postgres) usam
 [Testcontainers](https://testcontainers.com/), que sobe um container
 PostgreSQL real e descarta a necessidade de um banco configurado manualmente
-— **é necessário ter o Docker rodando localmente** para executá-los. O
+— **é necessário ter o Docker rodando localmente** no modo padrão. O
 container é criado uma única vez por execução (padrão "singleton container")
 e reaproveitado entre as classes de teste.
+
+Se o Docker local estiver indisponível, a suíte aceita um PostgreSQL **novo e
+descartável** já iniciado, acessível apenas em loopback por uma porta diferente
+de 5432. Configure `FARELO_TEST_JDBC_URL` com a URL
+`jdbc:postgresql://127.0.0.1:<porta>/farelo_integration_test`, além de
+`FARELO_TEST_DB_USER` e `FARELO_TEST_DB_PASSWORD`, e execute `mvn test`.
+O código de teste recusa outros hosts, a porta padrão, outro nome de banco,
+parâmetros de URL e credenciais ausentes. Nunca encaminhe a porta do banco
+real para esse modo: os testes aplicam migrations e escrevem dados.
