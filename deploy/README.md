@@ -86,6 +86,17 @@ remarcar `farelo-os-api:pre-d058180` como `farelo-os-api:latest`, recriar apenas
 `0882bb6`. Não restaurar o banco para reverter apenas esta mudança sem
 migration.
 
+Em 26/10, `farelo-health.timer` foi instalado em `/etc/systemd/system` com o
+serviço `farelo-health.service`, ambos versionados em `deploy/monitoring/`.
+O timer chama o verificador somente leitura de `current` a cada cinco minutos;
+a execução inicial terminou com `Result=success`. Consulte
+`systemctl status farelo-health.timer` e
+`journalctl -u farelo-health.service -n 100 --no-pager` para ver resultados.
+O journal registra apenas estados, contagens e idades. **Não existe canal de
+alerta ao responsável ainda**: #20 permanece aberto. O teste de backup local
+falhará quando o dump mais recente passar de 26 horas; isso não substitui
+backup externo automático (#19).
+
 Para reverter apenas a API `f522695` para `cfb6b05`, na VPS:
 
 ```bash

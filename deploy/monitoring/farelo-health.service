@@ -1,0 +1,12 @@
+[Unit]
+Description=Farelo OS private health and queue check
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /opt/farelo-os/current/deploy/monitoring/check-private-vps.sh
+TimeoutStartSec=90
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal

@@ -5,8 +5,8 @@ Em 24/10/2026, os tickets verificáveis foram publicados em
 de cada ticket deve ser acompanhado **no GitHub**: fechar somente depois de
 validar os critérios de aceite e registrar commit/ensaio. Esta lista é um
 índice para outra conversa, não substitui o estado ao vivo dos issues. Em
-26/10, #5, #14 e #16 foram fechados com teste e deploy; #20 tem checagem manual aprovada,
-mas ainda sem alertas.
+26/10, #5, #14 e #16 foram fechados com teste e deploy; #20 tem checagem
+automática a cada cinco minutos, mas ainda sem canal de alertas ao responsável.
 
 ## Operação primeiro
 
@@ -38,7 +38,7 @@ mas ainda sem alertas.
 ## Continuidade e corte
 
 19. [OPS-01: backup externo e restauração](https://github.com/pedrobuenozasso/pdv-farelo/issues/19) — depende de destino/credenciais fora do Git.
-20. [OPS-02: monitoramento](https://github.com/pedrobuenozasso/pdv-farelo/issues/20).
+20. [OPS-02: monitoramento](https://github.com/pedrobuenozasso/pdv-farelo/issues/20) — timer instalado; alertas externos pendentes.
 21. [OPS-03: domínio/HTTPS](https://github.com/pedrobuenozasso/pdv-farelo/issues/21) — para acesso fora do túnel privado.
 22. [OPS-04: piloto e corte do Sischef](https://github.com/pedrobuenozasso/pdv-farelo/issues/22) — último marco.
 
