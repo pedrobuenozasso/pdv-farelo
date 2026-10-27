@@ -1,9 +1,8 @@
 # Farelo OS na VPS Contabo
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 26/10/2026,
-a API usa `d058180` e a Web usa `c21de37`. O atalho `/opt/farelo-os/current`
-aponta para `/opt/farelo-os/releases/9af697b` (rotina de backup local; imagens
-de aplicação não foram recriadas). Os segredos ficam somente na VPS em
+a API e a Web usam o release `aa35560`. O atalho `/opt/farelo-os/current`
+aponta para `/opt/farelo-os/releases/aa35560`. Os segredos ficam somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
 
@@ -24,6 +23,18 @@ manualmente. O acesso por chave sem senha foi validado com
 `ssh -o BatchMode=yes farelo-vps whoami`.
 
 ## Operação
+
+O release `aa35560` aplicou a migração Flyway V71 (unicidade de documento fiscal
+por comanda) após **926 testes backend** em PostgreSQL descartável e backup local
+validado. Antes da migração havia zero documentos e zero duplicatas; depois,
+V71 está marcada como sucesso, há 52 produtos, zero documentos, API `UP`, login
+HTTP 200 e monitor privado sem alerta. A Web sincroniza detalhes/saldo da
+comanda a cada 10 s. As imagens anteriores estão nas tags
+`farelo-os-api:pre-aa35560` e `farelo-os-web:pre-aa35560`. Reverter só imagens
+depois de V71 requer atenção: a migração permanece no banco e o código antigo
+deve ser conferido quanto à compatibilidade. Não restaurar o banco para uma
+reversão de interface. O Edge Agent atualizado ainda não foi instalado no
+Windows da cafeteria; sua impressão física depende do ensaio #8/#9.
 
 Na VPS, como root:
 
