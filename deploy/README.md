@@ -103,6 +103,9 @@ temporário com permissão `600`, confere o catálogo por `pg_restore --list` no
 contêiner PostgreSQL e só então publica o arquivo em
 `/opt/farelo-os/shared/backups/`. Dois ensaios reais passaram em 26/10,
 com timer `active`, API `UP`, `/login` HTTP 200 e `local_backup=OK` no monitor.
+Um desses dumps foi restaurado com `pg_restore --exit-on-error` em PostgreSQL
+16 descartável sem rede; o banco restaurado continha 52 produtos e o
+contêiner foi removido.
 Consultar `systemctl status farelo-backup-local.timer` e
 `journalctl -u farelo-backup-local.service -n 50 --no-pager`. O script não faz
 retenção nem criptografia externa. **Não considera o ticket #19 concluído**:
