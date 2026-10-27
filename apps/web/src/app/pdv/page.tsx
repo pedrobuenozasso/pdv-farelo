@@ -76,6 +76,7 @@ import { getTableOccupancy, listTables } from "@/lib/api/tables";
 import { cn } from "@/lib/cn";
 import { decodeUserId } from "@/lib/auth";
 import { parseMoneyCents } from "@/lib/money-input";
+import { freshPaymentAmount } from "@/lib/payment-after-order";
 import { useSession } from "@/lib/use-session";
 
 // Tom de atendente, diferente do texto amigável ao cliente em
@@ -321,11 +322,13 @@ function CommandDetail({
   // already CREATED/"confirmed" the instant it's placed, see
   // OrderStatus's own javadoc on the unused CONFIRMED value) that both
   // creates the order from AddItemPanel's draft and
-  // opens PaymentPanel's payment form in the same click. Plain counter
-  // bumped by AddItemPanel, compared against its previous value inside
-  // PaymentPanel on render — see that component's own comment for why a
-  // token instead of a boolean, and why that comparison isn't a useEffect.
-  const [paymentPromptToken, setPaymentPromptToken] = useState(0);
+  // opens PaymentPanel's payment form with the fresh server balance. The
+  // token distinguishes consecutive prompts; amount is fetched after the
+  // order commits, before the form opens.
+  const [paymentPrompt, setPaymentPrompt] = useState<{
+    token: number;
+    amount: number | null;
+  }>({ token: 0, amount: null });
 
   const commandQuery = useQuery({
     queryKey: ["pdv", "command", number],
@@ -528,9 +531,20 @@ function CommandDetail({
                   queryKey: ["pdv", "commands"],
                 });
               }}
-              onConfirmAndReceive={() =>
-                setPaymentPromptToken((token) => token + 1)
-              }
+              onConfirmAndReceive={() => {
+                void freshPaymentAmount(() =>
+                  queryClient.fetchQuery({
+                    queryKey: ["pdv", "command", number, "paymentBalance"],
+                    queryFn: () => getPaymentBalance(number),
+                    staleTime: 0,
+                  }),
+                ).then((amount) =>
+                  setPaymentPrompt(({ token }) => ({
+                    token: token + 1,
+                    amount,
+                  })),
+                );
+              }}
             />
           ) : null}
 
@@ -557,7 +571,7 @@ function CommandDetail({
             totalDiscount={totalDiscount}
             totalPaid={totalPaid}
             remaining={remaining}
-            openSignal={paymentPromptToken}
+            openSignal={paymentPrompt}
           />
         ) : null}
       </div>
@@ -1524,15 +1538,15 @@ function PaymentPanel({
   totalDiscount: number;
   totalPaid: number;
   remaining: number;
-  // FARELO-320: "Confirmar e Receber" — any change to this number (from
-  // CommandDetail's paymentPromptToken) opens the payment form, same as
+  // FARELO-320: "Confirmar e Receber" — any change to this token (from
+  // CommandDetail's paymentPrompt) opens the payment form, same as
   // clicking "Registrar pagamento" below. A counter, not a boolean: a
   // boolean flipped true->true (two "Confirmar e Receber" clicks in a
   // row while the form is already open, e.g. after closing it manually
   // and re-triggering) wouldn't produce a detectable change; a
   // monotonically increasing counter always does — see the render-time
   // comparison below for why this isn't a useEffect.
-  openSignal: number;
+  openSignal: { token: number; amount: number | null };
 }) {
   const queryClient = useQueryClient();
   const session = useSession();
@@ -1685,14 +1699,16 @@ function PaymentPanel({
   // changes, not on every render". openSignal starts at 0 (no prompt
   // yet) and only increments from CommandDetail, so the first render
   // never matches this branch.
-  const [seenOpenSignal, setSeenOpenSignal] = useState(openSignal);
+  const [seenOpenSignal, setSeenOpenSignal] = useState(openSignal.token);
+  const [showBalanceWarning, setShowBalanceWarning] = useState(false);
   useEffect(() => {
     paymentIntent.current = null;
-  }, [openSignal]);
-  if (openSignal !== seenOpenSignal) {
-    setSeenOpenSignal(openSignal);
+  }, [openSignal.token]);
+  if (openSignal.token !== seenOpenSignal) {
+    setSeenOpenSignal(openSignal.token);
+    setShowBalanceWarning(openSignal.amount === null);
     reset({
-      amount: remaining > 0 ? String(remaining) : "",
+      amount: openSignal.amount === null ? "" : String(openSignal.amount),
       method: "PIX",
       amountReceived: "",
       institutionCnpj: "",
@@ -1817,6 +1833,13 @@ function PaymentPanel({
         <div className="border-line bg-primary-soft text-primary-dark rounded-2xl border p-3 text-center text-sm font-bold">
           Troco a devolver: {currencyFormatter.format(lastChangeGiven)}
         </div>
+      ) : null}
+
+      {showBalanceWarning && formOpen ? (
+        <p role="alert" className="text-red text-sm">
+          Pedido confirmado, mas não foi possível atualizar o saldo. Confira o
+          valor antes de receber.
+        </p>
       ) : null}
 
       {formOpen ? (
@@ -2044,6 +2067,7 @@ function PaymentPanel({
               variant="outline"
               onClick={() => {
                 paymentIntent.current = null;
+                setShowBalanceWarning(false);
                 setFormOpen(false);
               }}
             >
@@ -2066,6 +2090,7 @@ function PaymentPanel({
                 amountReceived: "",
               });
               setLastChangeGiven(null);
+              setShowBalanceWarning(false);
               setFormOpen(true);
             }}
           >
