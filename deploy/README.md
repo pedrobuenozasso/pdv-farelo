@@ -1,8 +1,8 @@
 # Farelo OS na VPS Contabo
 
-Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 26/10/2026,
-a API e a Web usam o release `aa35560`. O atalho `/opt/farelo-os/current`
-aponta para `/opt/farelo-os/releases/aa35560`. Os segredos ficam somente na VPS em
+Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 27/10/2026,
+a API e a Web usam o release `9e83fdb`. O atalho `/opt/farelo-os/current`
+aponta para `/opt/farelo-os/releases/9e83fdb`. Os segredos ficam somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
 
@@ -23,6 +23,17 @@ manualmente. O acesso por chave sem senha foi validado com
 `ssh -o BatchMode=yes farelo-vps whoami`.
 
 ## Operação
+
+O release `9e83fdb` acrescenta a ponte fiscal explícita entre documento
+pendente e preparação de homologação, ainda sem bean, endpoint ou envio. Os
+**928 testes backend** passaram em PostgreSQL descartável isolado. Na Web,
+“Confirmar e receber” espera o saldo atualizado após criar o pedido; falha da
+consulta deixa o valor vazio e avisa o operador. As imagens anteriores estão
+marcadas `farelo-os-api:pre-9e83fdb` e `farelo-os-web:pre-9e83fdb`; o backup
+pré-deploy passou pela validação do `pg_restore --list`. Após o deploy, API
+`UP`, login HTTP 200, Flyway V71 `success`, 52 produtos, zero documentos
+fiscais e monitor privado sem alerta. O ensaio presencial do pagamento e da
+impressão ainda falta.
 
 O release `aa35560` aplicou a migração Flyway V71 (unicidade de documento fiscal
 por comanda) após **926 testes backend** em PostgreSQL descartável e backup local

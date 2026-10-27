@@ -36,11 +36,12 @@ ticket isolado autoriza venda fiscal em produção.
 1. **FISC-08h — Opções vendidas.** Definir o tratamento fiscal dos adicionais
    e variantes com base no preço final e na classificação aprovada; até lá,
    itens com opções são recusados pela montagem fiscal.
-2. **FISC-09d — Operação de homologação.** Integrar o documento pendente ao
-   fluxo explícito, reforçar a unicidade no banco se outros caminhos de escrita
-   forem permitidos, montar e conectar o XSD oficial já preparado na VPS,
-   concluir a custódia do A1 e provisionar
-   numeração inicial conferida antes de ligar o fluxo. O rollback e a
+2. **FISC-09d — Operação de homologação.** A ponte explícita entre documento
+   pendente e preparação de homologação está em `1aa6224`; a unicidade por
+   comanda está no banco pela Flyway V71 (`eed4353`). O XSD oficial está
+   montado e conectado ao preparador explícito. Ainda falta concluir a
+   custódia do A1 e provisionar numeração inicial conferida antes de ligar o
+   fluxo. O rollback e a
    concorrência já foram testados no PostgreSQL.
 3. **FISC-10 — Ensaio real de homologação.** Com classificação por item
    revisada, dados do emitente e A1 protegidos, obter autorização e ensaiar
