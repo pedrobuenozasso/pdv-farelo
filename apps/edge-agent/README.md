@@ -146,10 +146,13 @@ o diálogo do navegador não participa. Se `WINDOWS_NAME` e `HOST/PORT`
 estiverem configurados para a mesma estação, o job falha sem escolher um
 destino arbitrário. Uma fila específica tem prioridade sobre o fallback.
 
-No PowerShell do PC da cafeteria, depois de instalar e testar o driver Epson:
+Com o Edge Agent **parado** (não execute `npm start` ainda), no PowerShell do
+PC da cafeteria, depois de instalar o driver Epson:
 
 ```powershell
 Get-Printer | Select-Object Name, DriverName, PortName
+# Opcional: inspecione jobs antigos já na fila; não os limpe automaticamente.
+Get-PrintJob -PrinterName 'NOME EXATO DA FILA EPSON'
 $env:FARELO_PRINTER_DEFAULT_WINDOWS_NAME = 'NOME EXATO DA FILA EPSON'
 cd apps/edge-agent
 npm ci
@@ -157,7 +160,8 @@ npm run print:test
 ```
 
 `print:test` envia **um ticket marcado TESTE** com o mesmo formatador gráfico
-do fluxo real, sem navegador, API ou chave de dispositivo. Use-o apenas quando
+do fluxo real, sem navegador, API, chave de dispositivo ou consumo de jobs
+antigos do backend. Use-o apenas quando
 a impressora estiver pronta; confira impressão, corte e largura no papel.
 Depois configure `FARELO_PRINT_DEVICE_KEY` de forma privada e inicie o agente
 (`npm run build; npm start`) usando HTTPS ou o túnel SSH privado para a API.
