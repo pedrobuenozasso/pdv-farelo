@@ -2,7 +2,8 @@
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 26/10/2026,
 a API usa `d058180` e a Web usa `c21de37`. O atalho `/opt/farelo-os/current`
-aponta para `/opt/farelo-os/releases/d058180`. Os segredos ficam somente na VPS em
+aponta para `/opt/farelo-os/releases/9af697b` (rotina de backup local; imagens
+de aplicação não foram recriadas). Os segredos ficam somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
 
@@ -94,8 +95,18 @@ a execução inicial terminou com `Result=success`. Consulte
 `journalctl -u farelo-health.service -n 100 --no-pager` para ver resultados.
 O journal registra apenas estados, contagens e idades. **Não existe canal de
 alerta ao responsável ainda**: #20 permanece aberto. O teste de backup local
-falhará quando o dump mais recente passar de 26 horas; isso não substitui
-backup externo automático (#19).
+falhará quando o dump mais recente passar de 26 horas.
+
+`9af697b` acrescentou `deploy/backup-local.sh` e timer diário
+`farelo-backup-local.timer` (subtarefa #23). O script escreve um `pg_dump -Fc`
+temporário com permissão `600`, confere o catálogo por `pg_restore --list` no
+contêiner PostgreSQL e só então publica o arquivo em
+`/opt/farelo-os/shared/backups/`. Dois ensaios reais passaram em 26/10,
+com timer `active`, API `UP`, `/login` HTTP 200 e `local_backup=OK` no monitor.
+Consultar `systemctl status farelo-backup-local.timer` e
+`journalctl -u farelo-backup-local.service -n 50 --no-pager`. O script não faz
+retenção nem criptografia externa. **Não considera o ticket #19 concluído**:
+configurar destino remoto cifrado, restauração isolada, retenção e alerta.
 
 Para reverter apenas a API `f522695` para `cfb6b05`, na VPS:
 
