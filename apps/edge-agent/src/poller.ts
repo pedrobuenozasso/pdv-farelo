@@ -40,7 +40,7 @@ import {
   formatPrintJobLog,
   type PrintJob,
 } from "./printJobsClient.js";
-import { resolvePrinterAddress as resolvePrinterAddressImpl } from "./config.js";
+import { resolvePrinterTarget as resolvePrinterTargetImpl } from "./config.js";
 // ADR-003: modo gráfico (imagem renderizada + comando ESC/POS de imagem
 // raster) substituiu o modo texto de `escpos.ts` como formatador padrão —
 // ver `ticketImage.ts` para o porquê. `escpos.ts` continua no repositório
@@ -50,6 +50,7 @@ import {
   buildCommandCheckEscPosImageTicket as buildCommandCheckEscPosTicketImpl,
 } from "./ticketImage.js";
 import { printOverTcp as printOverTcpImpl } from "./printerTransport.js";
+import { printOverWindowsSpooler as printOverWindowsSpoolerImpl } from "./windowsSpooler.js";
 
 // FARELO-210/211: "estação" fictícia usada para resolver o endereço de
 // impressora de uma conferência (COMMAND_CHECK) através do mesmo mecanismo
@@ -72,20 +73,22 @@ export type PollerDeps = {
   fetchPendingPrintJobs: typeof fetchPendingPrintJobsImpl;
   reportPrintJobPrinted: typeof reportPrintJobPrintedImpl;
   reportPrintJobFailed: typeof reportPrintJobFailedImpl;
-  resolvePrinterAddress: typeof resolvePrinterAddressImpl;
+  resolvePrinterTarget: typeof resolvePrinterTargetImpl;
   buildEscPosTicket: typeof buildEscPosTicketImpl;
   buildCommandCheckEscPosTicket: typeof buildCommandCheckEscPosTicketImpl;
   printOverTcp: typeof printOverTcpImpl;
+  printOverWindowsSpooler: typeof printOverWindowsSpoolerImpl;
 };
 
 const defaultDeps: PollerDeps = {
   fetchPendingPrintJobs: fetchPendingPrintJobsImpl,
   reportPrintJobPrinted: reportPrintJobPrintedImpl,
   reportPrintJobFailed: reportPrintJobFailedImpl,
-  resolvePrinterAddress: resolvePrinterAddressImpl,
+  resolvePrinterTarget: resolvePrinterTargetImpl,
   buildEscPosTicket: buildEscPosTicketImpl,
   buildCommandCheckEscPosTicket: buildCommandCheckEscPosTicketImpl,
   printOverTcp: printOverTcpImpl,
+  printOverWindowsSpooler: printOverWindowsSpoolerImpl,
 };
 
 /**
@@ -114,12 +117,12 @@ async function printJob(
       job.type === "COMMAND_CHECK"
         ? CONFERENCE_STATION_KEY
         : job.content!.productionStation;
-    const address = deps.resolvePrinterAddress(station);
-    if (!address) {
+    const target = deps.resolvePrinterTarget(station);
+    if (!target) {
       throw new Error(
-        `Nenhum endereço de impressora configurado para a estação ` +
+        `Nenhuma impressora configurada para a estação ` +
           `"${station ?? "sem estação"}" (nem fallback ` +
-          `FARELO_PRINTER_DEFAULT_HOST/FARELO_PRINTER_DEFAULT_PORT).`,
+          `FARELO_PRINTER_DEFAULT_*).`,
       );
     }
 
@@ -127,11 +130,15 @@ async function printJob(
       job.type === "COMMAND_CHECK"
         ? deps.buildCommandCheckEscPosTicket(job.commandCheckContent!)
         : deps.buildEscPosTicket(job.content!);
-    await deps.printOverTcp(address.host, address.port, ticket);
+    if (target.transport === "windows-spooler") {
+      await deps.printOverWindowsSpooler(target.printerName, ticket);
+    } else {
+      await deps.printOverTcp(target.host, target.port, ticket);
+    }
 
     await deps.reportPrintJobPrinted(apiBaseUrl, job.id, deviceKey);
     console.log(
-      `  → PrintJob ${job.id} impresso em ${address.host}:${address.port} ` +
+      `  → PrintJob ${job.id} entregue a ${target.transport === "tcp" ? `${target.host}:${target.port}` : `fila ${target.printerName}`} ` +
         `e reportado como PRINTED.`,
     );
   } catch (error) {

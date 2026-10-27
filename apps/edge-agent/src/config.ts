@@ -69,6 +69,10 @@ export type PrinterAddress = {
   port: number;
 };
 
+export type PrinterTarget =
+  | ({ transport: "tcp" } & PrinterAddress)
+  | { transport: "windows-spooler"; printerName: string };
+
 const DEFAULT_API_BASE_URL = "http://localhost:8080";
 const DEFAULT_POLL_INTERVAL_MS = 5000;
 
@@ -162,4 +166,33 @@ export function resolvePrinterAddress(
   }
 
   return readPrinterAddress(env, DEFAULT_STATION_ENV_KEY);
+}
+
+/** Resolve uma fila USB instalada no Windows ou o destino TCP existente. */
+export function resolvePrinterTarget(
+  station: string | null,
+  env: NodeJS.ProcessEnv = process.env,
+): PrinterTarget | null {
+  const keys =
+    station === null
+      ? [DEFAULT_STATION_ENV_KEY]
+      : [normalizeStationEnvKey(station), DEFAULT_STATION_ENV_KEY];
+
+  for (const key of keys) {
+    const prefix = `${PRINTER_ENV_PREFIX}${key}`;
+    const printerName = env[`${prefix}_WINDOWS_NAME`]?.trim();
+    const address = readPrinterAddress(env, key);
+    if (printerName && address) {
+      throw new Error(
+        `Configuração ambígua para ${prefix}: escolha WINDOWS_NAME ou HOST/PORT.`,
+      );
+    }
+    if (printerName) {
+      return { transport: "windows-spooler", printerName };
+    }
+    if (address) {
+      return { transport: "tcp", ...address };
+    }
+  }
+  return null;
 }

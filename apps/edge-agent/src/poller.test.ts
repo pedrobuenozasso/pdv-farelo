@@ -75,6 +75,33 @@ function neverCalled(label: string): (...args: unknown[]) => never {
 }
 
 describe("pollOnce", () => {
+  it("entrega o ticket à fila Windows USB antes de reportar PRINTED", async () => {
+    const events: string[] = [];
+    const deps: PollerDeps = {
+      fetchPendingPrintJobs: async () => [makeJob()],
+      resolvePrinterTarget: () => ({
+        transport: "windows-spooler",
+        printerName: "EPSON TM-T20X",
+      }),
+      buildEscPosTicket: () => Buffer.from([0x1b, 0x40, 0x00, 0xff]),
+      buildCommandCheckEscPosTicket: neverCalled(
+        "buildCommandCheckEscPosTicket",
+      ),
+      printOverTcp: neverCalled("printOverTcp"),
+      printOverWindowsSpooler: async (name, bytes) => {
+        assert.equal(name, "EPSON TM-T20X");
+        assert.deepEqual(bytes, Buffer.from([0x1b, 0x40, 0x00, 0xff]));
+        events.push("spooled");
+      },
+      reportPrintJobPrinted: async () => {
+        events.push("printed");
+      },
+      reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
+    };
+    await pollOnce("http://localhost:8080", deviceKey, deps);
+    assert.deepEqual(events, ["spooled", "printed"]);
+  });
+
   it("imprime via TCP e reporta PRINTED quando a impressão é bem-sucedida", async () => {
     const job = makeJob();
     const printedCalls: string[] = [];
@@ -87,11 +114,16 @@ describe("pollOnce", () => {
         passedKeys.push(key);
         return [job];
       },
-      resolvePrinterAddress: () => ({ host: "192.168.0.10", port: 9100 }),
+      resolvePrinterTarget: () => ({
+        transport: "tcp",
+        host: "192.168.0.10",
+        port: 9100,
+      }),
       buildEscPosTicket: () => Buffer.from("ticket-bytes"),
       buildCommandCheckEscPosTicket: neverCalled(
         "buildCommandCheckEscPosTicket",
       ),
+      printOverWindowsSpooler: neverCalled("printOverWindowsSpooler"),
       printOverTcp: async (host, port, ticket) => {
         printOverTcpCalls.push({ host, port, ticket });
       },
@@ -122,11 +154,12 @@ describe("pollOnce", () => {
         passedKeys.push(key);
         return [job];
       },
-      resolvePrinterAddress: () => null,
+      resolvePrinterTarget: () => null,
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
       buildCommandCheckEscPosTicket: neverCalled(
         "buildCommandCheckEscPosTicket",
       ),
+      printOverWindowsSpooler: neverCalled("printOverWindowsSpooler"),
       printOverTcp: neverCalled("printOverTcp"),
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
       reportPrintJobFailed: async (_apiBaseUrl, jobId, key) => {
@@ -147,11 +180,16 @@ describe("pollOnce", () => {
 
     const deps: PollerDeps = {
       fetchPendingPrintJobs: async () => [job],
-      resolvePrinterAddress: () => ({ host: "192.168.0.10", port: 9100 }),
+      resolvePrinterTarget: () => ({
+        transport: "tcp",
+        host: "192.168.0.10",
+        port: 9100,
+      }),
       buildEscPosTicket: () => Buffer.from("ticket-bytes"),
       buildCommandCheckEscPosTicket: neverCalled(
         "buildCommandCheckEscPosTicket",
       ),
+      printOverWindowsSpooler: neverCalled("printOverWindowsSpooler"),
       printOverTcp: async () => {
         throw new Error("ECONNREFUSED (impressora offline, simulado)");
       },
@@ -171,11 +209,12 @@ describe("pollOnce", () => {
 
     const deps: PollerDeps = {
       fetchPendingPrintJobs: async () => [job],
-      resolvePrinterAddress: () => null,
+      resolvePrinterTarget: () => null,
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
       buildCommandCheckEscPosTicket: neverCalled(
         "buildCommandCheckEscPosTicket",
       ),
+      printOverWindowsSpooler: neverCalled("printOverWindowsSpooler"),
       printOverTcp: neverCalled("printOverTcp"),
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
       reportPrintJobFailed: async () => {
@@ -192,11 +231,12 @@ describe("pollOnce", () => {
       fetchPendingPrintJobs: async () => {
         throw new Error("rede indisponível, simulado");
       },
-      resolvePrinterAddress: neverCalled("resolvePrinterAddress"),
+      resolvePrinterTarget: neverCalled("resolvePrinterAddress"),
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
       buildCommandCheckEscPosTicket: neverCalled(
         "buildCommandCheckEscPosTicket",
       ),
+      printOverWindowsSpooler: neverCalled("printOverWindowsSpooler"),
       printOverTcp: neverCalled("printOverTcp"),
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
       reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
@@ -234,12 +274,15 @@ describe("pollOnce", () => {
 
     const deps: PollerDeps = {
       fetchPendingPrintJobs: async () => [okJob, failJob],
-      resolvePrinterAddress: (station) =>
-        station === "BAR" ? { host: "192.168.0.10", port: 9100 } : null,
+      resolvePrinterTarget: (station) =>
+        station === "BAR"
+          ? { transport: "tcp", host: "192.168.0.10", port: 9100 }
+          : null,
       buildEscPosTicket: () => Buffer.from("ticket-bytes"),
       buildCommandCheckEscPosTicket: neverCalled(
         "buildCommandCheckEscPosTicket",
       ),
+      printOverWindowsSpooler: neverCalled("printOverWindowsSpooler"),
       printOverTcp: async () => {},
       reportPrintJobPrinted: async (_apiBaseUrl, jobId) => {
         printedCalls.push(jobId);
@@ -268,13 +311,14 @@ describe("pollOnce", () => {
 
     const deps: PollerDeps = {
       fetchPendingPrintJobs: async () => [job],
-      resolvePrinterAddress: (station) => {
+      resolvePrinterTarget: (station) => {
         resolveCalls.push(station);
-        return { host: "192.168.0.20", port: 9100 };
+        return { transport: "tcp", host: "192.168.0.20", port: 9100 };
       },
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
       buildCommandCheckEscPosTicket: () =>
         Buffer.from("conference-ticket-bytes"),
+      printOverWindowsSpooler: neverCalled("printOverWindowsSpooler"),
       printOverTcp: async (host, port, ticket) => {
         printOverTcpCalls.push({ host, port, ticket });
       },

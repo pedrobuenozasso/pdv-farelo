@@ -134,6 +134,40 @@ export FARELO_PRINTER_DEFAULT_HOST=192.168.0.50
 export FARELO_PRINTER_DEFAULT_PORT=9100
 ```
 
+### Epson USB no Windows (PRINT-01)
+
+O Edge Agent agora aceita uma fila de impressão **instalada no próprio Windows**:
+`FARELO_PRINTER_<ESTAÇÃO>_WINDOWS_NAME` ou
+`FARELO_PRINTER_DEFAULT_WINDOWS_NAME`. O valor é o nome exato mostrado por
+`Get-Printer`, não o modelo da caixa nem a porta USB. Para a Epson TM-T20X,
+use uma fila cujo driver aceite comandos ESC/POS **RAW**. O agente entrega
+os mesmos bytes gráficos ESC/POS diretamente ao spooler via `WritePrinter`;
+o diálogo do navegador não participa. Se `WINDOWS_NAME` e `HOST/PORT`
+estiverem configurados para a mesma estação, o job falha sem escolher um
+destino arbitrário. Uma fila específica tem prioridade sobre o fallback.
+
+No PowerShell do PC da cafeteria, depois de instalar e testar o driver Epson:
+
+```powershell
+Get-Printer | Select-Object Name, DriverName, PortName
+$env:FARELO_PRINTER_DEFAULT_WINDOWS_NAME = 'NOME EXATO DA FILA EPSON'
+cd apps/edge-agent
+npm ci
+npm run print:test
+```
+
+`print:test` envia **um ticket marcado TESTE** com o mesmo formatador gráfico
+do fluxo real, sem navegador, API ou chave de dispositivo. Use-o apenas quando
+a impressora estiver pronta; confira impressão, corte e largura no papel.
+Depois configure `FARELO_PRINT_DEVICE_KEY` de forma privada e inicie o agente
+(`npm run build; npm start`) usando HTTPS ou o túnel SSH privado para a API.
+`PRINTED` indica aceitação dos bytes pelo spooler, não prova física de papel
+impresso. É preciso testar também desconexão USB, reinício do agente/Windows
+e tratamento de jobs pendentes antes de encerrar o ticket.
+
+Referências técnicas: [Epson TM-T20X Technical Reference Guide](https://download4.epson.biz/sec_pubs/bs/pdf/TM-T20X_trg_en_revF.pdf)
+e [Microsoft RAW data type](https://learn.microsoft.com/windows-hardware/drivers/print/raw-data-type).
+
 ## Rodando localmente
 
 Pré-requisito: Node.js 20+, backend (`apps/api`) rodando (nativamente ou via

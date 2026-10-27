@@ -8,7 +8,11 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { loadConfig, resolvePrinterAddress } from "./config.js";
+import {
+  loadConfig,
+  resolvePrinterAddress,
+  resolvePrinterTarget,
+} from "./config.js";
 
 describe("loadConfig device key", () => {
   it("exige uma chave de dispositivo com pelo menos 32 bytes", () => {
@@ -20,6 +24,37 @@ describe("loadConfig device key", () => {
     assert.equal(
       loadConfig({ FARELO_PRINT_DEVICE_KEY: "a".repeat(32) }).deviceKey,
       "a".repeat(32),
+    );
+  });
+});
+
+describe("resolvePrinterTarget", () => {
+  it("seleciona a fila USB por estação e preserva o fallback TCP", () => {
+    const env = {
+      FARELO_PRINTER_BAR_WINDOWS_NAME: "EPSON TM-T20X Receipt",
+      FARELO_PRINTER_DEFAULT_HOST: "192.168.0.99",
+      FARELO_PRINTER_DEFAULT_PORT: "9100",
+    };
+    assert.deepEqual(resolvePrinterTarget("BAR", env), {
+      transport: "windows-spooler",
+      printerName: "EPSON TM-T20X Receipt",
+    });
+    assert.deepEqual(resolvePrinterTarget("KITCHEN", env), {
+      transport: "tcp",
+      host: "192.168.0.99",
+      port: 9100,
+    });
+  });
+
+  it("rejeita configuração ambígua em vez de escolher uma impressora errada", () => {
+    assert.throws(
+      () =>
+        resolvePrinterTarget("BAR", {
+          FARELO_PRINTER_BAR_WINDOWS_NAME: "EPSON",
+          FARELO_PRINTER_BAR_HOST: "192.168.0.10",
+          FARELO_PRINTER_BAR_PORT: "9100",
+        }),
+      /ambígua/,
     );
   });
 });
