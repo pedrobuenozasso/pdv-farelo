@@ -12,7 +12,7 @@ if systemd-run --quiet --wait --collect \
     -p LimitCORE=0 \
     -p "LoadCredentialEncrypted=a1.p12.cred:$dir/a1.p12.cred" \
     -p "LoadCredentialEncrypted=a1-password.cred:$dir/a1-password.cred" \
-    /bin/sh -c 'openssl pkcs12 -in "$CREDENTIALS_DIRECTORY/a1.p12.cred" \
+    /bin/sh -c 'openssl pkcs12 -legacy -in "$CREDENTIALS_DIRECTORY/a1.p12.cred" \
       -passin "file:$CREDENTIALS_DIRECTORY/a1-password.cred" -noout \
       >/dev/null 2>&1' >/dev/null 2>&1; then
   printf 'a1_credentials=OK\n'

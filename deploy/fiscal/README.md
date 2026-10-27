@@ -26,6 +26,9 @@ Esse segundo script também recusa substituição e guarda somente
 `bash /opt/farelo-os/current/deploy/fiscal/check-a1-credentials.sh` para
 confirmar A1 e senha por um processo transitório. Não mostrar o conteúdo dos
 arquivos nem executar `systemd-creds decrypt` com saída no terminal.
+O P12 atual usa RC2 internamente; por isso o verificador usa a opção
+[`-legacy`](https://docs.openssl.org/3.5/man1/openssl-pkcs12/) do OpenSSL 3.
+Isso não altera a proteção externa da credencial cifrada pelo systemd.
 
 O PDV e seus contêineres **não** montam essas credenciais. Quando a emissão
 fiscal estiver aprovada, um serviço fiscal separado deverá receber as duas
