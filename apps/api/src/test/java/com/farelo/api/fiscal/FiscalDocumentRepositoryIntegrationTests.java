@@ -200,13 +200,13 @@ class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
     @Test
     void savesEveryFiscalDocumentStatus() {
         Command command = command(SEEDED_COMMAND_NUMBER);
+        FiscalDocument document = fiscalDocumentRepository.saveAndFlush(new FiscalDocument(command));
 
         for (FiscalDocumentStatus status : FiscalDocumentStatus.values()) {
-            FiscalDocument document = new FiscalDocument(command);
             document.setStatus(status);
-            FiscalDocument saved = fiscalDocumentRepository.saveAndFlush(document);
+            fiscalDocumentRepository.saveAndFlush(document);
 
-            assertThat(fiscalDocumentRepository.findById(saved.getId()).orElseThrow().getStatus())
+            assertThat(fiscalDocumentRepository.findById(document.getId()).orElseThrow().getStatus())
                     .isEqualTo(status);
         }
     }
