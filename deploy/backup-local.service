@@ -1,0 +1,14 @@
+[Unit]
+Description=Farelo OS interim local PostgreSQL backup
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/bash /opt/farelo-os/current/deploy/backup-local.sh
+TimeoutStartSec=10min
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal

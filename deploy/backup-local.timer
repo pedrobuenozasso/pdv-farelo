@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily interim local PostgreSQL backup for Farelo OS
+
+[Timer]
+OnCalendar=*-*-* 05:00:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+Unit=farelo-backup-local.service
+
+[Install]
+WantedBy=timers.target
