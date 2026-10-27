@@ -35,6 +35,7 @@ pnpm-debug.log*
 *.p12
 *.P12
 *.pkcs12
+*.cred
 *.pem
 *.PEM
 *.key
