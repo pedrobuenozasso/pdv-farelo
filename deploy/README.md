@@ -1,9 +1,8 @@
 # Farelo OS na VPS Contabo
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 27/10/2026,
-a API e a Web usam as imagens do código `9e83fdb`. O atalho
-`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/90cd98a`, que
-acrescentou scripts de custódia sem recriar contêineres. Os segredos ficam
+a API usa a imagem do código `9e83fdb` e a Web a de `7320307`. O atalho
+`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/7320307`. Os segredos ficam
 somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
@@ -37,10 +36,22 @@ pré-deploy passou pela validação do `pg_restore --list`. Após o deploy, API
 fiscais e monitor privado sem alerta. O ensaio presencial do pagamento e da
 impressão ainda falta.
 
-O A1 foi instalado em 27/10 somente como credencial cifrada do systemd,
-separada dos contêineres. O procedimento, teste e limite de segurança estão
-em [`deploy/fiscal/README.md`](fiscal/README.md). A senha ainda precisa ser
-cadastrada interativamente no Mac; o PDV continua operando sem depender dela.
+O A1 e sua senha foram instalados em 27/10 como credenciais cifradas do
+systemd, separadas dos contêineres. O Java 21 abriu o A1 real em processo
+transitório sem rede; o PDV continua operando sem essas credenciais. O
+procedimento, teste e limite de segurança estão em
+[`deploy/fiscal/README.md`](fiscal/README.md).
+
+`7320307` atualizou somente a Web com o cruzamento de NCM dos 52 produtos em
+`/admin/fiscal-review`. Há 44 NCMs candidatos históricos e 8 itens sem NCM
+associado; a tela é apenas leitura. Build de produção, lint, TypeScript e
+formatação passaram; o UUID de cada item da revisão foi conferido com os 52
+produtos do banco. Após a atualização: `/login` HTTP 200, API e banco saudáveis,
+monitor privado sem alerta. A imagem Web anterior permanece como
+`farelo-os-web:pre-7320307`. Para reverter somente a Web, remarcar essa imagem
+como `farelo-os-web:latest`, recriar somente `web` com o Compose do release
+`ac06b6c`, verificar o login e voltar `current` para `ac06b6c`. Não restaurar o
+banco para reverter esta alteração de interface.
 
 O release `aa35560` aplicou a migração Flyway V71 (unicidade de documento fiscal
 por comanda) após **926 testes backend** em PostgreSQL descartável e backup local
