@@ -29,6 +29,11 @@ arquivos nem executar `systemd-creds decrypt` com saída no terminal.
 O P12 atual usa RC2 internamente; por isso o verificador usa a opção
 [`-legacy`](https://docs.openssl.org/3.5/man1/openssl-pkcs12/) do OpenSSL 3.
 Isso não altera a proteção externa da credencial cifrada pelo systemd.
+`SystemdA1CredentialLoader` é o adaptador Java explícito para um processo fiscal
+transitório. Ele lê os arquivos temporários do systemd, limita a senha a 1024
+bytes, recusa entradas malformadas e limpa os buffers após carregar o A1. Não é
+um bean da API nem inicia emissão. Em 27/10, a leitura do A1 real pelo Java 21
+foi verificada num contêiner temporário sem rede (`a1_java_load=OK`).
 
 O PDV e seus contêineres **não** montam essas credenciais. Quando a emissão
 fiscal estiver aprovada, um serviço fiscal separado deverá receber as duas

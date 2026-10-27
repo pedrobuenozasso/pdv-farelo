@@ -40,9 +40,9 @@ ticket isolado autoriza venda fiscal em produção.
    pendente e preparação de homologação está em `1aa6224`; a unicidade por
    comanda está no banco pela Flyway V71 (`eed4353`). O XSD oficial está
    montado e conectado ao preparador explícito. Ainda falta concluir a
-   custódia da senha do A1 e provisionar numeração inicial conferida antes de
-   ligar o fluxo. O A1 cifrado já está na VPS, mas ainda não está montado na
-   API. O rollback e a
+   numeração inicial conferida antes de ligar o fluxo. O A1 e sua senha já
+   estão cifrados na VPS e passaram na validação Java transitória; ainda não
+   estão montados na API. O rollback e a
    concorrência já foram testados no PostgreSQL.
 3. **FISC-10 — Ensaio real de homologação.** Com classificação por item
    revisada, dados do emitente e A1 protegidos, obter autorização e ensaiar
@@ -55,7 +55,7 @@ Em 24/10, a VPS ainda tinha **0 perfis fiscais, 0 configuração do emitente,
 0 produtos com perfil, 0 passos de opções e 0 documentos fiscais**; 39 itens
 estavam visíveis no PDV interno. Esses números vêm de consultas de contagem,
 sem dados pessoais ou segredos. O A1 permanece fora do Git; desde 27/10 há
-somente uma credencial cifrada na VPS, sem senha e sem acesso pela API. A conexão
+duas credenciais cifradas na VPS (A1 e senha), sem acesso pela API. A conexão
 mTLS só obteve WSDLs; nenhuma NFC-e foi transmitida.
 
 Os endpoints e ambientes de São Paulo devem ser conferidos novamente no dia
