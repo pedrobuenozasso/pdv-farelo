@@ -1,8 +1,10 @@
 # Farelo OS na VPS Contabo
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 27/10/2026,
-a API e a Web usam o release `9e83fdb`. O atalho `/opt/farelo-os/current`
-aponta para `/opt/farelo-os/releases/9e83fdb`. Os segredos ficam somente na VPS em
+a API e a Web usam as imagens do código `9e83fdb`. O atalho
+`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/90cd98a`, que
+acrescentou scripts de custódia sem recriar contêineres. Os segredos ficam
+somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
 
