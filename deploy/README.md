@@ -35,6 +35,11 @@ pré-deploy passou pela validação do `pg_restore --list`. Após o deploy, API
 fiscais e monitor privado sem alerta. O ensaio presencial do pagamento e da
 impressão ainda falta.
 
+O A1 foi instalado em 27/10 somente como credencial cifrada do systemd,
+separada dos contêineres. O procedimento, teste e limite de segurança estão
+em [`deploy/fiscal/README.md`](fiscal/README.md). A senha ainda precisa ser
+cadastrada interativamente no Mac; o PDV continua operando sem depender dela.
+
 O release `aa35560` aplicou a migração Flyway V71 (unicidade de documento fiscal
 por comanda) após **926 testes backend** em PostgreSQL descartável e backup local
 validado. Antes da migração havia zero documentos e zero duplicatas; depois,
