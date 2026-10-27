@@ -1708,7 +1708,10 @@ function PaymentPanel({
     setSeenOpenSignal(openSignal.token);
     setShowBalanceWarning(openSignal.amount === null);
     reset({
-      amount: openSignal.amount === null ? "" : String(openSignal.amount),
+      amount:
+        openSignal.amount !== null && openSignal.amount > 0
+          ? String(openSignal.amount)
+          : "",
       method: "PIX",
       amountReceived: "",
       institutionCnpj: "",
