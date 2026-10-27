@@ -7,7 +7,7 @@ import { useState } from "react";
 import { AdminShell } from "@/components/admin-shell";
 import { AuthGuard } from "@/components/auth-guard";
 import { Card } from "@/components/ui/card";
-import candidates from "@/data/fiscal-candidates-20261023.json";
+import candidates from "@/data/fiscal-candidates-20261027.json";
 import { listFiscalProfiles } from "@/lib/api/fiscal-profiles";
 import { listProducts } from "@/lib/api/products";
 
@@ -67,9 +67,8 @@ export default function FiscalReviewPage() {
             </h1>
             <p className="text-ink-soft mt-1 text-sm">
               Cruzamento histórico de {candidates.items.length} itens do QR
-              Pedir com cadastro, relatório e XMLs do Sischef em{" "}
-              {candidates.observedAt}. Os 13 itens extras do painel autenticado
-              ainda não foram cruzados.
+              Pedir com cadastro, relatório e XMLs do Sischef; complemento dos
+              13 itens do painel autenticado em {candidates.observedAt}.
             </p>
           </header>
           <Card>
@@ -134,13 +133,14 @@ export default function FiscalReviewPage() {
                 ? profileById.get(product.fiscalProfileId)
                 : null;
               return (
-                <Card key={item.qrId}>
+                <Card key={item.productId}>
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <h2 className="font-semibold">{item.name}</h2>
                       <p className="text-ink-soft text-xs">
-                        {item.section} · QR {item.qrId} · preço observado R${" "}
-                        {item.qrPrice}
+                        {item.section} ·{" "}
+                        {item.qrId ? `QR ${item.qrId}` : "Painel QR Pedir"} ·
+                        preço observado R$ {item.qrPrice}
                       </p>
                     </div>
                     <span className="border-line rounded-full border px-3 py-1 text-xs font-semibold">
