@@ -21,35 +21,15 @@ de dispositivos.
 alternativa. Ver [ADR-003](../../docs/decisions/ADR-003-ticket-graphic-mode.md)
 para o porquê completo.
 
-**Impressão ESC/POS real via TCP (FARELO-078)**, sobre a base de polling +
-report já existente (FARELO-076/077). O serviço conecta com a API e faz
-polling periódico de `GET /api/v1/print-jobs`. Para cada `PrintJob` pendente
-encontrado, o Edge Agent:
-
-1. loga o job (id, comanda, estação, itens);
-2. resolve o endereço IP/porta da impressora responsável pela
-   `productionStation` do job (ver "Endereços de impressora por estação"
-   abaixo);
-3. monta os bytes ESC/POS do ticket (`src/escpos.ts`) — ver "Formato do
-   ticket impresso" abaixo;
-4. tenta enviar o ticket via TCP para a impressora (`src/printerTransport.ts`).
-
-Sucesso nas três últimas etapas → `POST /api/v1/print-jobs/{id}/printed`.
-Qualquer falha — nenhum endereço configurado para a estação (nem fallback
-default), impressora offline/recusando conexão, timeout de rede — é logada
-com o motivo e reportada via `POST /api/v1/print-jobs/{id}/failed`. **Não há
-mais nenhum "logar = processado com sucesso"**: esse era um estado
-intermediário deliberado do FARELO-077, documentado como temporário até este
-ticket existir — agora o "processamento" real do loop é a tentativa de
-impressão em si.
-
-Uma falha de rede/API indisponível — seja no polling, seja na tentativa de
-impressão, seja na chamada de report — é logada e o próximo ciclo (ou próximo
-job, dentro do mesmo ciclo) tenta de novo; o processo nunca cai por causa
-disso, e não há lógica de retry sofisticada (fila temporária local,
-mencionada no prompt mestre seção 11, é responsabilidade futura, ainda não
-implementada; retry de `PrintJob`s `FAILED` é escopo do próximo ticket,
-FARELO-079, **não implementado aqui**).
+**Impressão ESC/POS via TCP ou fila USB Windows**: o agente busca
+`PrintJob`s pendentes, renderiza o ticket gráfico (`ticketImage.ts`) e envia
+os bytes via TCP ou Winspool RAW conforme a configuração da estação. Antes de
+iniciar o envio, grava o ID e estado `PREPARED` no journal local persistente.
+Após o transporte aceitar os bytes, grava `SPOOL_ACCEPTED` e reporta `PRINTED`
+à API. Falha de configuração/renderização (antes do envio) pode ser reportada
+como `FAILED`; erro ou queda depois de `PREPARED` é entrega incerta e **não**
+causa reimpressão automática. Se só o report `PRINTED` falhar, o agente o
+repete sem enviar bytes à impressora novamente. Ver "Entrega única" abaixo.
 
 FARELO-075 (esqueleto mínimo — só inicializar e logar que o processo subiu) foi o
 ponto de partida deste app.
@@ -171,6 +151,41 @@ e tratamento de jobs pendentes antes de encerrar o ticket.
 
 Referências técnicas: [Epson TM-T20X Technical Reference Guide](https://download4.epson.biz/sec_pubs/bs/pdf/TM-T20X_trg_en_revF.pdf)
 e [Microsoft RAW data type](https://learn.microsoft.com/windows-hardware/drivers/print/raw-data-type).
+
+### Entrega única e recuperação (PRINT-02)
+
+O journal guarda apenas ID do `PrintJob`, estado e horário (sem dados de
+cliente, itens ou chave de dispositivo). O padrão é
+`~/.farelo-os/print-delivery`; configure `FARELO_EDGE_AGENT_STATE_DIR` com
+um caminho **absoluto e persistente** para usar outra pasta. O mesmo usuário
+Windows, diretório e volume devem ser mantidos entre reinícios e atualizações.
+Não guarde o journal em pasta temporária, sincronizada com nuvem ou limpa no
+login. Se ele ficar ilegível, o agente bloqueia o job, em vez de assumir que
+nunca foi impresso. Rode uma única instância do agente por fila.
+
+- `PREPARED`: o processo pode ter parado antes, durante ou depois de entregar
+  os bytes. O agente não reimprime nem reporta `FAILED` automaticamente.
+- `SPOOL_ACCEPTED`: o transporte aceitou os bytes. Se a API ainda devolver o
+  job como pendente, o agente repete apenas o report `PRINTED`.
+
+Para recuperar um `PREPARED`, pare o agente. Confira o papel **e** a fila de
+impressão do Windows (`Get-PrintJob -PrinterName 'NOME EXATO'`). Com o ID do
+job mostrado no log:
+
+```powershell
+# Se o papel saiu (ou ficou confirmado na fila): reportará PRINTED sem reimprimir.
+npm run delivery:resolve -- JOB_ID printed --confirm-inspected-paper-and-queue
+
+# Só se NÃO saiu papel e a fila da impressora está vazia: permite nova tentativa.
+npm run delivery:resolve -- JOB_ID no-paper --confirm-inspected-paper-and-queue
+```
+
+Reinicie o agente depois de resolver. `no-paper` é recusado para
+`SPOOL_ACCEPTED`; nesse caso confira o status na API antes de qualquer
+reimpressão manual. O journal reduz duplicações por falha de rede ou restart,
+mas o protocolo RAW não fornece confirmação física de papel: um estado
+incerto sempre exige inspeção humana. Não apague a pasta do journal para
+"corrigir" um erro.
 
 ## Rodando localmente
 

@@ -15,8 +15,28 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { pollOnce, type PollerDeps } from "./poller.js";
 import type { PrintJob } from "./printJobsClient.js";
+import type { DeliveryJournal, DeliveryState } from "./deliveryState.js";
+import { FileDeliveryJournal } from "./deliveryState.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const deviceKey = "test-device-key-32-bytes-long-value";
+
+function makeJournal(): DeliveryJournal {
+  const states = new Map<string, DeliveryState>();
+  return {
+    get: async (id) => states.get(id) ?? null,
+    prepare: async (id) => {
+      if (states.has(id)) throw new Error("job já preparado");
+      states.set(id, "PREPARED");
+    },
+    markSpoolAccepted: async (id) => {
+      if (states.get(id) !== "PREPARED") throw new Error("job não preparado");
+      states.set(id, "SPOOL_ACCEPTED");
+    },
+  };
+}
 
 function makeJob(overrides: Partial<PrintJob> = {}): PrintJob {
   return {
@@ -75,9 +95,79 @@ function neverCalled(label: string): (...args: unknown[]) => never {
 }
 
 describe("pollOnce", () => {
+  it("duas instâncias concorrentes não enviam o mesmo job duas vezes", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "farelo-poller-race-"));
+    try {
+      let spools = 0;
+      const deps: PollerDeps = {
+        journal: new FileDeliveryJournal(dir),
+        fetchPendingPrintJobs: async () => [makeJob()],
+        resolvePrinterTarget: () => ({
+          transport: "tcp",
+          host: "127.0.0.1",
+          port: 9100,
+        }),
+        buildEscPosTicket: () => Buffer.from("ticket"),
+        buildCommandCheckEscPosTicket: neverCalled(
+          "buildCommandCheckEscPosTicket",
+        ),
+        printOverTcp: async () => {
+          spools++;
+        },
+        printOverWindowsSpooler: neverCalled("printOverWindowsSpooler"),
+        reportPrintJobPrinted: async () => {},
+        reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
+      };
+      await Promise.all([
+        pollOnce("http://localhost:8080", deviceKey, deps),
+        pollOnce("http://localhost:8080", deviceKey, deps),
+      ]);
+      assert.equal(spools, 1);
+      assert.equal(
+        await new FileDeliveryJournal(dir).get("job-1"),
+        "SPOOL_ACCEPTED",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("repete somente o report PRINTED após falha da API, sem imprimir outra vez", async () => {
+    const journal = makeJournal();
+    let spools = 0;
+    let reports = 0;
+    const deps: PollerDeps = {
+      journal,
+      fetchPendingPrintJobs: async () => [makeJob()],
+      resolvePrinterTarget: () => ({
+        transport: "windows-spooler",
+        printerName: "EPSON",
+      }),
+      buildEscPosTicket: () => Buffer.from("ticket"),
+      buildCommandCheckEscPosTicket: neverCalled(
+        "buildCommandCheckEscPosTicket",
+      ),
+      printOverTcp: neverCalled("printOverTcp"),
+      printOverWindowsSpooler: async () => {
+        spools++;
+      },
+      reportPrintJobPrinted: async () => {
+        reports++;
+        if (reports === 1) throw new Error("API offline");
+      },
+      reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
+    };
+    await pollOnce("http://localhost:8080", deviceKey, deps);
+    assert.equal(await journal.get("job-1"), "SPOOL_ACCEPTED");
+    await pollOnce("http://localhost:8080", deviceKey, deps);
+    assert.equal(spools, 1);
+    assert.equal(reports, 2);
+  });
+
   it("entrega o ticket à fila Windows USB antes de reportar PRINTED", async () => {
     const events: string[] = [];
     const deps: PollerDeps = {
+      journal: makeJournal(),
       fetchPendingPrintJobs: async () => [makeJob()],
       resolvePrinterTarget: () => ({
         transport: "windows-spooler",
@@ -110,6 +200,7 @@ describe("pollOnce", () => {
       [];
 
     const deps: PollerDeps = {
+      journal: makeJournal(),
       fetchPendingPrintJobs: async (_apiBaseUrl, key) => {
         passedKeys.push(key);
         return [job];
@@ -150,6 +241,7 @@ describe("pollOnce", () => {
     const passedKeys: string[] = [];
 
     const deps: PollerDeps = {
+      journal: makeJournal(),
       fetchPendingPrintJobs: async (_apiBaseUrl, key) => {
         passedKeys.push(key);
         return [job];
@@ -174,11 +266,13 @@ describe("pollOnce", () => {
     assert.deepEqual(passedKeys, [deviceKey, deviceKey]);
   });
 
-  it("reporta FAILED quando a impressão via TCP falha (impressora offline/timeout)", async () => {
+  it("bloqueia reimpressão quando a tentativa de transporte falha de modo incerto", async () => {
     const job = makeJob();
-    const failedCalls: string[] = [];
+    const journal = makeJournal();
+    let attempts = 0;
 
     const deps: PollerDeps = {
+      journal,
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterTarget: () => ({
         transport: "tcp",
@@ -191,23 +285,24 @@ describe("pollOnce", () => {
       ),
       printOverWindowsSpooler: neverCalled("printOverWindowsSpooler"),
       printOverTcp: async () => {
+        attempts++;
         throw new Error("ECONNREFUSED (impressora offline, simulado)");
       },
       reportPrintJobPrinted: neverCalled("reportPrintJobPrinted"),
-      reportPrintJobFailed: async (_apiBaseUrl, jobId) => {
-        failedCalls.push(jobId);
-      },
+      reportPrintJobFailed: neverCalled("reportPrintJobFailed"),
     };
 
     await pollOnce("http://localhost:8080", deviceKey, deps);
-
-    assert.deepEqual(failedCalls, ["job-1"]);
+    await pollOnce("http://localhost:8080", deviceKey, deps);
+    assert.equal(attempts, 1);
+    assert.equal(await journal.get("job-1"), "PREPARED");
   });
 
   it("não derruba o processo quando reportPrintJobFailed também falha (API indisponível)", async () => {
     const job = makeJob();
 
     const deps: PollerDeps = {
+      journal: makeJournal(),
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterTarget: () => null,
       buildEscPosTicket: neverCalled("buildEscPosTicket"),
@@ -228,6 +323,7 @@ describe("pollOnce", () => {
 
   it("não derruba o processo quando fetchPendingPrintJobs falha (rede/API indisponível)", async () => {
     const deps: PollerDeps = {
+      journal: makeJournal(),
       fetchPendingPrintJobs: async () => {
         throw new Error("rede indisponível, simulado");
       },
@@ -273,6 +369,7 @@ describe("pollOnce", () => {
     const failedCalls: string[] = [];
 
     const deps: PollerDeps = {
+      journal: makeJournal(),
       fetchPendingPrintJobs: async () => [okJob, failJob],
       resolvePrinterTarget: (station) =>
         station === "BAR"
@@ -310,6 +407,7 @@ describe("pollOnce", () => {
       [];
 
     const deps: PollerDeps = {
+      journal: makeJournal(),
       fetchPendingPrintJobs: async () => [job],
       resolvePrinterTarget: (station) => {
         resolveCalls.push(station);
