@@ -60,7 +60,9 @@ import java.util.UUID;
  * comanda may carry several orders (several trips to the counter) but is
  * billed, paid, and — eventually — fiscally documented as one unit. {@code
  * command} is therefore a required {@code @ManyToOne}, the same shape as
- * {@code Payment.command}/{@code Order.command}. No {@code @OneToMany} back
+ * {@code Payment.command}/{@code Order.command}. V71 limits the table to
+ * one document per command visit; a rejected/cancelled document cannot be
+ * silently replaced. Any reissue policy needs separate review. No {@code @OneToMany} back
  * from {@code Command} — same reasoning {@code Payment}'s javadoc already
  * gives in full: nothing here needs a collection-management surface
  * (cascade rules, orphan removal, lazy-collection footguns); a future

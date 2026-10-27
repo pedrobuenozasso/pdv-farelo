@@ -26,6 +26,8 @@ class FiscalAccessKeyUniquenessIntegrationTests extends AbstractIntegrationTest 
     void duplicateAccessKeyIsRejectedAcrossCommandsButNullDraftsAreAllowed() {
         UUID firstCommand = commands.findByNumber(21).orElseThrow().getId();
         UUID secondCommand = commands.findByNumber(22).orElseThrow().getId();
+        UUID thirdCommand = commands.findByNumber(30).orElseThrow().getId();
+        UUID fourthCommand = commands.findByNumber(31).orElseThrow().getId();
         String key = String.format("%044d", new BigInteger(
                 UUID.randomUUID().toString().replace("-", ""), 16));
 
@@ -38,8 +40,8 @@ class FiscalAccessKeyUniquenessIntegrationTests extends AbstractIntegrationTest 
                     "SELECT count(*) FROM fiscal_document WHERE access_key = ?", Integer.class, key))
                     .isEqualTo(1);
 
-            inserted.add(insert(firstCommand, null));
-            inserted.add(insert(secondCommand, null));
+            inserted.add(insert(thirdCommand, null));
+            inserted.add(insert(fourthCommand, null));
         } finally {
             inserted.forEach(id -> jdbc.update("DELETE FROM fiscal_document WHERE id = ?", id));
         }

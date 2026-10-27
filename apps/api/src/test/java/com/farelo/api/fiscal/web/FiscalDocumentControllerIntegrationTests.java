@@ -10,6 +10,7 @@ import com.farelo.api.security.User;
 import com.farelo.api.security.UserRepository;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.auth.JwtTokenService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -53,12 +54,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * pattern {@code PaymentControllerIntegrationTests}/{@code
  * CommandControllerIntegrationTests} already established.
  *
- * <p>No {@code @BeforeEach}/{@code @AfterEach} cleanup needed: this class
- * never mutates a {@code Command}'s status, and every {@link FiscalDocument}
- * row it creates is scoped to its own dedicated command number, so leftover
- * rows from other test classes sharing the singleton Postgres container (see
- * {@link AbstractIntegrationTest}) never affect an assertion here — same
- * reasoning as {@code PaymentRepositoryIntegrationTests}.
+ * <p>V71 allows one document per comanda; fixtures are removed after each
+ * method because several transition tests reuse the same seeded comanda.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -95,6 +92,18 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
 
     @Autowired
     private JwtTokenService jwtTokenService;
+
+    @AfterEach
+    void removeFiscalFixtures() {
+        for (int number : new int[]{COMMAND_WITH_DOCUMENTS, OTHER_COMMAND_FOR_LEAK_CHECK,
+                TRANSITION_SUCCESS_NUMBER, TRANSITION_NO_TOKEN_NUMBER,
+                TRANSITION_WRONG_ROLE_NUMBER, TRANSITION_INVALID_MOVE_NUMBER,
+                TRANSITION_OWNER_COMMAND_NUMBER}) {
+            fiscalDocumentRepository.deleteAll(
+                    fiscalDocumentRepository.findByCommandOrderByCreatedAtAsc(command(number)));
+        }
+        fiscalDocumentRepository.flush();
+    }
 
     private Command command(int number) {
         return commandRepository.findByNumber(number).orElseThrow();
@@ -133,15 +142,11 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
-    void listsFiscalDocumentsOldestFirstScopedToCommand() throws Exception {
+    void listsOnlyFiscalDocumentScopedToCommand() throws Exception {
         Command command = command(COMMAND_WITH_DOCUMENTS);
         Command otherCommand = command(OTHER_COMMAND_FOR_LEAK_CHECK);
 
         FiscalDocument first = fiscalDocumentRepository.save(new FiscalDocument(command));
-        // Distinct, increasing createdAt for a deterministic order
-        // assertion — same pattern PaymentControllerIntegrationTests uses.
-        Thread.sleep(10);
-        FiscalDocument second = fiscalDocumentRepository.save(new FiscalDocument(command));
         // A fiscal document on a different command must not leak into this
         // list.
         fiscalDocumentRepository.save(new FiscalDocument(otherCommand));
@@ -149,16 +154,14 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
         mockMvc.perform(get("/api/v1/commands/{number}/fiscal-documents", COMMAND_WITH_DOCUMENTS)
                         .header("Authorization", "Bearer " + tokenFor(UserRole.MANAGER)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].id").value(first.getId().toString()))
                 .andExpect(jsonPath("$[0].commandNumber").value(COMMAND_WITH_DOCUMENTS))
                 .andExpect(jsonPath("$[0].status").value("PENDING"))
                 .andExpect(jsonPath("$[0].documentNumber").value(nullValue()))
                 .andExpect(jsonPath("$[0].accessKey").value(nullValue()))
                 .andExpect(jsonPath("$[0].createdAt").exists())
-                .andExpect(jsonPath("$[0].updatedAt").exists())
-                .andExpect(jsonPath("$[1].id").value(second.getId().toString()))
-                .andExpect(jsonPath("$[1].status").value("PENDING"));
+                .andExpect(jsonPath("$[0].updatedAt").exists());
     }
 
     @Test
@@ -264,10 +267,10 @@ class FiscalDocumentControllerIntegrationTests extends AbstractIntegrationTest {
     @Test
     void manualTransitionCannotForgeSefazOutcomes() throws Exception {
         String token = tokenFor(UserRole.ADMIN);
+        FiscalDocument document = newDocument(TRANSITION_INVALID_MOVE_NUMBER);
         for (FiscalDocumentStatus outcome : new FiscalDocumentStatus[]{
                 FiscalDocumentStatus.AUTHORIZED, FiscalDocumentStatus.REJECTED,
                 FiscalDocumentStatus.CANCELLED, FiscalDocumentStatus.CONTINGENCY}) {
-            FiscalDocument document = newDocument(TRANSITION_INVALID_MOVE_NUMBER);
             document.setStatus(outcome == FiscalDocumentStatus.CANCELLED
                     ? FiscalDocumentStatus.AUTHORIZED : FiscalDocumentStatus.PROCESSING);
             fiscalDocumentRepository.saveAndFlush(document);

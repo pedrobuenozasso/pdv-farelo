@@ -4,6 +4,7 @@ import com.farelo.api.AbstractIntegrationTest;
 import com.farelo.api.command.Command;
 import com.farelo.api.command.CommandNotFoundException;
 import com.farelo.api.command.CommandRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,19 +33,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * registry maintained across this suite (see {@code
  * FiscalDocumentRepositoryIntegrationTests}: 21, 23-25; {@code
  * FiscalDocumentControllerIntegrationTests}: 35-37). {@code COMMAND_NUMBER}
- * (26) is shared by every test method here: none of them assert an exact
- * row *count* for that command, only look up/act on a specific document by
- * its own id, so accumulation across methods (JUnit gives no ordering
- * guarantee between test methods in a class) never affects an assertion.
- * {@code OTHER_COMMAND_NUMBER} (27) is dedicated to the comanda-ownership
- * mismatch test below, so it never accumulates fiscal documents that would
- * matter to any assertion elsewhere.
- *
- * <p>No {@code @BeforeEach} table cleanup — same reasoning as {@code
- * FiscalDocumentRepositoryIntegrationTests}: every test scopes its
- * assertions to rows it creates itself, so leftover rows from other test
- * classes sharing the singleton Postgres container (see {@link
- * AbstractIntegrationTest}) never affect an assertion here.
+ * (26) is shared by every test method here. V71 permits only one document
+ * per comanda, so each test removes its fixture afterward.
  */
 @SpringBootTest
 class FiscalDocumentServiceIntegrationTests extends AbstractIntegrationTest {
@@ -64,6 +54,13 @@ class FiscalDocumentServiceIntegrationTests extends AbstractIntegrationTest {
 
     @Autowired
     private CommandRepository commandRepository;
+
+    @AfterEach
+    void removeFiscalFixture() {
+        Command command = command(COMMAND_NUMBER);
+        fiscalDocumentRepository.deleteAll(fiscalDocumentRepository.findByCommandOrderByCreatedAtAsc(command));
+        fiscalDocumentRepository.flush();
+    }
 
     private Command command(int number) {
         return commandRepository.findByNumber(number).orElseThrow();

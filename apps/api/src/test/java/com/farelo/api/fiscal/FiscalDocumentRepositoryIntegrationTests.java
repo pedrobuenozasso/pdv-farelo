@@ -11,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -23,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@link Command}, defaults to {@link FiscalDocumentStatus#PENDING} with
  * every identifying field {@code null}, that its mutable fields persist
  * correctly once set, and that {@code findByCommandOrderByCreatedAtAsc}
- * returns rows oldest-first, scoped to the right command. Same format as
+ * returns the row scoped to the right command. Same format as
  * {@code PaymentRepositoryIntegrationTests}.
  *
  * <p>Uses dedicated seeded command numbers 21, 23-25 — free numbers per the
@@ -34,8 +33,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * rolled back after each method. This matters now that access_key is unique:
  * several recorder tests intentionally reuse the same signed XML fixture.
  * {@link
- * #findByCommandOrderByCreatedAtAscReturnsOldestFirstScopedToCommand()}
- * *does* assert an exact count ({@code hasSize(2)}), so it cannot share
+ * #findByCommandOrderByCreatedAtAscReturnsOnlyMatchingCommand()}
+ * does assert an exact count, so it cannot share
  * {@code SEEDED_COMMAND_NUMBER} — it gets its own untouched pair, {@code
  * ORDER_COMMAND_NUMBER} (24) and {@code ORDER_OTHER_COMMAND_NUMBER} (25),
  * that no other method in this class ever writes to. {@code
@@ -238,25 +237,19 @@ class FiscalDocumentRepositoryIntegrationTests extends AbstractIntegrationTest {
     }
 
     @Test
-    void findByCommandOrderByCreatedAtAscReturnsOldestFirstScopedToCommand() throws InterruptedException {
+    void findByCommandOrderByCreatedAtAscReturnsOnlyMatchingCommand() {
         Command command = command(ORDER_COMMAND_NUMBER);
         Command otherCommand = command(ORDER_OTHER_COMMAND_NUMBER);
 
         FiscalDocument first = fiscalDocumentRepository.saveAndFlush(new FiscalDocument(command));
-        // Distinct, increasing createdAt for a deterministic order assertion
-        // — same pattern PaymentRepositoryIntegrationTests/
-        // PrintJobControllerIntegrationTests already use.
-        Thread.sleep(10);
-        FiscalDocument second = fiscalDocumentRepository.saveAndFlush(new FiscalDocument(command));
         // A fiscal document on a different command must not leak into this
         // list.
         fiscalDocumentRepository.saveAndFlush(new FiscalDocument(otherCommand));
 
-        List<FiscalDocument> documents = fiscalDocumentRepository.findByCommandOrderByCreatedAtAsc(command);
+        var documents = fiscalDocumentRepository.findByCommandOrderByCreatedAtAsc(command);
 
-        assertThat(documents).hasSize(2);
+        assertThat(documents).hasSize(1);
         assertThat(documents.get(0).getId()).isEqualTo(first.getId());
-        assertThat(documents.get(1).getId()).isEqualTo(second.getId());
     }
 
     @Test
