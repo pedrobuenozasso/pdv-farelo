@@ -330,6 +330,7 @@ function CommandDetail({
   const commandQuery = useQuery({
     queryKey: ["pdv", "command", number],
     queryFn: () => getCommand(number),
+    refetchInterval: 10000,
   });
 
   const visitsQuery = useQuery({
@@ -340,11 +341,14 @@ function CommandDetail({
   const ordersQuery = useQuery({
     queryKey: ["pdv", "command", number, "orders"],
     queryFn: () => listCommandOrders(number),
+    // Kitchen staff can change an order while this comanda stays open.
+    refetchInterval: 10000,
   });
 
   const balanceQuery = useQuery({
     queryKey: ["pdv", "command", number, "paymentBalance"],
     queryFn: () => getPaymentBalance(number),
+    refetchInterval: 10000,
   });
 
   const invalidateCommand = () => {
@@ -434,11 +438,20 @@ function CommandDetail({
             </Button>
             <Button
               variant="outline"
-              disabled={!canClose || remaining > 0 || closeMutation.isPending}
+              disabled={
+                !canClose ||
+                !balanceQuery.isSuccess ||
+                remaining > 0 ||
+                closeMutation.isPending
+              }
               onClick={() => closeMutation.mutate()}
               title={
-                canClose && remaining > 0
-                  ? "Restam pagamentos pendentes"
+                canClose
+                  ? !balanceQuery.isSuccess
+                    ? "Aguardando saldo atualizado da comanda"
+                    : remaining > 0
+                      ? "Restam pagamentos pendentes"
+                      : undefined
                   : undefined
               }
             >
@@ -450,6 +463,12 @@ function CommandDetail({
           ) : null}
           {closeErrorMessage ? (
             <p className="text-red text-sm">{closeErrorMessage}</p>
+          ) : null}
+          {balanceQuery.isError ? (
+            <p role="alert" className="text-red text-sm">
+              Não foi possível consultar o saldo. Atualize a comanda antes de
+              fechá-la.
+            </p>
           ) : null}
         </div>
       ) : null}
