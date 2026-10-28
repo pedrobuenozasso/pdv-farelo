@@ -68,4 +68,6 @@ Resultado: 44 itens têm um NCM candidato; oito ficam sem NCM associado (seis do
 - `../sischef-extraction/raw-current/qr-admin-extra-20261023.sql`: IDs dos 13 produtos extras no Farelo OS.
 - Sischef, tela Produtos simples em 27/10: busca “CROQUETE” mostrou quatro cadastros sem item exato de legumes; “GELEIA DE PIMENTA” mostrou apenas o ramequim separado. A ficha do croquete de carne com gorgonzola (ID 2814508) exibiu NCM 21069090.
 
-O arquivo de candidatos é exibido em `/admin/fiscal-review` apenas para leitura. Não usar estes valores para preparar NFC-e sem validação fiscal.
+O arquivo de candidatos fornece a evidência original exibida em `/admin/fiscal-review`. Não usar estes valores para preparar NFC-e sem validação fiscal.
+
+Atualização de 28/10: a migração V72 carrega os 52 itens em `fiscal_ncm_review` (44 com NCM histórico, oito vazios). Em `/admin/fiscal-review`, o administrador pode editar o NCM de trabalho e marcar a conferência. `source_ncm` permanece como evidência original. A tabela não é consultada pelo gerador de NFC-e; `Product.fiscalProfile` continua sendo a configuração usada na emissão.

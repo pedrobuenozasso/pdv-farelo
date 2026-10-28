@@ -35,6 +35,19 @@ movimentações de estoque exigem `ADMIN` ou `MANAGER`.
 
 ## Endpoints
 
+### `GET /api/v1/fiscal-ncm-reviews` e `PUT /api/v1/fiscal-ncm-reviews/{productId}`
+
+Requerem `ADMIN`. São a área de rascunho da revisão do NCM histórico do Sischef,
+separada de `FiscalProfile` e da geração de NFC-e. A migração V72 carrega os
+52 produtos do cardápio encontrado em outubro de 2026: 44 com `sourceNcm` e
+`draftNcm`, oito com ambos vazios. `sourceNcm` nunca muda por essa API.
+
+`PUT` recebe `{ "draftNcm": "21069090", "reviewed": false }`; `draftNcm` pode
+ser `null` quando `reviewed` é `false`. A resposta e os elementos de `GET`
+contêm `productId`, `sourceNcm`, `draftNcm`, `reviewed` e `updatedAt`. Marcar
+`reviewed` registra a conferência no cadastro, mas não atribui perfil fiscal ao
+produto nem habilita emissão.
+
 ### `POST /api/v1/categories`
 
 Cria uma categoria de produto. (FARELO-012)

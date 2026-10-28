@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -8,6 +8,12 @@ import { AdminShell } from "@/components/admin-shell";
 import { AuthGuard } from "@/components/auth-guard";
 import { Card } from "@/components/ui/card";
 import candidates from "@/data/fiscal-candidates-20261027.json";
+import { apiErrorMessage } from "@/lib/api/client";
+import {
+  listFiscalNcmReviews,
+  saveFiscalNcmReview,
+  type FiscalNcmReview,
+} from "@/lib/api/fiscal-ncm-reviews";
 import { listFiscalProfiles } from "@/lib/api/fiscal-profiles";
 import { listProducts } from "@/lib/api/products";
 
@@ -23,6 +29,80 @@ function shown(value: string | null | undefined) {
   return value && value !== "—" ? value : "Não observado";
 }
 
+function NcmReviewEditor({
+  productId,
+  review,
+  sourceNcm,
+}: {
+  productId: string;
+  review: FiscalNcmReview | undefined;
+  sourceNcm: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const [draftNcm, setDraftNcm] = useState(review?.draftNcm ?? sourceNcm ?? "");
+  const [reviewed, setReviewed] = useState(review?.reviewed ?? false);
+  const isValid = !draftNcm || /^[0-9]{8}$/.test(draftNcm);
+  const mutation = useMutation({
+    mutationFn: () =>
+      saveFiscalNcmReview(productId, {
+        draftNcm: draftNcm || null,
+        reviewed,
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["fiscal-ncm-reviews"] }),
+  });
+
+  return (
+    <div className="border-line mt-3 border-t pt-3 text-sm">
+      <p className="text-ink-soft text-xs">
+        NCM original Sischef: {shown(review?.sourceNcm ?? sourceNcm)}. O
+        rascunho abaixo não alimenta a emissão de NFC-e.
+      </p>
+      <div className="mt-2 flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1 text-xs font-medium">
+          NCM para conferência
+          <input
+            aria-label="NCM para conferência"
+            inputMode="numeric"
+            maxLength={8}
+            value={draftNcm}
+            onChange={(event) => {
+              setDraftNcm(event.target.value.replace(/\D/g, ""));
+              setReviewed(false);
+            }}
+            className="border-line bg-surface w-36 rounded-lg border px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="flex items-center gap-2 pb-2 text-xs">
+          <input
+            type="checkbox"
+            checked={reviewed}
+            disabled={!draftNcm || !isValid}
+            onChange={(event) => setReviewed(event.target.checked)}
+          />
+          Conferi este NCM
+        </label>
+        <button
+          type="button"
+          disabled={!isValid || mutation.isPending || (reviewed && !draftNcm)}
+          onClick={() => mutation.mutate()}
+          className="bg-primary rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+        >
+          {mutation.isPending ? "Salvando..." : "Salvar rascunho"}
+        </button>
+      </div>
+      {review?.reviewed && reviewed && !mutation.isPending && (
+        <p className="mt-2 text-xs text-green-700">Conferido no cadastro.</p>
+      )}
+      {mutation.isError && (
+        <p className="text-red mt-2 text-xs">
+          {apiErrorMessage(mutation.error, "Não foi possível salvar o NCM.")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function FiscalReviewPage() {
   const [search, setSearch] = useState("");
   const [confidence, setConfidence] = useState("TODOS");
@@ -34,18 +114,25 @@ export default function FiscalReviewPage() {
     queryKey: ["fiscal-profiles"],
     queryFn: listFiscalProfiles,
   });
+  const reviewsQuery = useQuery({
+    queryKey: ["fiscal-ncm-reviews"],
+    queryFn: listFiscalNcmReviews,
+  });
   const productById = new Map(
     (productsQuery.data ?? []).map((item) => [item.id, item]),
   );
   const profileById = new Map(
     (profilesQuery.data ?? []).map((item) => [item.id, item]),
   );
+  const reviewByProductId = new Map(
+    (reviewsQuery.data ?? []).map((item) => [item.productId, item]),
+  );
   const filtered = candidates.items.filter((item) => {
     if (confidence !== "TODOS" && item.confidence !== confidence) return false;
     const query = search.trim().toLocaleLowerCase("pt-BR");
     return (
       !query ||
-      `${item.name} ${item.section} ${item.sischefCandidate ?? ""}`
+      `${item.name} ${item.section} ${item.sischefCandidate ?? ""} ${item.ncm ?? ""} ${reviewByProductId.get(item.productId)?.draftNcm ?? ""}`
         .toLocaleLowerCase("pt-BR")
         .includes(query)
     );
@@ -76,8 +163,8 @@ export default function FiscalReviewPage() {
             <p className="text-ink-soft mt-1 text-sm">
               Confiança descreve apenas a ligação entre produtos. Os códigos
               exibidos são evidência histórica, não classificação aprovada. O
-              código interno do Sischef não é GTIN validado. Esta tela não grava
-              dados fiscais nem emite NFC-e.
+              código interno do Sischef não é GTIN validado. O rascunho de NCM
+              pode ser corrigido aqui; ele não altera o perfil usado na NFC-e.
             </p>
             <div className="mt-3 flex flex-wrap gap-2 text-xs">
               {confidenceOrder.map((level) => (
@@ -124,7 +211,9 @@ export default function FiscalReviewPage() {
             </select>
           </div>
           <p className="text-ink-soft text-sm">
-            {filtered.length} itens na revisão
+            {filtered.length} itens na revisão ·{" "}
+            {reviewsQuery.data?.filter((item) => item.reviewed).length ?? 0}{" "}
+            conferidos de {candidates.items.length}
           </p>
           <div className="flex flex-col gap-3">
             {filtered.map((item) => {
@@ -177,6 +266,22 @@ export default function FiscalReviewPage() {
                   <p className="text-ink-soft mt-3 text-xs">
                     {item.reviewNote}
                   </p>
+                  {reviewsQuery.isPending ? (
+                    <p className="text-ink-soft mt-3 text-xs">
+                      Carregando rascunho fiscal...
+                    </p>
+                  ) : reviewsQuery.isError ? (
+                    <p className="text-red mt-3 text-xs">
+                      Não foi possível carregar os rascunhos fiscais.
+                    </p>
+                  ) : product ? (
+                    <NcmReviewEditor
+                      key={`${item.productId}:${reviewByProductId.get(item.productId)?.updatedAt ?? "new"}`}
+                      productId={item.productId}
+                      review={reviewByProductId.get(item.productId)}
+                      sourceNcm={item.ncm}
+                    />
+                  ) : null}
                   <div className="border-line mt-3 border-t pt-3 text-xs">
                     {productsQuery.isPending || profilesQuery.isPending ? (
                       <p>Consultando cadastro Farelo OS...</p>
