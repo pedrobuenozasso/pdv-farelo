@@ -48,6 +48,14 @@ contêm `productId`, `sourceNcm`, `draftNcm`, `reviewed` e `updatedAt`. Marcar
 `reviewed` registra a conferência no cadastro, mas não atribui perfil fiscal ao
 produto nem habilita emissão.
 
+`PUT /api/v1/fiscal-ncm-reviews/{productId}/tax-codes` recebe
+`{ "cest": "1709700", "cfop": "5102", "csosn": "102" }`, com campos
+`null` permitidos. V73 preserva os originais dos XMLs em `sourceCest`,
+`sourceCfop` e `sourceCsosn` e carrega rascunhos separados `draftCest`,
+`draftCfop` e `draftCsosn` (25/32/32 itens, respectivamente). Este `PUT`
+altera apenas os rascunhos desses três campos, sem alterar NCM, marca de
+conferência ou `FiscalProfile`. Os códigos históricos não são aprovação fiscal.
+
 ### `POST /api/v1/categories`
 
 Cria uma categoria de produto. (FARELO-012)

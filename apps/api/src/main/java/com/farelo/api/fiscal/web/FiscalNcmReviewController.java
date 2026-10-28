@@ -39,6 +39,13 @@ public class FiscalNcmReviewController {
         return service.save(productId, request.draftNcm(), request.reviewed());
     }
 
+    @PutMapping("/{productId}/tax-codes")
+    @RequireRole(UserRole.ADMIN)
+    public FiscalNcmReviewService.Review saveTaxCodes(
+            @PathVariable UUID productId, @Valid @RequestBody TaxCodesRequest request) {
+        return service.saveTaxCodes(productId, request.cest(), request.cfop(), request.csosn());
+    }
+
     public record UpdateRequest(
             @Pattern(regexp = "^[0-9]{8}$", message = "NCM must have 8 digits") String draftNcm,
             boolean reviewed) {
@@ -47,4 +54,9 @@ public class FiscalNcmReviewController {
             return !reviewed || draftNcm != null;
         }
     }
+
+    public record TaxCodesRequest(
+            @Pattern(regexp = "^[0-9]{7}$", message = "CEST must have 7 digits") String cest,
+            @Pattern(regexp = "^[0-9]{4}$", message = "CFOP must have 4 digits") String cfop,
+            @Pattern(regexp = "^[0-9]{3}$", message = "CSOSN must have 3 digits") String csosn) {}
 }

@@ -12,6 +12,7 @@ import { apiErrorMessage } from "@/lib/api/client";
 import {
   listFiscalNcmReviews,
   saveFiscalNcmReview,
+  saveFiscalTaxCodesReview,
   type FiscalNcmReview,
 } from "@/lib/api/fiscal-ncm-reviews";
 import { listFiscalProfiles } from "@/lib/api/fiscal-profiles";
@@ -27,6 +28,85 @@ const confidenceDescriptions: Record<string, string> = {
 
 function shown(value: string | null | undefined) {
   return value && value !== "—" ? value : "Não observado";
+}
+
+function TaxCodesReviewEditor({
+  productId,
+  review,
+}: {
+  productId: string;
+  review: FiscalNcmReview | undefined;
+}) {
+  const queryClient = useQueryClient();
+  const [cest, setCest] = useState(review?.draftCest ?? "");
+  const [cfop, setCfop] = useState(review?.draftCfop ?? "");
+  const [csosn, setCsosn] = useState(review?.draftCsosn ?? "");
+  const valid =
+    (!cest || /^\d{7}$/.test(cest)) &&
+    (!cfop || /^\d{4}$/.test(cfop)) &&
+    (!csosn || /^\d{3}$/.test(csosn));
+  const mutation = useMutation({
+    mutationFn: () =>
+      saveFiscalTaxCodesReview(productId, {
+        cest: cest || null,
+        cfop: cfop || null,
+        csosn: csosn || null,
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["fiscal-ncm-reviews"] }),
+  });
+
+  return (
+    <div className="border-line mt-3 border-t pt-3 text-sm">
+      <p className="text-ink-soft text-xs">
+        Códigos dos XMLs antigos: CEST {shown(review?.sourceCest)}, CFOP{" "}
+        {shown(review?.sourceCfop)}, CSOSN {shown(review?.sourceCsosn)}.
+        Corrigir aqui não altera a emissão de NFC-e.
+      </p>
+      <div className="mt-2 flex flex-wrap items-end gap-3">
+        {(
+          [
+            ["CEST", cest, setCest, 7],
+            ["CFOP", cfop, setCfop, 4],
+            ["CSOSN", csosn, setCsosn, 3],
+          ] as const
+        ).map(([label, value, setter, length]) => (
+          <label
+            key={label}
+            className="flex flex-col gap-1 text-xs font-medium"
+          >
+            {label} para conferência
+            <input
+              aria-label={`${label} para conferência`}
+              inputMode="numeric"
+              maxLength={length}
+              value={value}
+              onChange={(event) =>
+                setter(event.target.value.replace(/\D/g, ""))
+              }
+              className="border-line bg-surface w-28 rounded-lg border px-3 py-2 text-sm"
+            />
+          </label>
+        ))}
+        <button
+          type="button"
+          disabled={!valid || mutation.isPending}
+          onClick={() => mutation.mutate()}
+          className="bg-primary rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+        >
+          {mutation.isPending ? "Salvando..." : "Salvar códigos"}
+        </button>
+      </div>
+      {mutation.isError && (
+        <p className="text-red mt-2 text-xs">
+          {apiErrorMessage(
+            mutation.error,
+            "Não foi possível salvar os códigos.",
+          )}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function NcmReviewEditor({
@@ -163,8 +243,9 @@ export default function FiscalReviewPage() {
             <p className="text-ink-soft mt-1 text-sm">
               Confiança descreve apenas a ligação entre produtos. Os códigos
               exibidos são evidência histórica, não classificação aprovada. O
-              código interno do Sischef não é GTIN validado. O rascunho de NCM
-              pode ser corrigido aqui; ele não altera o perfil usado na NFC-e.
+              código interno do Sischef não é GTIN validado. Os rascunhos de
+              NCM, CEST, CFOP e CSOSN podem ser corrigidos aqui; eles não
+              alteram o perfil usado na NFC-e.
             </p>
             <div className="mt-3 flex flex-wrap gap-2 text-xs">
               {confidenceOrder.map((level) => (
@@ -275,12 +356,19 @@ export default function FiscalReviewPage() {
                       Não foi possível carregar os rascunhos fiscais.
                     </p>
                   ) : product ? (
-                    <NcmReviewEditor
-                      key={`${item.productId}:${reviewByProductId.get(item.productId)?.updatedAt ?? "new"}`}
-                      productId={item.productId}
-                      review={reviewByProductId.get(item.productId)}
-                      sourceNcm={item.ncm}
-                    />
+                    <div>
+                      <NcmReviewEditor
+                        key={`${item.productId}:${reviewByProductId.get(item.productId)?.updatedAt ?? "new"}`}
+                        productId={item.productId}
+                        review={reviewByProductId.get(item.productId)}
+                        sourceNcm={item.ncm}
+                      />
+                      <TaxCodesReviewEditor
+                        key={`tax:${item.productId}:${reviewByProductId.get(item.productId)?.updatedAt ?? "new"}`}
+                        productId={item.productId}
+                        review={reviewByProductId.get(item.productId)}
+                      />
+                    </div>
                   ) : null}
                   <div className="border-line mt-3 border-t pt-3 text-xs">
                     {productsQuery.isPending || profilesQuery.isPending ? (

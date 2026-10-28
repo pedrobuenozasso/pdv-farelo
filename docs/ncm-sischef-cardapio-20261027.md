@@ -71,3 +71,5 @@ Resultado: 44 itens têm um NCM candidato; oito ficam sem NCM associado (seis do
 O arquivo de candidatos fornece a evidência original exibida em `/admin/fiscal-review`. Não usar estes valores para preparar NFC-e sem validação fiscal.
 
 Atualização de 28/10: a migração V72 carrega os 52 itens em `fiscal_ncm_review` (44 com NCM histórico, oito vazios). Em `/admin/fiscal-review`, o administrador pode editar o NCM de trabalho e marcar a conferência. `source_ncm` permanece como evidência original. A tabela não é consultada pelo gerador de NFC-e; `Product.fiscalProfile` continua sendo a configuração usada na emissão.
+
+A migração V73 acrescenta à mesma revisão os códigos dos XMLs históricos: 25 CEST, 32 CFOP e 32 CSOSN. Cada código tem valor original imutável e rascunho editável na tela. Eles não entram em `FiscalProfile` nem na geração da NFC-e; aplicabilidade e correção continuam pendentes de conferência fiscal.

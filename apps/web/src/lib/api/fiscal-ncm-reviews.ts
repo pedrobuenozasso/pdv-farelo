@@ -4,6 +4,12 @@ export type FiscalNcmReview = {
   productId: string;
   sourceNcm: string | null;
   draftNcm: string | null;
+  sourceCest: string | null;
+  draftCest: string | null;
+  sourceCfop: string | null;
+  draftCfop: string | null;
+  sourceCsosn: string | null;
+  draftCsosn: string | null;
   reviewed: boolean;
   updatedAt: string;
 };
@@ -16,6 +22,18 @@ export async function listFiscalNcmReviews(): Promise<FiscalNcmReview[]> {
     headers: authHeaders(),
   });
   return parseResponse<FiscalNcmReview[]>(response);
+}
+
+export async function saveFiscalTaxCodesReview(
+  productId: string,
+  input: { cest: string | null; cfop: string | null; csosn: string | null },
+): Promise<FiscalNcmReview> {
+  const response = await fetch(`${URL}/${productId}/tax-codes`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+  return parseResponse<FiscalNcmReview>(response);
 }
 
 export async function saveFiscalNcmReview(
