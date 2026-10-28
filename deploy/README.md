@@ -1,8 +1,8 @@
 # Farelo OS na VPS Contabo
 
-Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 27/10/2026,
-a API usa a imagem do código `9e83fdb` e a Web a de `7320307`. O atalho
-`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/7320307`. Os segredos ficam
+Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 28/10/2026,
+a API e a Web usam o release `fe1e4a2`. O atalho
+`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/fe1e4a2`. Os segredos ficam
 somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
@@ -24,6 +24,23 @@ manualmente. O acesso por chave sem senha foi validado com
 `ssh -o BatchMode=yes farelo-vps whoami`.
 
 ## Operação
+
+`fe1e4a2` carregou em V72 os NCMs históricos numa tabela de revisão separada
+dos perfis usados pela emissão: 52 produtos, 44 NCMs preenchidos, oito vazios,
+zero marcados como conferidos. O Admin pode editar o rascunho em
+`/admin/fiscal-review`; o original Sischef permanece imutável. Antes do
+deploy, a migração foi testada dentro de uma transação revertida na VPS,
+resultando em 52/44. Backup `600` validado por `pg_restore --list` em
+`/opt/farelo-os/shared/backups/pre-ncm-fe1e4a2-20261028.dump`; imagens
+anteriores preservadas como `farelo-os-api:pre-fe1e4a2` e
+`farelo-os-web:pre-fe1e4a2`. API compilou, Web compilou e passou em TypeScript
+e lint; o teste de integração novo foi compilado, mas não executado localmente
+porque o Docker Desktop estava desligado. Depois do deploy: Flyway V72 aplicada,
+API `UP`, `/login` e `/admin/fiscal-review` HTTP 200, rota fiscal sem JWT
+retornando 401, monitor privado sem alertas. Nenhuma nota foi emitida.
+Para reverter as imagens, remarcar as tags `pre-fe1e4a2` como `latest`, recriar
+`api` e `web` com o Compose do release `7320307` e voltar `current` para
+`/opt/farelo-os/releases/7320307`; V72 é aditiva e pode permanecer no banco.
 
 O release `9e83fdb` acrescenta a ponte fiscal explícita entre documento
 pendente e preparação de homologação, ainda sem bean, endpoint ou envio. Os
