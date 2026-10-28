@@ -32,8 +32,9 @@ em `/opt/farelo-os/shared/backups/pre-taxcodes-2da26ab-20261028.dump`, modo
 `600`, validado com `pg_restore --list`; imagens dos contêineres anteriores
 preservadas em `farelo-os-api:pre-2da26ab` e `farelo-os-web:pre-2da26ab`.
 Build API/Web passou na VPS, compilação de testes backend, TypeScript e lint
-passaram no Mac; o teste de integração novo não foi executado localmente sem
-Docker Desktop. Após atualizar API e depois Web: V73 `success`, 52 linhas,
+passaram no Mac. O teste `FiscalNcmReviewServiceIntegrationTests` passou em
+PostgreSQL 16 descartável, no namespace Docker separado do banco de produção;
+o banco e a imagem de teste foram removidos. Após atualizar API e depois Web: V73 `success`, 52 linhas,
 44 NCM, 25 CEST, 32 CFOP, 32 CSOSN, zero perfis fiscais, API `UP`, `/login`
 e `/admin/fiscal-review` HTTP 200, API de revisão sem JWT 401 e monitor
 privado sem alerta. Nenhuma NFC-e foi enviada. Para rollback, restaurar as
