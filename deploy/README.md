@@ -1,8 +1,8 @@
 # Farelo OS na VPS Contabo
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 28/10/2026,
-a API e a Web usam o release `fe1e4a2`. O atalho
-`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/fe1e4a2`. Os segredos ficam
+a API e a Web usam o release `2da26ab`. O atalho
+`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/2da26ab`. Os segredos ficam
 somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
@@ -24,6 +24,22 @@ manualmente. O acesso por chave sem senha foi validado com
 `ssh -o BatchMode=yes farelo-vps whoami`.
 
 ## Operação
+
+`2da26ab` aplicou V73 e colocou CEST, CFOP e CSOSN históricos na mesma revisão
+administrativa dos NCMs, com originais preservados e rascunhos editáveis.
+Prévia da migração em transação revertida: 52/25/32/32. Backup antes do deploy
+em `/opt/farelo-os/shared/backups/pre-taxcodes-2da26ab-20261028.dump`, modo
+`600`, validado com `pg_restore --list`; imagens dos contêineres anteriores
+preservadas em `farelo-os-api:pre-2da26ab` e `farelo-os-web:pre-2da26ab`.
+Build API/Web passou na VPS, compilação de testes backend, TypeScript e lint
+passaram no Mac; o teste de integração novo não foi executado localmente sem
+Docker Desktop. Após atualizar API e depois Web: V73 `success`, 52 linhas,
+44 NCM, 25 CEST, 32 CFOP, 32 CSOSN, zero perfis fiscais, API `UP`, `/login`
+e `/admin/fiscal-review` HTTP 200, API de revisão sem JWT 401 e monitor
+privado sem alerta. Nenhuma NFC-e foi enviada. Para rollback, restaurar as
+duas tags `pre-2da26ab` como `latest`, recriar API/Web com o Compose de
+`fe1e4a2` e voltar `current` para esse release; V73 é aditiva e pode permanecer
+no banco. Não restaurar o backup só para reverter a interface.
 
 `fe1e4a2` carregou em V72 os NCMs históricos numa tabela de revisão separada
 dos perfis usados pela emissão: 52 produtos, 44 NCMs preenchidos, oito vazios,
