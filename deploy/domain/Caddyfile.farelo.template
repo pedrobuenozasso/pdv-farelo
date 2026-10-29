@@ -33,12 +33,16 @@ app.farelodebolo.com.br {
     header X-Content-Type-Options nosniff
     header Referrer-Policy no-referrer
 
-    @api path /api/*
-    handle @api {
-        @login path /api/v1/auth/login
-        basic_auth @login {
+    handle /api/v1/auth/login {
+        basic_auth {
             equipe __STAFF_HASH__
         }
+        reverse_proxy farelo-os-web-1:3000 {
+            header_up -Authorization
+        }
+    }
+
+    handle /api/* {
         reverse_proxy farelo-os-web-1:3000
     }
 

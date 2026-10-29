@@ -20,7 +20,9 @@ Os arquivos `deploy/compose.domain.yml` e
 `deploy/domain/Caddyfile.farelo.template` preparam dois hosts: `pedido` expõe
 somente `/c/*`, os assets Next e o POST de pedido por QR; `app` serve o
 Admin/PDV com Basic Auth adicional nas páginas e no login da API, além do
-login/RBAC próprio do Farelo. A API protegida continua exigindo JWT; banco e
+login/RBAC próprio do Farelo. No login, o proxy retira o cabeçalho Basic antes
+de entregar a requisição à API; as demais rotas da API preservam o Bearer JWT.
+A API protegida continua exigindo JWT; banco e
 API não ganham portas públicas. O Caddyfile completo passou em `caddy
 validate` no contêiner atual com hash fictício, **sem reload**. A sobreposição
 Compose passou em `docker compose config`. O código dos QR agora aceita
