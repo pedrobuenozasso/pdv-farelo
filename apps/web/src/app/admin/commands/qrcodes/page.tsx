@@ -38,7 +38,10 @@ function menuUrl(origin: string, number: number, qrToken: string): string {
 }
 
 export default function CommandQrCodesAdminPage() {
-  const origin = useOrigin();
+  const currentOrigin = useOrigin();
+  // Public QR codes must keep working when Admin lives behind a separate
+  // protected hostname. Local development keeps using its current origin.
+  const origin = process.env.NEXT_PUBLIC_MENU_ORIGIN || currentOrigin;
   const qrQuery = useQuery({
     queryKey: ["commands", "qr"],
     queryFn: listCommandQrTokens,

@@ -41,6 +41,7 @@ services:
       dockerfile: deploy/web.Dockerfile
       args:
         API_BASE_URL: http://api:8080
+        NEXT_PUBLIC_MENU_ORIGIN: ${NEXT_PUBLIC_MENU_ORIGIN:-}
     restart: unless-stopped
     environment:
       API_BASE_URL: http://api:8080

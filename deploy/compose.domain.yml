@@ -1,0 +1,12 @@
+# Add this overlay to the private production Compose only when publishing the
+# domain. The shared Caddy already belongs to sucao-estoque_default.
+services:
+  web:
+    networks:
+      - default
+      - shared_proxy
+
+networks:
+  shared_proxy:
+    external: true
+    name: sucao-estoque_default

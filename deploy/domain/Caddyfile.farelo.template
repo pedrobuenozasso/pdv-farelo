@@ -1,0 +1,56 @@
+# Append to /root/sucao-estoque/Caddyfile after replacing __STAFF_HASH__ with
+# the locally generated Argon2id hash. Never commit the filled Caddyfile.
+pedido.farelodebolo.com.br {
+    encode gzip
+    header X-Content-Type-Options nosniff
+    header Referrer-Policy no-referrer
+
+    @menu path /c/*
+    handle @menu {
+        reverse_proxy farelo-os-web-1:3000
+    }
+
+    @order {
+        method POST
+        path /api/v1/orders
+    }
+    handle @order {
+        reverse_proxy farelo-os-web-1:3000
+    }
+
+    @assets path /_next/* /favicon.ico
+    handle @assets {
+        reverse_proxy farelo-os-web-1:3000
+    }
+
+    handle {
+        respond "Página não encontrada" 404
+    }
+}
+
+app.farelodebolo.com.br {
+    encode gzip
+    header X-Content-Type-Options nosniff
+    header Referrer-Policy no-referrer
+
+    @api path /api/*
+    handle @api {
+        @login path /api/v1/auth/login
+        basic_auth @login {
+            equipe __STAFF_HASH__
+        }
+        reverse_proxy farelo-os-web-1:3000
+    }
+
+    @assets path /_next/* /favicon.ico
+    handle @assets {
+        reverse_proxy farelo-os-web-1:3000
+    }
+
+    handle {
+        basic_auth {
+            equipe __STAFF_HASH__
+        }
+        reverse_proxy farelo-os-web-1:3000
+    }
+}

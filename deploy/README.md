@@ -14,6 +14,32 @@ Caddy atual monta `/root/sucao-estoque/Caddyfile` e usa a rede Docker
 `farelo-os_default`. Nenhum DNS, proxy, firewall ou serviço do outro projeto
 foi alterado até esta atualização. Preservar o túnel SSH como retorno.
 
+### Preparação do domínio (29/10)
+
+Os arquivos `deploy/compose.domain.yml` e
+`deploy/domain/Caddyfile.farelo.template` preparam dois hosts: `pedido` expõe
+somente `/c/*`, os assets Next e o POST de pedido por QR; `app` serve o
+Admin/PDV com Basic Auth adicional nas páginas e no login da API, além do
+login/RBAC próprio do Farelo. A API protegida continua exigindo JWT; banco e
+API não ganham portas públicas. O Caddyfile completo passou em `caddy
+validate` no contêiner atual com hash fictício, **sem reload**. A sobreposição
+Compose passou em `docker compose config`. O código dos QR agora aceita
+`NEXT_PUBLIC_MENU_ORIGIN=https://pedido.farelodebolo.com.br` no build, para
+que os QR impressos pelo Admin não apontem a `app`.
+
+Para ativar, primeiro definir uma senha extra diferente da senha do PDV com
+`bash deploy/domain/set-staff-password.sh` na VPS em terminal SSH interativo.
+O script lê sem eco, exige 16 caracteres e grava só o hash Argon2id em
+`/opt/farelo-os/shared/domain/staff.hash` (modo 600). Depois, com backup do
+Caddyfile atual, substituir `__STAFF_HASH__` pelo hash nesse host, anexar o
+bloco ao Caddyfile compartilhado, validar com `caddy validate --adapter
+caddyfile` e fazer reload, sem recriar o Caddy do Sucão. O Web Farelo deve
+ser recriado com **ambos** `deploy/compose.yml` e `deploy/compose.domain.yml`
+para manter o vínculo à rede `sucao-estoque_default`; todo deploy futuro deve
+incluir esse overlay. Testar os dois hosts com resolução temporária antes de
+apontar A records no Registro.br. Manter o SSH/túnel como rollback. A sessão
+do Registro.br expirou durante a preparação; nenhum DNS foi alterado.
+
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 29/10/2026,
 a API usa o release `2da26ab` e a Web usa `1031ad3`. O atalho
 `/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/1031ad3`. Os segredos ficam
