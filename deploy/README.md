@@ -1,5 +1,13 @@
 # Farelo OS na VPS Contabo
 
+O domínio `farelodebolo.com.br` foi adquirido em 29/10/2026. Na última
+consulta, não havia registros A para raiz, `www`, `app` ou `pedido`. Outro
+projeto (`sucao-estoque`) já opera Caddy nas portas 80/443 da mesma VPS;
+por isso o `infra/compose.production.yml` não pode ser iniciado como está.
+O acesso administrativo do Farelo segue privado por túnel SSH. Planejar a
+integração com o proxy existente, a proteção do Admin e as regras de firewall
+antes de apontar DNS e abrir HTTPS público ([#21](https://github.com/pedrobuenozasso/pdv-farelo/issues/21)).
+
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 29/10/2026,
 a API usa o release `2da26ab` e a Web usa `1031ad3`. O atalho
 `/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/1031ad3`. Os segredos ficam

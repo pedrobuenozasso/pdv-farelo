@@ -45,8 +45,9 @@ Detalhado em [`domain-model.md`](domain-model.md) conforme cada domínio é impl
 ## Infraestrutura
 
 Docker + Docker Compose, Ubuntu LTS, VPS Contabo informada pelo proprietário
-(Cloud VPS 4, 4 vCPU / 8 GB RAM / ~100 GB SSD; capacidade real ainda precisa
-ser auditada), DNS a definir, Caddy, GitHub Actions.
+(Cloud VPS 4, 4 vCPU / 8 GB RAM / ~100 GB SSD), domínio
+`farelodebolo.com.br` adquirido em 29/10/2026, DNS ainda não apontado para
+o PDV, Caddy compartilhado com outro projeto na VPS, GitHub Actions.
 
 **Ambiente de desenvolvimento**: `infra/docker-compose.yml` (Postgres) +
 `infra/docker-compose.dev.yml` (backend + frontend, complementar — ver
