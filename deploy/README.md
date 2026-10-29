@@ -17,8 +17,9 @@ foi alterado até esta atualização. Preservar o túnel SSH como retorno.
 ### Preparação do domínio (29/10)
 
 Os arquivos `deploy/compose.domain.yml` e
-`deploy/domain/Caddyfile.farelo.template` preparam dois hosts: `pedido` expõe
-somente `/c/*`, os assets Next e o POST de pedido por QR; `app` serve o
+`deploy/domain/Caddyfile.farelo.template` preparam dois hosts: `cardapio` expõe
+somente `/comanda1` a `/comanda100` (reescritos internamente para `/c/1` a
+`/c/100`), `/c/*` legado, os assets Next e o POST de pedido por QR; `sistema` serve o
 Admin/PDV com Basic Auth adicional nas páginas e no login da API, além do
 login/RBAC próprio do Farelo. No login, o proxy retira o cabeçalho Basic antes
 de entregar a requisição à API; as demais rotas da API preservam o Bearer JWT.
@@ -26,8 +27,9 @@ A API protegida continua exigindo JWT; banco e
 API não ganham portas públicas. O Caddyfile completo passou em `caddy
 validate` no contêiner atual com hash fictício, **sem reload**. A sobreposição
 Compose passou em `docker compose config`. O código dos QR agora aceita
-`NEXT_PUBLIC_MENU_ORIGIN=https://pedido.farelodebolo.com.br` no build, para
-que os QR impressos pelo Admin não apontem a `app`.
+`NEXT_PUBLIC_MENU_ORIGIN=https://cardapio.farelodebolo.com.br` no build, para
+que os QR impressos pelo Admin não apontem a `sistema`. Cada URL continua
+incluindo `?qr=<token-da-visita>`; `/comanda1` isolado não autoriza pedido.
 
 Para ativar, primeiro definir uma senha extra diferente da senha do PDV com
 `bash deploy/domain/set-staff-password.sh` na VPS em terminal SSH interativo.

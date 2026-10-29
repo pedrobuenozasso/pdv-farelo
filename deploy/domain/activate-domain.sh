@@ -18,7 +18,7 @@ if [[ ! -s "$hash_file" ]]; then
   echo 'Hash da senha extra ausente; execute set-staff-password.sh antes.' >&2
   exit 1
 fi
-if grep -q 'pedido.farelodebolo.com.br' "$source_file"; then
+if grep -q 'cardapio.farelodebolo.com.br' "$source_file"; then
   echo 'Bloco Farelo já presente; inspecione antes de executar novamente.' >&2
   exit 1
 fi

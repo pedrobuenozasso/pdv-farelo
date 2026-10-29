@@ -1,9 +1,15 @@
 # Append to /root/sucao-estoque/Caddyfile after replacing __STAFF_HASH__ with
 # the locally generated Argon2id hash. Never commit the filled Caddyfile.
-pedido.farelodebolo.com.br {
+cardapio.farelodebolo.com.br {
     encode gzip
     header X-Content-Type-Options nosniff
     header Referrer-Policy no-referrer
+
+    @command path_regexp comanda ^/comanda(100|[1-9][0-9]?)$
+    handle @command {
+        rewrite * /c/{re.comanda.1}
+        reverse_proxy farelo-os-web-1:3000
+    }
 
     @menu path /c/*
     handle @menu {
@@ -28,7 +34,7 @@ pedido.farelodebolo.com.br {
     }
 }
 
-app.farelodebolo.com.br {
+sistema.farelodebolo.com.br {
     encode gzip
     header X-Content-Type-Options nosniff
     header Referrer-Policy no-referrer

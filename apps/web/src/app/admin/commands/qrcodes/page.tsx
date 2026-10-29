@@ -34,7 +34,10 @@ import { useOrigin } from "@/lib/use-origin";
 import { listCommandQrTokens, type CommandQr } from "@/lib/api/command-qr";
 
 function menuUrl(origin: string, number: number, qrToken: string): string {
-  return `${origin}/c/${number}?qr=${encodeURIComponent(qrToken)}`;
+  const path = process.env.NEXT_PUBLIC_MENU_ORIGIN
+    ? `/comanda${number}`
+    : `/c/${number}`;
+  return `${origin}${path}?qr=${encodeURIComponent(qrToken)}`;
 }
 
 export default function CommandQrCodesAdminPage() {
