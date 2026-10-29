@@ -30,15 +30,18 @@ que os QR impressos pelo Admin não apontem a `app`.
 Para ativar, primeiro definir uma senha extra diferente da senha do PDV com
 `bash deploy/domain/set-staff-password.sh` na VPS em terminal SSH interativo.
 O script lê sem eco, exige 16 caracteres e grava só o hash Argon2id em
-`/opt/farelo-os/shared/domain/staff.hash` (modo 600). Depois, com backup do
-Caddyfile atual, substituir `__STAFF_HASH__` pelo hash nesse host, anexar o
-bloco ao Caddyfile compartilhado, validar com `caddy validate --adapter
-caddyfile` e fazer reload, sem recriar o Caddy do Sucão. O Web Farelo deve
-ser recriado com **ambos** `deploy/compose.yml` e `deploy/compose.domain.yml`
-para manter o vínculo à rede `sucao-estoque_default`; todo deploy futuro deve
-incluir esse overlay. Testar os dois hosts com resolução temporária antes de
-apontar A records no Registro.br. Manter o SSH/túnel como rollback. A sessão
-do Registro.br expirou durante a preparação; nenhum DNS foi alterado.
+`/opt/farelo-os/shared/domain/staff.hash` (modo 600). O script
+`deploy/domain/activate-domain.sh` valida o Caddyfile final, faz backup do
+original e recarrega o Caddy em execução, com restauração em caso de falha.
+**Executá-lo somente depois de conferir os A records**, para evitar tentativas
+ACME repetidas antes de o domínio resolver para a VPS. O Web Farelo foi
+recriado em `dbeeaf8` com **ambos** `deploy/compose.yml` e
+`deploy/compose.domain.yml`, preservando `farelo-os_default` e conectando-se
+à rede `sucao-estoque_default`; todo deploy futuro deve incluir esse overlay.
+`/opt/farelo-os/shared/.env` contém `NEXT_PUBLIC_MENU_ORIGIN` e continua modo
+600. A imagem anterior está marcada `farelo-os-web:pre-dbeeaf8`. O login
+privado respondeu 200; o Caddy existente acessou a Web pelo nome da rede.
+Manter o SSH/túnel como rollback. Nenhum DNS/Caddy público foi alterado.
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 29/10/2026,
 a API usa o release `2da26ab` e a Web usa `1031ad3`. O atalho
