@@ -1,8 +1,8 @@
 # Farelo OS na VPS Contabo
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 29/10/2026,
-a API usa o release `2da26ab` e a Web usa `86a040f`. O atalho
-`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/86a040f`. Os segredos ficam
+a API usa o release `2da26ab` e a Web usa `0d55b56`. O atalho
+`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/0d55b56`. Os segredos ficam
 somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
@@ -30,6 +30,11 @@ ao salvar, envia apenas os dígitos para o cadastro. O registro existente foi
 salvo anteriormente com CNPJ pontuado; precisa de novo salvamento pela Web
 para normalizar o valor. Inscrição estadual e código IBGE ainda estão vazios.
 Essa mudança não habilita emissão e não altera o banco automaticamente.
+O release Web `0d55b56` passou em TypeScript, lint e build de produção;
+`/login` e `/admin/fiscal-company` responderam HTTP 200, API/DB continuaram
+saudáveis e o monitor privado não apontou alertas. A imagem Web anterior foi
+reconstruída do código de `86a040f` como `farelo-os-web:pre-0d55b56` para
+rollback; a API e o volume PostgreSQL não foram recriados.
 
 `86a040f` alterou apenas a Web: `/admin/fiscal-company` agora explica que
 ME (Microempresa) é o porte da empresa, não o CRT da NFC-e. O proprietário
