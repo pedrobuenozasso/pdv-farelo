@@ -280,9 +280,30 @@ export default function FiscalProfilesPage() {
     queryFn: getCompanyFiscalConfiguration,
   });
   const missingIssuerFields = companyQuery.data
-    ? issuerFields
-        .filter(({ key }) => !companyQuery.data?.[key]?.trim())
-        .map(({ label }) => label)
+    ? [
+        ...issuerFields
+          .filter(({ key }) => !companyQuery.data?.[key]?.trim())
+          .map(({ label }) => label),
+        ...(!/^[0-9]{14}$/.test(companyQuery.data.cnpj)
+          ? ["CNPJ com 14 dígitos, sem pontuação"]
+          : []),
+        ...(companyQuery.data.stateRegistration &&
+        !/^[0-9]{12}$/.test(companyQuery.data.stateRegistration)
+          ? ["inscrição estadual paulista com 12 dígitos"]
+          : []),
+        ...(companyQuery.data.cityCode &&
+        !/^35[0-9]{5}$/.test(companyQuery.data.cityCode)
+          ? ["código IBGE paulista com 7 dígitos"]
+          : []),
+        ...(companyQuery.data.postalCode &&
+        !/^[0-9]{8}$/.test(companyQuery.data.postalCode)
+          ? ["CEP com 8 dígitos"]
+          : []),
+        ...(companyQuery.data.taxRegime &&
+        !["1", "3"].includes(companyQuery.data.taxRegime)
+          ? ["CRT suportado (1 ou 3)"]
+          : []),
+      ]
     : [];
   const activePosProducts = (productsQuery.data ?? []).filter(
     (product) => product.active && product.availableOnPos,
@@ -364,7 +385,7 @@ export default function FiscalProfilesPage() {
                     </p>
                     {missingIssuerFields.length > 0 ? (
                       <p className="text-red mt-1">
-                        Cadastro incompleto: faltam{" "}
+                        Cadastro fiscal pendente: conferir{" "}
                         {missingIssuerFields.join(", ")}.
                       </p>
                     ) : (
