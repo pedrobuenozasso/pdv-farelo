@@ -46,16 +46,17 @@ Detalhado em [`domain-model.md`](domain-model.md) conforme cada domínio é impl
 
 Docker + Docker Compose, Ubuntu LTS, VPS Contabo informada pelo proprietário
 (Cloud VPS 4, 4 vCPU / 8 GB RAM / ~100 GB SSD), domínio
-`farelodebolo.com.br` adquirido em 29/10/2026, DNS ainda não apontado para
-o PDV, Caddy compartilhado com outro projeto na VPS, GitHub Actions.
+`farelodebolo.com.br` adquirido em 29/10/2026, DNS `cardapio` e `sistema`
+apontado para a VPS com HTTPS no Caddy compartilhado, GitHub Actions.
 
 **Ambiente de desenvolvimento**: `infra/docker-compose.yml` (Postgres) +
 `infra/docker-compose.dev.yml` (backend + frontend, complementar — ver
 `infra/README.md`) sobem a stack completa localmente com um único comando.
-O preparo de produção está em `infra/compose.production.yml`,
-`infra/Caddyfile.production` e `infra/README.md`. Ele não foi implantado;
-domínio/DNS, backup externo, auditoria da VPS e bloqueios de produto/segurança
-continuam pendentes. `apps/edge-agent` não faz parte desse
+O preparo original de produção está em `infra/compose.production.yml`,
+`infra/Caddyfile.production` e `infra/README.md`. A implantação real usa
+`deploy/compose.yml`, `deploy/compose.domain.yml` e o Caddy compartilhado;
+backup externo, auditoria da VPS e bloqueios de produto/segurança continuam
+pendentes. `apps/edge-agent` não faz parte desse
 compose: roda como processo separado (fisicamente num mini PC dedicado em
 produção), sem lógica real de rede ainda para justificar orquestração local
 junto do resto da stack (ver `apps/edge-agent/README.md`).

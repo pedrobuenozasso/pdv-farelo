@@ -1,18 +1,14 @@
 # Farelo OS na VPS Contabo
 
-O domínio `farelodebolo.com.br` foi adquirido em 29/10/2026. Na última
-consulta, não havia registros A para raiz, `www`, `app` ou `pedido`. Outro
-projeto (`sucao-estoque`) já opera Caddy nas portas 80/443 da mesma VPS;
-por isso o `infra/compose.production.yml` não pode ser iniciado como está.
-O acesso administrativo do Farelo segue privado por túnel SSH. Planejar a
-integração com o proxy existente, a proteção do Admin e as regras de firewall
-antes de apontar DNS e abrir HTTPS público ([#21](https://github.com/pedrobuenozasso/pdv-farelo/issues/21)).
-O proprietário informou que administra o DNS no Registro.br e quer cardápio
-para clientes e Admin/PDV acessíveis com uma camada extra de proteção. O
-Caddy atual monta `/root/sucao-estoque/Caddyfile` e usa a rede Docker
-`sucao-estoque_default`; os contêineres Farelo estão na rede separada
-`farelo-os_default`. Nenhum DNS, proxy, firewall ou serviço do outro projeto
-foi alterado até esta atualização. Preservar o túnel SSH como retorno.
+O domínio `farelodebolo.com.br` foi ativado em 29/10/2026: os A records
+`cardapio` e `sistema` no Registro.br apontam para `209.126.6.77`, e o Caddy
+compartilhado com `sucao-estoque` serve HTTPS válido nos dois hosts. O host
+público oferece o cardápio QR; o Admin/PDV exige senha extra, além do login
+próprio. Banco e API permanecem sem portas públicas. O teste com senha extra
+e QR válido no navegador ainda falta ([#21](https://github.com/pedrobuenozasso/pdv-farelo/issues/21)).
+O Caddy monta `/root/sucao-estoque/Caddyfile` e usa a rede Docker
+`sucao-estoque_default`; a Web Farelo está nela e também na rede
+`farelo-os_default`. Preservar o túnel SSH como retorno.
 
 ### Preparação do domínio (29/10)
 
@@ -46,15 +42,24 @@ recriado em `dbeeaf8` com **ambos** `deploy/compose.yml` e
 `/opt/farelo-os/shared/.env` contém `NEXT_PUBLIC_MENU_ORIGIN` e continua modo
 600. A imagem anterior está marcada `farelo-os-web:pre-dbeeaf8`. O login
 privado respondeu 200; o Caddy existente acessou a Web pelo nome da rede.
-Manter o SSH/túnel como rollback. Nenhum DNS/Caddy público foi alterado.
+Manter o SSH/túnel como rollback.
 
 O release `68aa6be` foi construído na VPS com o host `cardapio` e o caminho
 `/comandaN?qr=...`, depois implantado apenas na Web. O login privado retornou
 200 e o Caddy existente alcançou a Web pela rede interna. A imagem anterior
 está em `farelo-os-web:pre-68aa6be` e `current` aponta para `68aa6be`.
-O Caddyfile atualizado passou em validação com o hash real, sem reload.
-A aba Registro.br perdeu a conexão com a extensão do Chrome antes de gravar
-os registros; DNS público e HTTPS Farelo continuam pendentes.
+O Caddyfile atualizado passou em validação com o hash real. Os registros A
+foram gravados e passaram a resolver para a VPS. O primeiro `caddy reload`
+usou o caminho montado e não alterou a configuração ativa: o bind mount
+somente leitura do contêiner ainda apontava a um inode antigo. A configuração
+nova foi então carregada via `caddy reload --config /tmp/farelo-caddy-live`
+sem reiniciar o contêiner. O arquivo do host está atualizado para o próximo
+restart, mas o bind mount deve ser conferido após esse restart. O script de
+ativação foi corrigido para carregar diretamente o candidato validado.
+HTTPS foi confirmado do Mac e da VPS: cardápio `/comanda1` 200, `/admin` no
+host público 404, sistema `/login` 401 sem Basic Auth, Sucão 302. Certificados
+validaram (`ssl_verify_result=0`). A senha extra e o QR real ainda precisam de
+ensaio no navegador.
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 29/10/2026,
 a API usa o release `2da26ab` e a Web usa `1031ad3`. O atalho

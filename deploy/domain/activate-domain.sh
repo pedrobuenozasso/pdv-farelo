@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run on the VPS only after the staff password has been enrolled and DNS is
-# ready. Preserve the existing Caddy bind-mount inode so reload sees changes.
+# ready. Caddy's existing bind mount can point to an older, read-only inode;
+# load the validated candidate directly through Caddy's admin API.
 set -euo pipefail
 
 if [[ $(id -u) -ne 0 ]]; then
@@ -40,15 +41,18 @@ if ! docker exec sucao-estoque-caddy-1 caddy validate --config /tmp/farelo-caddy
   docker exec sucao-estoque-caddy-1 rm -f /tmp/farelo-caddy-candidate
   exit 1
 fi
-docker exec sucao-estoque-caddy-1 rm -f /tmp/farelo-caddy-candidate
 
 backup="${source_file}.pre-farelo-$(date -u +%Y%m%dT%H%M%SZ)"
 cp -p "$source_file" "$backup"
 cat "$work_dir/candidate" > "$source_file"
-if ! docker exec sucao-estoque-caddy-1 caddy reload --config /etc/caddy/Caddyfile; then
+chmod 600 "$source_file"
+if ! docker exec sucao-estoque-caddy-1 caddy reload --config /tmp/farelo-caddy-candidate --adapter caddyfile; then
   cat "$backup" > "$source_file"
-  docker exec sucao-estoque-caddy-1 caddy reload --config /etc/caddy/Caddyfile || true
+  docker cp "$backup" sucao-estoque-caddy-1:/tmp/farelo-caddy-rollback
+  docker exec sucao-estoque-caddy-1 caddy reload --config /tmp/farelo-caddy-rollback --adapter caddyfile || true
+  docker exec sucao-estoque-caddy-1 rm -f /tmp/farelo-caddy-rollback /tmp/farelo-caddy-candidate
   echo "Reload falhou; Caddyfile anterior restaurado. Backup: $backup" >&2
   exit 1
 fi
+docker exec sucao-estoque-caddy-1 rm -f /tmp/farelo-caddy-candidate
 echo "Caddy recarregado. Backup para rollback: $backup"
