@@ -48,6 +48,14 @@ recriado em `dbeeaf8` com **ambos** `deploy/compose.yml` e
 privado respondeu 200; o Caddy existente acessou a Web pelo nome da rede.
 Manter o SSH/túnel como rollback. Nenhum DNS/Caddy público foi alterado.
 
+O release `68aa6be` foi construído na VPS com o host `cardapio` e o caminho
+`/comandaN?qr=...`, depois implantado apenas na Web. O login privado retornou
+200 e o Caddy existente alcançou a Web pela rede interna. A imagem anterior
+está em `farelo-os-web:pre-68aa6be` e `current` aponta para `68aa6be`.
+O Caddyfile atualizado passou em validação com o hash real, sem reload.
+A aba Registro.br perdeu a conexão com a extensão do Chrome antes de gravar
+os registros; DNS público e HTTPS Farelo continuam pendentes.
+
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 29/10/2026,
 a API usa o release `2da26ab` e a Web usa `1031ad3`. O atalho
 `/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/1031ad3`. Os segredos ficam
