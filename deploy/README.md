@@ -31,7 +31,8 @@ que os QR impressos pelo Admin não apontem a `app`.
 
 Para ativar, primeiro definir uma senha extra diferente da senha do PDV com
 `bash deploy/domain/set-staff-password.sh` na VPS em terminal SSH interativo.
-O script lê sem eco, exige 16 caracteres e grava só o hash Argon2id em
+O script lê sem eco, exige apenas uma senha não vazia (o proprietário escolhe
+o comprimento) e grava só o hash Argon2id em
 `/opt/farelo-os/shared/domain/staff.hash` (modo 600). O script
 `deploy/domain/activate-domain.sh` valida o Caddyfile final, faz backup do
 original e recarrega o Caddy em execução, com restauração em caso de falha.

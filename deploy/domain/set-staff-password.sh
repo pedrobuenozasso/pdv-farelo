@@ -12,9 +12,9 @@ target=/opt/farelo-os/shared/domain
 install -d -m 700 "$target"
 read -r -s -p 'Nova senha extra da equipe (invisível): ' password
 printf '\n'
-if [[ ${#password} -lt 16 ]]; then
+if [[ -z "$password" ]]; then
   unset password
-  echo 'Use pelo menos 16 caracteres.' >&2
+  echo 'A senha não pode ficar vazia.' >&2
   exit 1
 fi
 hash=$(printf '%s\n' "$password" | docker exec -i sucao-estoque-caddy-1 caddy hash-password --algorithm argon2id)
