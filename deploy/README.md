@@ -1,8 +1,8 @@
 # Farelo OS na VPS Contabo
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 29/10/2026,
-a API usa o release `2da26ab` e a Web usa `0d55b56`. O atalho
-`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/0d55b56`. Os segredos ficam
+a API usa o release `2da26ab` e a Web usa `1031ad3`. O atalho
+`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/1031ad3`. Os segredos ficam
 somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
@@ -24,6 +24,13 @@ manualmente. O acesso por chave sem senha foi validado com
 `ssh -o BatchMode=yes farelo-vps whoami`.
 
 ## Operação
+
+`1031ad3` também faz a tela `/admin/fiscal-profiles` apontar formatos
+incompatíveis do emitente, além de campos vazios. Assim, CNPJ com máscara não
+aparece como cadastro pronto. TypeScript, lint e build de produção passaram;
+`/login` e `/admin/fiscal-profiles` HTTP 200, monitor privado OK. Imagem Web
+anterior em `farelo-os-web:pre-1031ad3`; rollback da interface usando essa
+imagem e o release `0d55b56`, sem alterar API ou banco.
 
 O editor fiscal valida o tamanho do CNPJ e da inscrição estadual paulista e,
 ao salvar, envia apenas os dígitos para o cadastro. O registro existente foi
