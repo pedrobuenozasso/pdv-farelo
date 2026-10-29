@@ -1,8 +1,8 @@
 # Farelo OS na VPS Contabo
 
-Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 28/10/2026,
-a API e a Web usam o release `2da26ab`. O atalho
-`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/2da26ab`. Os segredos ficam
+Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 29/10/2026,
+a API usa o release `2da26ab` e a Web usa `86a040f`. O atalho
+`/opt/farelo-os/current` aponta para `/opt/farelo-os/releases/86a040f`. Os segredos ficam
 somente na VPS em
 `/opt/farelo-os/shared/.env` (permissão `600`); nunca copie esse arquivo para
 o Git.
@@ -24,6 +24,17 @@ manualmente. O acesso por chave sem senha foi validado com
 `ssh -o BatchMode=yes farelo-vps whoami`.
 
 ## Operação
+
+`86a040f` alterou apenas a Web: `/admin/fiscal-company` agora explica que
+ME (Microempresa) é o porte da empresa, não o CRT da NFC-e. O proprietário
+informou o porte ME; o CRT efetivo ainda precisa ser conferido no XML atual
+ou com a contabilidade. O formulário continua aceitando apenas CRT 1 ou 3;
+não selecionar um deles por inferência do porte. Não houve alteração de API,
+banco, credenciais ou emissão fiscal. Build de produção, TypeScript e lint
+passaram; `/login` e `/admin/fiscal-company` responderam HTTP 200, API `UP`
+e monitor privado sem alerta. A imagem Web anterior foi preservada como
+`farelo-os-web:pre-86a040f`; para rollback, remarcar essa imagem como `latest`,
+recriar apenas a Web com o Compose anterior e voltar `current` para `2da26ab`.
 
 `2da26ab` aplicou V73 e colocou CEST, CFOP e CSOSN históricos na mesma revisão
 administrativa dos NCMs, com originais preservados e rascunhos editáveis.
