@@ -25,6 +25,12 @@ manualmente. O acesso por chave sem senha foi validado com
 
 ## Operação
 
+O editor fiscal valida o tamanho do CNPJ e da inscrição estadual paulista e,
+ao salvar, envia apenas os dígitos para o cadastro. O registro existente foi
+salvo anteriormente com CNPJ pontuado; precisa de novo salvamento pela Web
+para normalizar o valor. Inscrição estadual e código IBGE ainda estão vazios.
+Essa mudança não habilita emissão e não altera o banco automaticamente.
+
 `86a040f` alterou apenas a Web: `/admin/fiscal-company` agora explica que
 ME (Microempresa) é o porte da empresa, não o CRT da NFC-e. O proprietário
 informou o porte ME; o CRT efetivo ainda precisa ser conferido no XML atual

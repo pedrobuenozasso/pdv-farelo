@@ -24,10 +24,24 @@ const inputClass =
 
 const optionalText = z.string().trim();
 const schema = z.object({
-  cnpj: z.string().trim().min(1, "CNPJ é obrigatório"),
+  cnpj: z
+    .string()
+    .trim()
+    .refine(
+      (value) =>
+        /^[0-9./-]+$/.test(value) && value.replace(/\D/g, "").length === 14,
+      {
+        message: "CNPJ deve ter 14 dígitos",
+      },
+    ),
   legalName: z.string().trim().min(1, "Razão social é obrigatória"),
   tradeName: optionalText,
-  stateRegistration: optionalText,
+  stateRegistration: optionalText.refine(
+    (value) =>
+      value === "" ||
+      (/^[0-9.-]+$/.test(value) && value.replace(/\D/g, "").length === 12),
+    { message: "Inscrição estadual de SP deve ter 12 dígitos" },
+  ),
   address: optionalText,
   taxRegime: z.enum(["", "1", "3"]),
   street: optionalText.max(60, "Máximo de 60 caracteres"),
@@ -61,10 +75,10 @@ function initialValues(data: CompanyFiscalConfiguration | null): FormValues {
 
 function toInput(values: FormValues): CompanyFiscalConfigurationInput {
   return {
-    cnpj: values.cnpj,
+    cnpj: values.cnpj.replace(/\D/g, ""),
     legalName: values.legalName,
     tradeName: values.tradeName || null,
-    stateRegistration: values.stateRegistration || null,
+    stateRegistration: values.stateRegistration.replace(/\D/g, "") || null,
     address: values.address || null,
     taxRegime: values.taxRegime || null,
     street: values.street || null,
@@ -77,10 +91,18 @@ function toInput(values: FormValues): CompanyFiscalConfigurationInput {
 }
 
 const fields: { name: keyof FormValues; label: string; hint?: string }[] = [
-  { name: "cnpj", label: "CNPJ" },
+  {
+    name: "cnpj",
+    label: "CNPJ",
+    hint: "14 dígitos; pontuação será removida ao salvar",
+  },
   { name: "legalName", label: "Razão social" },
   { name: "tradeName", label: "Nome fantasia" },
-  { name: "stateRegistration", label: "Inscrição estadual" },
+  {
+    name: "stateRegistration",
+    label: "Inscrição estadual",
+    hint: "12 dígitos em SP; pontuação será removida ao salvar",
+  },
   { name: "street", label: "Logradouro" },
   { name: "streetNumber", label: "Número" },
   { name: "district", label: "Bairro" },

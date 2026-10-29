@@ -10,6 +10,8 @@ Em 24/10, o proprietário estava na cafeteria com um PC Windows e pediu ensaio d
 
 Em 29/10, o proprietário informou que a empresa é **ME (Microempresa)**. Isso define o porte, mas não o CRT da NFC-e. A tela `/admin/fiscal-company` agora explica a diferença e continua aceitando apenas CRT 1 ou 3. Conferir o código no XML de uma NFC-e atual ou com a contabilidade antes de preencher; se for 2 ou 4, o emissor precisa de suporte específico. Nenhum CRT foi inferido ou salvo com base nessa informação.
 
+Depois, o proprietário salvou o cadastro de emitente com CRT 1. A consulta somente leitura na VPS encontrou uma linha, com inscrição estadual e código IBGE do município ainda vazios; o CNPJ foi salvo com pontuação (18 caracteres), formato recusado pelo montador fiscal. A Web agora valida 14 dígitos para CNPJ e 12 para inscrição estadual paulista e remove pontuação ao salvar. O registro existente **ainda precisa ser salvo novamente** pelo formulário para normalizar o CNPJ; a tentativa de backup da tabela para edição direta foi rejeitada pela revisão automática e nenhuma alteração de banco foi feita. CRT 1 ainda requer confirmação contra XML atual/contabilidade.
+
 ## Onde está o código e como está o Git
 
 - Checkout de trabalho deste histórico: `/Users/pedrobueno/Documents/ChatGPT/Farelo PDV Codex/pdv-farelo-admin-login`.
