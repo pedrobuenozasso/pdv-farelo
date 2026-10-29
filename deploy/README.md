@@ -7,6 +7,12 @@ por isso o `infra/compose.production.yml` não pode ser iniciado como está.
 O acesso administrativo do Farelo segue privado por túnel SSH. Planejar a
 integração com o proxy existente, a proteção do Admin e as regras de firewall
 antes de apontar DNS e abrir HTTPS público ([#21](https://github.com/pedrobuenozasso/pdv-farelo/issues/21)).
+O proprietário informou que administra o DNS no Registro.br e quer cardápio
+para clientes e Admin/PDV acessíveis com uma camada extra de proteção. O
+Caddy atual monta `/root/sucao-estoque/Caddyfile` e usa a rede Docker
+`sucao-estoque_default`; os contêineres Farelo estão na rede separada
+`farelo-os_default`. Nenhum DNS, proxy, firewall ou serviço do outro projeto
+foi alterado até esta atualização. Preservar o túnel SSH como retorno.
 
 Implantação privada inicial em `209.126.6.77`, Ubuntu 24.04.5. Em 29/10/2026,
 a API usa o release `2da26ab` e a Web usa `1031ad3`. O atalho

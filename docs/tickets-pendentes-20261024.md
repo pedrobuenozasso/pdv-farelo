@@ -7,6 +7,12 @@ validar os critérios de aceite e registrar commit/ensaio. Esta lista é um
 índice para outra conversa, não substitui o estado ao vivo dos issues. Em
 26/10, #5, #14 e #16 foram fechados com teste e deploy; #20 tem checagem
 automática a cada cinco minutos, mas ainda sem canal de alertas ao responsável.
+Em 29/10, 19 issues continuavam abertos. O proprietário adquiriu
+`farelodebolo.com.br` no Registro.br e decidiu publicar cardápio e Admin/PDV
+com proteção extra. O [#21](https://github.com/pedrobuenozasso/pdv-farelo/issues/21)
+é o próximo trabalho de infraestrutura: integrar o Caddy já usado por outro
+projeto nas portas 80/443, proteger o acesso de equipe, configurar DNS e
+validar HTTPS sem derrubar o outro serviço. Ainda não há A no domínio.
 
 ## Operação primeiro
 
@@ -39,7 +45,7 @@ automática a cada cinco minutos, mas ainda sem canal de alertas ao responsável
 
 19. [OPS-01: backup externo e restauração](https://github.com/pedrobuenozasso/pdv-farelo/issues/19) — depende de destino/credenciais fora do Git.
 20. [OPS-02: monitoramento](https://github.com/pedrobuenozasso/pdv-farelo/issues/20) — timer instalado; alertas externos pendentes.
-21. [OPS-03: domínio/HTTPS](https://github.com/pedrobuenozasso/pdv-farelo/issues/21) — para acesso fora do túnel privado.
+21. [OPS-03: domínio/HTTPS](https://github.com/pedrobuenozasso/pdv-farelo/issues/21) — domínio comprado; DNS, proxy compartilhado, proteção de equipe e ensaio ainda pendentes.
 22. [OPS-04: piloto e corte do Sischef](https://github.com/pedrobuenozasso/pdv-farelo/issues/22) — último marco.
 
 O relatório de evidência e critérios gerais está em
