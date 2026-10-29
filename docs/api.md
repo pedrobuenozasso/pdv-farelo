@@ -2803,7 +2803,7 @@ constraint de banco).
 | `tradeName` | string | não | Nome fantasia; omitido/`null` = "sem nome fantasia" |
 | `stateRegistration` | string | não | Inscrição estadual; omitido/`null` = "sem inscrição" (empresa isenta) |
 | `address` | string | não | Texto livre (não estruturado); omitido/`null` = "sem endereço" |
-| `taxRegime` | string | não | CRT `1` ou `3`, somente após conferência do emitente; outro valor é rejeitado |
+| `taxRegime` | string | não | CRT `1` ou `3`, somente após conferência do emitente; outro valor é rejeitado. Porte `ME` (Microempresa) não é um código CRT e não determina, por si só, qual opção selecionar. |
 | `street`, `streetNumber`, `district`, `city` | string | não | Campos estruturados do endereço fiscal; não são extraídos do texto livre |
 | `cityCode` | string | não | Código IBGE municipal de sete dígitos |
 | `postalCode` | string | não | CEP de oito dígitos, sem pontuação |

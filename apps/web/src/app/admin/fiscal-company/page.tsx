@@ -135,12 +135,20 @@ function IssuerForm({ data }: { data: CompanyFiscalConfiguration | null }) {
           </label>
         ))}
         <label className="flex flex-col gap-1 text-sm font-medium">
-          Regime tributário (CRT)
+          Código de Regime Tributário da NFC-e (CRT)
           <select className={inputClass} {...register("taxRegime")}>
-            <option value="">Selecione após conferir</option>
+            <option value="">
+              Selecione após conferir no XML ou com o contador
+            </option>
             <option value="1">1 — Simples Nacional</option>
             <option value="3">3 — Regime Normal</option>
           </select>
+          <span className="text-ink-soft text-xs font-normal">
+            ME (Microempresa) é o porte da empresa, não um código CRT. Confira o
+            CRT no XML atual ou com a contabilidade. Esta versão só aceita CRT 1
+            ou 3; se o documento indicar outro código, não salve este formulário
+            e nos avise.
+          </span>
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium sm:col-span-2">
           Endereço em texto livre (cadastro anterior)
