@@ -10,6 +10,16 @@ O Caddy monta `/root/sucao-estoque/Caddyfile` e usa a rede Docker
 `sucao-estoque_default`; a Web Farelo está nela e também na rede
 `farelo-os_default`. Preservar o túnel SSH como retorno.
 
+Em 30/10, a raiz `https://cardapio.farelodebolo.com.br/` passou a exibir o
+catálogo publicado em modo somente leitura. Não há carrinho nem formulário de
+pedido nessa página. O pedido continua exclusivo ao QR vigente da comanda,
+`/comandaN?qr=...`; o token é validado na API ao criar o pedido. A Web
+`71b8a8e` está ativa; o Caddy foi recarregado sem restart após validação,
+com backup `/root/sucao-estoque/Caddyfile.pre-catalog-20261030T175918Z`.
+Raiz 200 com TLS válido, `/admin` público 404, sistema sem senha extra 401 e
+Sucão 302. No momento da verificação, 3 dos 52 produtos ativos estavam
+marcados `availableOnMenu`; os outros não aparecem no catálogo público.
+
 ### Preparação do domínio (29/10)
 
 Os arquivos `deploy/compose.domain.yml` e
