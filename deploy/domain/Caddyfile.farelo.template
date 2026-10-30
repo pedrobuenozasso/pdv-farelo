@@ -5,6 +5,12 @@ cardapio.farelodebolo.com.br {
     header X-Content-Type-Options nosniff
     header Referrer-Policy no-referrer
 
+    @catalog path /
+    handle @catalog {
+        rewrite * /cardapio
+        reverse_proxy farelo-os-web-1:3000
+    }
+
     @command path_regexp comanda ^/comanda(100|[1-9][0-9]?)$
     handle @command {
         rewrite * /c/{re.comanda.1}
