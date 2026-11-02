@@ -17,7 +17,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
@@ -77,6 +77,7 @@ import { cn } from "@/lib/cn";
 import { decodeUserId } from "@/lib/auth";
 import { parseMoneyCents } from "@/lib/money-input";
 import { freshPaymentAmount } from "@/lib/payment-after-order";
+import { usePdvHotkeys, type PdvHotkeyAction } from "@/lib/pdv-hotkeys";
 import { useSession } from "@/lib/use-session";
 
 // Tom de atendente, diferente do texto amigável ao cliente em
@@ -685,6 +686,10 @@ function AddItemPanel({
   // FARELO-316: "Observação geral do pedido" applies to the draft order,
   // not to the comanda as a whole.
   const [note, setNote] = useState("");
+  // Operação por teclado (espelha o PDV que a equipe já usa): foco da busca
+  // para Ctrl+F e índice do produto em destaque para navegação por setas.
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   // FARELO-320: which button triggered the in-flight mutation — read once
   // in onSuccess, then reset. A ref (not state) since it's write-then-
   // read-once bookkeeping for the mutation callback, not something that
@@ -767,6 +772,12 @@ function AddItemPanel({
       product,
     ]);
   }
+  // Lista achatada na MESMA ordem em que a grade é renderizada (seção a
+  // seção), para a navegação por setas mapear índice → produto.
+  const flatProducts = Array.from(sections.values()).flat();
+  const flatIndexById = new Map(
+    flatProducts.map((product, index) => [product.id, index]),
+  );
 
   const selectedProduct = (productsQuery.data ?? []).find(
     (product) => product.id === selectedProductId,
@@ -869,11 +880,108 @@ function AddItemPanel({
     setOptionQuantities({});
   }
 
+  // O índice destacado é clampado na leitura (em vez de corrigido por efeito),
+  // então a busca/categoria pode reduzir a grade sem deixar o destaque fora
+  // dos limites. A navegação por setas usa módulo sobre a contagem atual.
+  const safeHighlightedIndex =
+    flatProducts.length === 0
+      ? 0
+      : Math.min(highlightedIndex, flatProducts.length - 1);
+
+  // Estado fresco lido no momento do evento, para os callbacks do hook
+  // permanecerem estáveis (o listener de teclado não re-registra a cada tecla).
+  // O ref é atualizado em efeito (nunca durante o render).
+  const latest = useRef({
+    cartLength: cart.length,
+    selectedProductId,
+    flatProducts,
+    highlightedIndex: safeHighlightedIndex,
+    canAddSelected,
+    addSelectedProduct,
+  });
+  useEffect(() => {
+    latest.current = {
+      cartLength: cart.length,
+      selectedProductId,
+      flatProducts,
+      highlightedIndex: safeHighlightedIndex,
+      canAddSelected,
+      addSelectedProduct,
+    };
+  });
+
+  const getHotkeyContext = useCallback(
+    () => ({
+      hasCart: latest.current.cartLength > 0,
+      hasSelection: latest.current.selectedProductId !== null,
+      hasProducts: latest.current.flatProducts.length > 0,
+    }),
+    [],
+  );
+
+  const dispatchHotkey = useCallback(
+    (action: PdvHotkeyAction) => {
+      const state = latest.current;
+      switch (action.type) {
+        case "focus-search":
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+          return;
+        case "move-highlight":
+          setSelectedProductId(null);
+          setHighlightedIndex((index) => {
+            const count = state.flatProducts.length;
+            if (count === 0) return 0;
+            return (index + action.delta + count) % count;
+          });
+          return;
+        case "activate-highlight":
+          // Com um produto já selecionado e válido, Enter lança no carrinho;
+          // caso contrário, seleciona o produto em destaque (que então pede
+          // passos/quantidade, como um clique faria).
+          if (state.selectedProductId !== null) {
+            if (state.canAddSelected) state.addSelectedProduct();
+            return;
+          }
+          {
+            const target = state.flatProducts[state.highlightedIndex];
+            if (target) {
+              setSelectedProductId(target.id);
+              setOptionQuantities({});
+              setQuantity(1);
+            }
+          }
+          return;
+        case "confirm":
+          receiveAfterRef.current = false;
+          addItemMutation.mutate();
+          return;
+        case "confirm-and-receive":
+          receiveAfterRef.current = true;
+          addItemMutation.mutate();
+          return;
+        case "clear":
+          if (state.selectedProductId !== null) {
+            setSelectedProductId(null);
+          } else if (search) {
+            setSearch("");
+          }
+          return;
+      }
+    },
+    // addItemMutation/search are referenced directly; the rest comes from the
+    // latest ref so this stays stable across keystrokes.
+    [addItemMutation, search],
+  );
+
+  usePdvHotkeys(true, getHotkeyContext, dispatchHotkey);
+
   return (
     <div className="border-line bg-bg flex flex-col gap-3 rounded-2xl border p-4">
       <input
+        ref={searchInputRef}
         type="text"
-        placeholder="Buscar produto pelo nome..."
+        placeholder="Buscar produto pelo nome... (Ctrl+F)"
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
@@ -929,28 +1037,41 @@ function AddItemPanel({
             <div className="text-ink-faint text-[11px] font-bold tracking-wide uppercase">
               {categoryName}
             </div>
-            {products.map((product) => (
-              <button
-                key={product.id}
-                type="button"
-                onClick={() => {
-                  setSelectedProductId(product.id);
-                  setOptionQuantities({});
-                  setQuantity(1);
-                }}
-                className={cn(
-                  "flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
-                  selectedProductId === product.id
-                    ? "bg-primary-soft text-primary-dark font-semibold"
-                    : "hover:bg-bg-alt",
-                )}
-              >
-                <span>{product.name}</span>
-                <span className="font-semibold">
-                  {currencyFormatter.format(product.price)}
-                </span>
-              </button>
-            ))}
+            {products.map((product) => {
+              const isHighlighted =
+                selectedProductId === null &&
+                flatIndexById.get(product.id) === safeHighlightedIndex;
+              return (
+                <button
+                  key={product.id}
+                  type="button"
+                  ref={
+                    isHighlighted
+                      ? (node) =>
+                          node?.scrollIntoView({ block: "nearest" })
+                      : undefined
+                  }
+                  onClick={() => {
+                    setSelectedProductId(product.id);
+                    setOptionQuantities({});
+                    setQuantity(1);
+                  }}
+                  className={cn(
+                    "flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
+                    selectedProductId === product.id
+                      ? "bg-primary-soft text-primary-dark font-semibold"
+                      : isHighlighted
+                        ? "bg-bg-alt ring-primary/40 ring-2"
+                        : "hover:bg-bg-alt",
+                  )}
+                >
+                  <span>{product.name}</span>
+                  <span className="font-semibold">
+                    {currencyFormatter.format(product.price)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         ))}
       </div>
@@ -1161,7 +1282,7 @@ function AddItemPanel({
             >
               {addItemMutation.isPending
                 ? "Confirmando..."
-                : "Confirmar pedido"}
+                : "Confirmar pedido (F10)"}
             </Button>
             <Button
               variant="outline"
@@ -1171,9 +1292,13 @@ function AddItemPanel({
                 addItemMutation.mutate();
               }}
             >
-              Confirmar e receber
+              Confirmar e receber (F9)
             </Button>
           </div>
+          <p className="text-ink-faint text-[11px]">
+            Teclado: Ctrl+F busca, ↑↓ navegam, Enter lança, F10 confirma, F9
+            recebe, Esc limpa.
+          </p>
         </div>
       ) : null}
       {errorMessage ? <p className="text-red text-sm">{errorMessage}</p> : null}
