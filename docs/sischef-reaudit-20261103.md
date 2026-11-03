@@ -60,9 +60,9 @@ Os caminhos `../../sischef-extraction/` acima levam ao diretório irmão do chec
 2. **Financeiro e contábil:** operações, contas, formas e credenciadoras; pedidos, pagamentos, baixa e liquidação; caixas/turnos; extrato, DRE, DFC e relatórios. Usar um período fechado idêntico nas telas e chaves de associação, sem misturar venda, emissão e caixa.
 3. **Restante:** pessoas/usuários/permissões, produtos/passos/grupos, estoque, compras/devoluções, pedidos, relatórios, parâmetros, integrações e PDV comanda/mesa. Registrar por tela: URL, data, filtros, campos, regras, contagem, lacuna no Farelo OS e evidência.
 
-## Tickets pequenos preparados (ainda não publicados)
+## Tickets pequenos
 
-A integração GitHub permitiu ler issues, mas recusou criar issues com HTTP 403 (`Resource not accessible by integration`); o `gh` local também está sem token válido. Não afirmar que estes tickets existem no GitHub até publicação confirmada.
+A integração GitHub recusou criação com HTTP 403, mas a sessão autenticada do Chrome permitiu publicar e verificar [MIG-01 #24](https://github.com/pedrobuenozasso/pdv-farelo/issues/24) e [FISC-10 #25](https://github.com/pedrobuenozasso/pdv-farelo/issues/25). A tentativa de criar FIN-01 travou; uma busca posterior não o encontrou. **FIN-01 ainda é rascunho local.**
 
 ### MIG-01 — Reauditar telas e parâmetros atuais do Sischef
 
@@ -78,4 +78,4 @@ Aceite: um período fechado com filtros uniformes e cruzamento por ID de pedido,
 
 ## Próximo passo imediato
 
-Concluir a coleta de vínculos tributários dos 287 produtos simples e 20 produtos com passos, com destaque para os itens ativos no cardápio do Farelo OS. Depois, extrair os relatórios fiscais e financeiros com **o mesmo período fechado** para cruzar pedido, NFC-e, pagamento e baixa. Investigar as três notas de outubro sem retorno e os 15 caixas pendentes pela interface e com responsável pela operação, sem reenviar, cancelar, inutilizar ou conferir por conta própria. Publicar os três tickets no GitHub quando a permissão de escrita da integração ou do `gh` estiver restaurada.
+Concluir a coleta de vínculos tributários dos 287 produtos simples e 20 produtos com passos, com destaque para os itens ativos no cardápio do Farelo OS. Depois, extrair os relatórios fiscais e financeiros com **o mesmo período fechado** para cruzar pedido, NFC-e, pagamento e baixa. Investigar as três notas de outubro sem retorno e os 15 caixas pendentes pela interface e com responsável pela operação, sem reenviar, cancelar, inutilizar ou conferir por conta própria. Publicar FIN-01 quando a sessão de escrita no GitHub estiver novamente acessível.
