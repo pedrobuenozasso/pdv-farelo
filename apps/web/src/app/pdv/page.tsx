@@ -9,10 +9,8 @@
 //
 // The staff-only list endpoint provides live status for the comanda grid.
 //
-// UX choice: selecting a number shows its detail inline below the grid
-// (not a modal, not a separate /pdv/{number} route) — simplest for this
-// PDV screen; a dedicated route/shell is a natural evolution once /pdv
-// grows more sections (prompt mestre seção 21).
+// Selecting a comanda opens its order screen in one click. The draft remains
+// local until F10/F9 confirms it, as in the operator's current PDV.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -153,6 +151,9 @@ const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
 
 export default function PdvCommandsPage() {
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<CommandStatus | null>(
+    null,
+  );
   const [balcaoOpen, setBalcaoOpen] = useState(false);
 
   return (
@@ -182,15 +183,31 @@ export default function PdvCommandsPage() {
 
         <CommandGrid
           selectedNumber={selectedNumber}
-          onSelect={setSelectedNumber}
+          onSelect={(number, status) => {
+            setSelectedNumber(number);
+            setSelectedStatus(status);
+          }}
         />
 
-        {selectedNumber !== null ? (
-          <CommandDetail
-            key={selectedNumber}
-            number={selectedNumber}
-            onClose={() => setSelectedNumber(null)}
-          />
+        {selectedNumber !== null && selectedStatus !== null ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Comanda ${selectedNumber}`}
+            className="bg-ink/50 fixed inset-0 z-50 overflow-y-auto p-2 sm:p-6"
+          >
+            <div className="mx-auto max-w-6xl">
+              <CommandDetail
+                key={selectedNumber}
+                number={selectedNumber}
+                initialStatus={selectedStatus}
+                onClose={() => {
+                  setSelectedNumber(null);
+                  setSelectedStatus(null);
+                }}
+              />
+            </div>
+          </div>
         ) : null}
       </main>
     </AuthGuard>
@@ -202,7 +219,7 @@ function CommandGrid({
   onSelect,
 }: {
   selectedNumber: number | null;
-  onSelect: (number: number) => void;
+  onSelect: (number: number, status: CommandStatus) => void;
 }) {
   const [numberFilter, setNumberFilter] = useState("");
   const commands = useQuery({
@@ -258,12 +275,12 @@ function CommandGrid({
           espelha a memória muscular da equipe; a cor de seleção/estado é a
           identidade própria do Farelo (o Sischef mantém os cards neutros e
           reserva o magenta para botões). */}
-      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
+      <div className="grid [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))] gap-2">
         {visibleCommands.map(({ number, status, tableNumber }) => (
           <button
             key={number}
             type="button"
-            onClick={() => onSelect(number)}
+            onClick={() => onSelect(number, status)}
             aria-label={`Comanda ${number}, ${STATUS_LABEL[status]}${tableNumber === null ? "" : `, mesa ${tableNumber}`}`}
             aria-pressed={number === selectedNumber}
             className={cn(
@@ -317,13 +334,17 @@ function TableOccupancySummary() {
 
 function CommandDetail({
   number,
+  initialStatus,
   onClose,
 }: {
   number: number;
+  initialStatus: CommandStatus;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [addItemOpen, setAddItemOpen] = useState(false);
+  const [addItemOpen, setAddItemOpen] = useState(
+    initialStatus === "AVAILABLE" || initialStatus === "OPEN",
+  );
   // FARELO-320: "Confirmar e Receber" — a PDV-only UI shortcut (Farelo has
   // no real backend "Confirmar" transition to formalize — an order is
   // already CREATED/"confirmed" the instant it's placed, see
@@ -368,7 +389,10 @@ function CommandDetail({
 
   const openMutation = useMutation({
     mutationFn: () => openCommand(number),
-    onSuccess: invalidateCommand,
+    onSuccess: () => {
+      invalidateCommand();
+      setAddItemOpen(true);
+    },
   });
 
   const closeMutation = useMutation({
@@ -401,10 +425,12 @@ function CommandDetail({
   const remaining = balanceQuery.data?.remaining ?? 0;
 
   return (
-    <Card className="flex flex-col gap-5">
+    <Card className="flex flex-col gap-5 shadow-xl">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h2 className="font-serif text-xl font-semibold">Comanda {number}</h2>
+          <h2 className="font-serif text-xl font-semibold">
+            Lançamento de pedido — Comanda {number}
+          </h2>
           {command ? (
             <Badge tone={STATUS_TONE[command.status]} dot>
               {STATUS_LABEL[command.status]}
@@ -421,7 +447,7 @@ function CommandDetail({
           onClick={onClose}
           className="text-ink-soft hover:text-ink text-sm"
         >
-          Fechar painel
+          Voltar às comandas
         </button>
       </div>
 
@@ -482,26 +508,6 @@ function CommandDetail({
           ) : null}
         </div>
       ) : null}
-
-      {(visitsQuery.data?.length ?? 0) > 1 ? (
-        <div className="border-line border-t pt-3 text-sm">
-          <p className="text-ink-soft font-semibold">Histórico de visitas</p>
-          <ul className="text-ink-faint mt-2 flex flex-wrap gap-3">
-            {visitsQuery.data?.map((visit) => (
-              <li key={visit.id}>
-                Visita {visit.cycleNumber} · {STATUS_LABEL[visit.status]} ·{" "}
-                {dateTimeFormatter.format(new Date(visit.createdAt))}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {command ? (
-        <CustomerCard commandNumber={number} command={command} />
-      ) : null}
-
-      {command ? <TableAssociation command={command} /> : null}
 
       <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-start">
         <div className="flex flex-col gap-3">
@@ -582,6 +588,24 @@ function CommandDetail({
           />
         ) : null}
       </div>
+
+      {command ? (
+        <CustomerCard commandNumber={number} command={command} />
+      ) : null}
+      {command ? <TableAssociation command={command} /> : null}
+      {(visitsQuery.data?.length ?? 0) > 1 ? (
+        <div className="border-line border-t pt-3 text-sm">
+          <p className="text-ink-soft font-semibold">Histórico de visitas</p>
+          <ul className="text-ink-faint mt-2 flex flex-wrap gap-3">
+            {visitsQuery.data?.map((visit) => (
+              <li key={visit.id}>
+                Visita {visit.cycleNumber} · {STATUS_LABEL[visit.status]} ·{" "}
+                {dateTimeFormatter.format(new Date(visit.createdAt))}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -695,6 +719,9 @@ function AddItemPanel({
   // Operação por teclado (espelha o PDV que a equipe já usa): foco da busca
   // para Ctrl+F e índice do produto em destaque para navegação por setas.
   const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   // FARELO-320: which button triggered the in-flight mutation — read once
   // in onSuccess, then reset. A ref (not state) since it's write-then-
@@ -1031,7 +1058,7 @@ function AddItemPanel({
           ))}
       </div>
 
-      <div className="flex max-h-56 flex-col gap-3 overflow-y-auto">
+      <div className="flex max-h-[45vh] flex-col gap-3 overflow-y-auto">
         {productsQuery.isLoading ? (
           <p className="text-ink-faint text-sm">Carregando...</p>
         ) : null}
@@ -1053,8 +1080,7 @@ function AddItemPanel({
                   type="button"
                   ref={
                     isHighlighted
-                      ? (node) =>
-                          node?.scrollIntoView({ block: "nearest" })
+                      ? (node) => node?.scrollIntoView({ block: "nearest" })
                       : undefined
                   }
                   onClick={() => {
