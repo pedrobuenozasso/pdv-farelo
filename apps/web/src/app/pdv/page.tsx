@@ -345,6 +345,9 @@ function CommandDetail({
   const [addItemOpen, setAddItemOpen] = useState(
     initialStatus === "AVAILABLE" || initialStatus === "OPEN",
   );
+  const [draftHasItems, setDraftHasItems] = useState(false);
+  const [orderPending, setOrderPending] = useState(false);
+  const [discardPrompt, setDiscardPrompt] = useState(false);
   // FARELO-320: "Confirmar e Receber" — a PDV-only UI shortcut (Farelo has
   // no real backend "Confirmar" transition to formalize — an order is
   // already CREATED/"confirmed" the instant it's placed, see
@@ -444,10 +447,14 @@ function CommandDetail({
         </div>
         <button
           type="button"
-          onClick={onClose}
+          onClick={() => {
+            if (draftHasItems) setDiscardPrompt(true);
+            else onClose();
+          }}
+          disabled={orderPending}
           className="text-ink-soft hover:text-ink text-sm"
         >
-          Voltar às comandas
+          {orderPending ? "Confirmando..." : "Voltar às comandas"}
         </button>
       </div>
 
@@ -519,10 +526,11 @@ function CommandDetail({
             (command.status === "AVAILABLE" || command.status === "OPEN") ? (
               <button
                 type="button"
-                onClick={() => setAddItemOpen((open) => !open)}
+                onClick={() => setAddItemOpen(true)}
+                disabled={addItemOpen}
                 className="text-primary text-xs font-bold hover:underline"
               >
-                {addItemOpen ? "Fechar" : "+ Adicionar item"}
+                {addItemOpen ? "Lançamento em andamento" : "+ Adicionar item"}
               </button>
             ) : null}
           </div>
@@ -530,6 +538,8 @@ function CommandDetail({
           {addItemOpen ? (
             <AddItemPanel
               commandNumber={number}
+              onDraftChange={setDraftHasItems}
+              onPendingChange={setOrderPending}
               onAdded={() => {
                 // Partial-match invalidation: also catches "orders" and
                 // "paymentBalance" (both nested under this same key prefix)
@@ -604,6 +614,29 @@ function CommandDetail({
               </li>
             ))}
           </ul>
+        </div>
+      ) : null}
+      {discardPrompt ? (
+        <div className="bg-ink/50 fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Descartar pedido em preparação?"
+            className="border-line bg-surface flex max-w-sm flex-col gap-4 rounded-2xl border p-6 shadow-xl"
+          >
+            <p className="font-semibold">Descartar pedido em preparação?</p>
+            <p className="text-ink-soft text-sm">
+              Os itens ainda não foram confirmados e serão perdidos.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDiscardPrompt(false)}>
+                Continuar editando
+              </Button>
+              <Button variant="dark" onClick={onClose}>
+                Descartar
+              </Button>
+            </div>
+          </div>
         </div>
       ) : null}
     </Card>
@@ -691,10 +724,14 @@ function selectedOptionCount(
 
 function AddItemPanel({
   commandNumber,
+  onDraftChange,
+  onPendingChange,
   onAdded,
   onConfirmAndReceive,
 }: {
   commandNumber: number;
+  onDraftChange: (hasItems: boolean) => void;
+  onPendingChange: (pending: boolean) => void;
   onAdded: () => void;
   // FARELO-320: called (in addition to onAdded) when the order was
   // created via "Confirmar e receber" rather than plain confirmation — see
@@ -774,6 +811,15 @@ function AddItemPanel({
       }
     },
   });
+
+  useEffect(() => {
+    onDraftChange(
+      cart.length > 0 || note.trim().length > 0 || selectedProductId !== null,
+    );
+  }, [cart.length, note, selectedProductId, onDraftChange]);
+  useEffect(() => {
+    onPendingChange(addItemMutation.isPending);
+  }, [addItemMutation.isPending, onPendingChange]);
 
   const errorMessage = apiErrorMessage(
     addItemMutation.error,

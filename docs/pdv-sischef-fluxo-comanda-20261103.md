@@ -18,6 +18,11 @@ Complementa `referencia-pdv-sischef-20261102.md` e
    adicionais, garçom principal, subtotal, taxa de serviço, desconto e total.
 5. Fechar o diálogo sem confirmar não cria pedido. O carrinho é rascunho local;
    apenas as ações de confirmação gravam, conforme observação anterior.
+6. Ao adicionar `ÁGUA MINERAL` à comanda 2, o card do produto passou a exibir
+   controles `− 1 +`; o painel do pedido mostrou quantidade, valor unitário,
+   total e subtotal de R$ 7,00. Ao fechar com esse rascunho, surgiu a escolha
+   **Continuar editando** ou **Descartar**. Foi descartado; nenhuma venda foi
+   confirmada.
 
 ## REA
 
@@ -35,6 +40,7 @@ anterior, não de código decompilado. O bundle e credenciais não entram no Git
 | Fluxo | Sischef | Farelo OS após UI-01a | Próximo ticket |
 | --- | --- | --- | --- |
 | Abrir comanda | Um clique mostra lançamento | Um clique abre subtela com rascunho de pedido | Validar com operador |
+| Sair com rascunho | Pede para continuar ou descartar | Mesma confirmação ao voltar às comandas | Validar com operador |
 | Buscar produto | Busca focada ao abrir, categorias e produtos | Busca focada; categorias horizontais e lista de produtos | UI-01b: grade de produtos e navegação |
 | Contexto do pedido | Comanda, mesa, cliente, garçom, totais juntos | Comanda no cabeçalho; cliente/mesa abaixo; pagamento lateral | UI-01c: reorganizar painel lateral |
 | Confirmar | F10 grava e envia à produção | F10 usa `createOrder` e atualiza pedidos | Teste ponta a ponta na cafeteria |
