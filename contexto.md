@@ -1,5 +1,15 @@
 # Contexto de continuidade — Farelo OS
 
+**Atualização de 03/11/2026:** o proprietário pediu a remoção da senha extra
+do domínio `sistema.farelodebolo.com.br`. O Caddy foi alterado e recarregado;
+`/login` responde 200 sem Basic Auth, enquanto `/api/v1/orders` responde 401
+sem sessão do Farelo OS. `cardapio/` continua 200 e ambos os domínios têm TLS
+válido. A Web na VPS é `81142b1`; o fluxo da comanda abre a subtela com um
+clique, com teste visual em desktop e 390 px. A REA não completou a análise
+estática do bundle Sischef por incompatibilidade Swift/SDK no Mac. Ver
+`docs/pdv-sischef-fluxo-comanda-20261103.md` e `deploy/README.md`. Os itens
+abaixo sobre senha extra descrevem o histórico anterior e não o estado atual.
+
 Atualizado em 29/10/2026. Leia este arquivo antes de retomar o projeto em outra conversa. Ele registra o estado observado; a autorização para ensaiar homologação deve ser distinguida de habilitar emissão em produção ou publicar serviços na internet. **Não colocar senha, certificado A1, `.env`, chave SSH, XML de cliente ou dump do banco no Git/chat.**
 
 ## Leia primeiro: estado e próxima ação em 29/10

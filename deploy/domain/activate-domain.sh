@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run on the VPS only after the staff password has been enrolled and DNS is
-# ready. Caddy's existing bind mount can point to an older, read-only inode;
+# Run on the VPS only after DNS is ready. Caddy's existing bind mount can point
+# to an older, read-only inode;
 # load the validated candidate directly through Caddy's admin API.
 set -euo pipefail
 
@@ -11,29 +11,21 @@ fi
 
 source_file=/root/sucao-estoque/Caddyfile
 template=/opt/farelo-os/current/deploy/domain/Caddyfile.farelo.template
-hash_file=/opt/farelo-os/shared/domain/staff.hash
 work_dir=$(mktemp -d /tmp/farelo-domain.XXXXXXXX)
 trap 'rm -rf "$work_dir"' EXIT
 
-if [[ ! -s "$hash_file" ]]; then
-  echo 'Hash da senha extra ausente; execute set-staff-password.sh antes.' >&2
-  exit 1
-fi
 if grep -q 'cardapio.farelodebolo.com.br' "$source_file"; then
   echo 'Bloco Farelo já presente; inspecione antes de executar novamente.' >&2
   exit 1
 fi
 
 cp -p "$source_file" "$work_dir/original"
-python3 - "$source_file" "$template" "$hash_file" "$work_dir/candidate" <<'PY'
+python3 - "$source_file" "$template" "$work_dir/candidate" <<'PY'
 from pathlib import Path
 import sys
 
-source, template, hash_file, output = map(Path, sys.argv[1:])
-hash_value = hash_file.read_text().strip()
-if not hash_value.startswith('$argon2id$'):
-    raise SystemExit('Hash Argon2id inválido.')
-output.write_text(source.read_text().rstrip() + '\n\n' + template.read_text().replace('__STAFF_HASH__', hash_value))
+source, template, output = map(Path, sys.argv[1:])
+output.write_text(source.read_text().rstrip() + '\n\n' + template.read_text())
 PY
 
 docker cp "$work_dir/candidate" sucao-estoque-caddy-1:/tmp/farelo-caddy-candidate

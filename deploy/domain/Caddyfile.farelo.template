@@ -1,5 +1,4 @@
-# Append to /root/sucao-estoque/Caddyfile after replacing __STAFF_HASH__ with
-# the locally generated Argon2id hash. Never commit the filled Caddyfile.
+# Farelo public hosts. The system host uses the application's own login/RBAC.
 cardapio.farelodebolo.com.br {
     encode gzip
     header X-Content-Type-Options nosniff
@@ -46,12 +45,7 @@ sistema.farelodebolo.com.br {
     header Referrer-Policy no-referrer
 
     handle /api/v1/auth/login {
-        basic_auth {
-            equipe __STAFF_HASH__
-        }
-        reverse_proxy farelo-os-web-1:3000 {
-            header_up -Authorization
-        }
+        reverse_proxy farelo-os-web-1:3000
     }
 
     handle /api/* {
@@ -64,9 +58,6 @@ sistema.farelodebolo.com.br {
     }
 
     handle {
-        basic_auth {
-            equipe __STAFF_HASH__
-        }
         reverse_proxy farelo-os-web-1:3000
     }
 }

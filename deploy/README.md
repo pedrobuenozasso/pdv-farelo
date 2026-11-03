@@ -1,5 +1,18 @@
 # Farelo OS na VPS Contabo
 
+Em 03/11/2026, a pedido do proprietário, a senha extra de
+`sistema.farelodebolo.com.br` foi removida do Caddy. Permanecem o login e o
+controle de acesso do Farelo OS. O arquivo ativo do host é
+`/root/sucao-estoque/Caddyfile`; backup anterior:
+`/root/sucao-estoque/Caddyfile.pre-remove-staff-auth-20261103T233106Z`.
+O bind mount do contêiner ainda aponta a um inode antigo; a configuração
+validada foi carregada diretamente via `caddy reload --config /dev/stdin
+--adapter caddyfile` a partir do arquivo do host. Em um restart, verificar o
+novo bind mount e o acesso externo. Checagem externa após a mudança:
+`sistema/login` 200, `cardapio/` 200, HTTPS válido em ambos e
+`sistema/api/v1/orders` 401 sem sessão. O template de domínio também foi
+atualizado para não restaurar a senha extra em uma ativação futura.
+
 Em 03/11/2026, a Web `81142b1` foi implantada com o fluxo de lançamento em
 subtela por um clique, proteção para descartar rascunhos e ajustes de largura
 desktop/mobile. A API e o banco não foram recriados. Build de produção,
