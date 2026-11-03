@@ -32,14 +32,14 @@ export function InternalNav() {
   }
 
   return (
-    <div className="border-line bg-surface flex items-center justify-between border-b px-8 py-3.5">
-      <Link href="/pdv" className="flex items-center gap-2.5">
+    <div className="border-line bg-surface flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3.5 sm:px-8">
+      <Link href="/pdv" className="flex shrink-0 items-center gap-2.5">
         <LogoBadge size={34} />
         <span className="font-serif text-base font-semibold italic">
           Farelo OS
         </span>
       </Link>
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center justify-end gap-1">
         {TABS.filter((tab) => {
           if (tab.href === "/admin")
             return session?.role === "ADMIN" || session?.role === "MANAGER";

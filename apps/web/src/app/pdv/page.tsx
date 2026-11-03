@@ -478,27 +478,26 @@ function CommandDetail({
                   : "Iniciar nova visita"}
               </Button>
             ) : null}
-            <Button
-              variant="outline"
-              disabled={
-                !canClose ||
-                !balanceQuery.isSuccess ||
-                remaining > 0 ||
-                closeMutation.isPending
-              }
-              onClick={() => closeMutation.mutate()}
-              title={
-                canClose
-                  ? !balanceQuery.isSuccess
+            {canClose ? (
+              <Button
+                variant="outline"
+                disabled={
+                  !balanceQuery.isSuccess ||
+                  remaining > 0 ||
+                  closeMutation.isPending
+                }
+                onClick={() => closeMutation.mutate()}
+                title={
+                  !balanceQuery.isSuccess
                     ? "Aguardando saldo atualizado da comanda"
                     : remaining > 0
                       ? "Restam pagamentos pendentes"
                       : undefined
-                  : undefined
-              }
-            >
-              {closeMutation.isPending ? "Fechando..." : "Fechar comanda"}
-            </Button>
+                }
+              >
+                {closeMutation.isPending ? "Fechando..." : "Fechar comanda"}
+              </Button>
+            ) : null}
           </div>
           {openErrorMessage ? (
             <p className="text-red text-sm">{openErrorMessage}</p>
