@@ -404,8 +404,7 @@ function CommandDetail({
   });
 
   const command = commandQuery.data;
-  const canOpen =
-    command?.status === "AVAILABLE" || command?.status === "CLOSED";
+  const canStartNewVisit = command?.status === "CLOSED";
   const canClose =
     command?.status === "OPEN" || command?.status === "PAYMENT_REQUESTED";
 
@@ -468,17 +467,17 @@ function CommandDetail({
       {command ? (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="dark"
-              disabled={!canOpen || openMutation.isPending}
-              onClick={() => openMutation.mutate()}
-            >
-              {openMutation.isPending
-                ? "Abrindo..."
-                : command.status === "CLOSED"
-                  ? "Iniciar nova visita"
-                  : "Abrir comanda"}
-            </Button>
+            {canStartNewVisit ? (
+              <Button
+                variant="dark"
+                disabled={openMutation.isPending}
+                onClick={() => openMutation.mutate()}
+              >
+                {openMutation.isPending
+                  ? "Iniciando..."
+                  : "Iniciar nova visita"}
+              </Button>
+            ) : null}
             <Button
               variant="outline"
               disabled={
@@ -516,8 +515,8 @@ function CommandDetail({
         </div>
       ) : null}
 
-      <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-start">
-        <div className="flex flex-col gap-3">
+      <div className="grid min-w-0 gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] sm:items-start">
+        <div className="flex min-w-0 flex-col gap-3">
           <div className="flex items-center justify-between">
             <h3 className="text-ink-faint text-xs font-bold tracking-wide uppercase">
               Pedidos
@@ -2002,7 +2001,7 @@ function PaymentPanel({
   );
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <div className="border-line bg-bg rounded-2xl border p-4">
         <div className="text-ink-faint text-xs font-bold tracking-wide uppercase">
           Total da comanda
