@@ -32,6 +32,13 @@ O bundle público carregado nessa tela foi identificado como
 Foi baixado sem token de sessão nem dados de cliente, para análise estática
 com `analyze_javascript_application`. A REA não concluiu a análise: seu helper
 de propriedade de processo no macOS não compilou via `xcrun` dentro de 120 s.
+Uma tentativa local com prazo de 300 s confirmou falha de compilação: o
+`swiftc` instalado é Swift 5.10, mas a interface Swift do SDK macOS 15.2
+usa `@_extern`, que esse compilador não reconhece. A tentativa de usar o SDK
+14.5 também falhou, pois sua interface foi gerada por outra revisão do Swift
+5.10. Para retomar a extração via REA, é necessário corrigir a combinação
+Command Line Tools/SDK e reiniciar o processo da REA; repetir a mesma chamada
+sem essa correção não produz evidência nova.
 O Evidence parcial retido pela REA marcou o único script como `unavailable` e
 contou zero rotas recuperadas; isso não significa que a aplicação não tenha
 rotas. `list_browser_targets` também não alcançou um endpoint CDP local para
