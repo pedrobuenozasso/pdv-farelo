@@ -32,6 +32,11 @@ O bundle público carregado nessa tela foi identificado como
 Foi baixado sem token de sessão nem dados de cliente, para análise estática
 com `analyze_javascript_application`. A REA não concluiu a análise: seu helper
 de propriedade de processo no macOS não compilou via `xcrun` dentro de 120 s.
+O Evidence parcial retido pela REA marcou o único script como `unavailable` e
+contou zero rotas recuperadas; isso não significa que a aplicação não tenha
+rotas. `list_browser_targets` também não alcançou um endpoint CDP local para
+anexar à sessão autenticada. Não se exportaram token nem cookies do Sischef
+para contornar essa limitação.
 Portanto as conclusões acima vêm da interface observada e da documentação
 anterior, não de código decompilado. O bundle e credenciais não entram no Git.
 
@@ -47,6 +52,16 @@ anterior, não de código decompilado. O bundle e credenciais não entram no Git
 | Receber | F9 confirma e abre recebimento | F9 cria pedido e abre pagamento | Teste ponta a ponta na cafeteria |
 | Comanda fechada | Ciclo de atendimento próprio | Exige `Iniciar nova visita` antes de lançar | Testar reuso sem misturar visitas |
 
-Prioridade: validar UI-01a no navegador, depois UI-01b e UI-01c. A auditoria
+Prioridade: validar UI-01a com o operador na cafeteria, depois UI-01b e UI-01c. A auditoria
 das demais telas do PDV continua nos documentos de referência; esta nota cobre
 o fluxo específico de abertura e lançamento, sem alegar paridade total.
+
+## Validação no Farelo OS publicado
+
+No release Web `81142b1`, a comanda 2 **disponível** abriu o lançamento com um
+clique, já com a busca focada. `Água mineral` entrou apenas no rascunho; sair
+abriu a confirmação de descarte e, após descartar, a comanda continuou
+disponível sem pedido gravado. A tela foi conferida em desktop e em 390 px:
+painel de pagamento dentro da subtela e largura da página igual à viewport
+mobile, sem rolagem horizontal. Não se executou F10/F9 nessa comanda, pois isso
+criaria um pedido de produção real.

@@ -1,5 +1,22 @@
 # Farelo OS na VPS Contabo
 
+Em 03/11/2026, a Web `81142b1` foi implantada com o fluxo de lançamento em
+subtela por um clique, proteção para descartar rascunhos e ajustes de largura
+desktop/mobile. A API e o banco não foram recriados. Build de produção,
+TypeScript, ESLint, teste visual do rascunho sem confirmação, largura móvel de
+390 px sem rolagem horizontal e monitor privado passaram. A imagem Web anterior
+está em `farelo-os-web:pre-81142b1`; `/opt/farelo-os/current` aponta para
+`81142b1`. Para reverter somente a Web, remarcar essa imagem como `latest` e
+recriar só `web` com os dois arquivos Compose do release `8a34abd`.
+
+Na validação, o host `sistema` respondeu 200 sem a senha extra, embora o hash
+Argon2id anterior ainda estivesse na VPS. A regra `basic_auth` do template foi
+restaurada no Caddy com validação prévia e reload, sem reiniciar o proxy. Backup
+da configuração anterior: `/root/sucao-estoque/Caddyfile.pre-auth-20261103T223226Z`.
+Checagem externa final: `sistema/pdv` 401 sem senha extra, `cardapio/` 200,
+`cardapio/admin` 404, TLS válido nos dois hosts. A senha extra e o hash não
+foram copiados ao repositório.
+
 O domínio `farelodebolo.com.br` foi ativado em 29/10/2026: os A records
 `cardapio` e `sistema` no Registro.br apontam para `209.126.6.77`, e o Caddy
 compartilhado com `sucao-estoque` serve HTTPS válido nos dois hosts. O host
