@@ -252,7 +252,13 @@ function CommandGrid({
           className="border-line bg-surface text-ink focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
         />
       </label>
-      <div className="grid grid-cols-5 gap-2.5 sm:grid-cols-10">
+      {/* Grade de comandas em cards grandes, no mesmo formato do PDV que a
+          equipe já usa (Sischef): cards ~150px auto-preenchendo a linha (~6
+          por linha no desktop), número grande e centralizado. O layout
+          espelha a memória muscular da equipe; a cor de seleção/estado é a
+          identidade própria do Farelo (o Sischef mantém os cards neutros e
+          reserva o magenta para botões). */}
+      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
         {visibleCommands.map(({ number, status, tableNumber }) => (
           <button
             key={number}
@@ -261,7 +267,7 @@ function CommandGrid({
             aria-label={`Comanda ${number}, ${STATUS_LABEL[status]}${tableNumber === null ? "" : `, mesa ${tableNumber}`}`}
             aria-pressed={number === selectedNumber}
             className={cn(
-              "aspect-square rounded-xl border text-sm font-bold",
+              "flex min-h-[104px] items-center justify-center rounded-md border text-[26px] font-semibold tabular-nums transition-colors",
               number === selectedNumber
                 ? "bg-primary text-primary-ink border-transparent"
                 : status === "OPEN"
@@ -272,7 +278,7 @@ function CommandGrid({
                       ? "border-red bg-red-soft text-red-ink"
                       : status === "CLOSED"
                         ? "border-line bg-bg-alt text-ink-faint"
-                        : "border-line bg-surface text-ink-soft hover:border-primary/40",
+                        : "border-line bg-surface text-ink hover:border-primary/40",
             )}
           >
             {number}
