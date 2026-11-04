@@ -77,7 +77,10 @@ produto vence; caso não exista, busca-se o grupo tributário do grupo de
 produto. NCM/CEST e origem são atributos do produto. O grupo tributário
 concentra regras como CFOP e CSOSN. O grupo de produto também controla
 visibilidade por canal e notificação padrão; o produto pode escolher seu
-próprio destino de notificação.
+próprio destino de notificação. No formulário do grupo `BEBIDAS GELADAS`, as
+visibilidades são caixas separadas para PDV online, smartphone, SmartPOS, PDV
+offline e pedido franqueado; também há ativo, cor e destino de notificação,
+mais uma aba própria de tributação.
 
 **Produto com passos:** descrição, grupo, preço base, abertura automática ou
 manual, ativo e observações. Cada passo tem descrição, mínimo, máximo, ordem,
@@ -96,6 +99,20 @@ abertura, fechamento, observação e impressão; havia 14 de 14 caixas recentes
 pendentes no momento da leitura. Isto é estado operacional, não condição
 necessária para replicar a interface. DRE e DFC usam bases diferentes e não
 devem ser conciliados apenas por totais de tela.
+
+**Usuários:** o formulário associa login a uma pessoa/funcionário e distingue
+`Supervisor da empresa` de `Operador`. As permissões podem vir de perfil pronto
+ou de seleção manual por módulos: acessos, cadastros, PDV online, financeiro,
+caixa/turno, compras/vendas, estoque, notas fiscais, Analytics, Sischef,
+cardápio e integrações. A interface avisa que algumas permissões são negativas
+(`Não permite`), portanto marcar um grupo inteiro pode também marcar bloqueios.
+Não foram copiadas senhas nem toda a árvore de permissões do operador.
+
+**Pagamentos:** cinco formas ativas na lista: dinheiro, integração com apps,
+débito, crédito e PIX. A forma tem ID, descrição, ordem, tipo, cor e ativo.
+Débito mostra vencimento D+2 e crédito D+30, ambos com baixa automática;
+o vínculo entre forma, conta e operação deve ser verificado no formulário antes
+de replicar a contabilização.
 
 **Fiscal:** a configuração de emitente, documentos e tributações já está
 detalhada nos dois relatórios anteriores. A leitura de menus/listas não
@@ -123,9 +140,11 @@ movimento financeiro e NFC-e são registros relacionados, mas não idênticos.
 
 Nesta rodada foram abertos diretamente: início, listagem e formulário de
 produto simples (abas principais, complementares e fiscais), listagem de
-grupos, listagem e formulário de produto com passos, usuários, parâmetros
-financeiros, consulta financeira, conferência de caixas, pedidos, Painel
-Fiscal e exportações. Os documentos anteriores registram outras áreas.
+grupos (lista e formulário), listagem e formulário de produto com passos,
+usuários (lista e formulário), parâmetros financeiros, formas de
+pagamento, consulta financeira, conferência de caixas, pedidos, Painel Fiscal,
+configuração fiscal e exportações. Os documentos anteriores registram outras
+áreas.
 Ainda falta auditar **cada** formulário e estado de erro/vazio, os vínculos
 fiscais dos itens atuais em lote, o esquema completo dos dumps sem cabeçalho,
 permissões finas e a conciliação por transação. Não se deve chamar este mapa
