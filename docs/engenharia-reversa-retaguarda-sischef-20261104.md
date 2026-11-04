@@ -88,6 +88,12 @@ vazio seu campo de grupo tributário próprio. Assim, a regra de precedência es
 confirmada, mas o perfil fiscal efetivamente usado nesse item não se deduz
 desses dois campos. É necessário confrontar a operação do pedido e o XML
 autorizado antes de atribuir CFOP/CSOSN.
+Os grupos tributários 3551 e 3552 foram abertos: ambos estão ativos e cada
+um aponta a uma **operação de saída** (`VENDA DE MERCADORIAS` e `VENDA DE
+MERCADORIAS COM ST`, respectivamente). Seus campos de operação de entrada
+estavam vazios e o MVA padrão exibido era 0%. Portanto a cadeia de configuração
+visível é produto/grupo de produto → grupo tributário → operação de saída →
+regras tributárias. Isso ainda não demonstra a cadeia aplicada em uma venda.
 
 **Produto com passos:** descrição, grupo, preço base, abertura automática ou
 manual, ativo e observações. Cada passo tem descrição, mínimo, máximo, ordem,
