@@ -81,10 +81,13 @@ próprio destino de notificação. No formulário do grupo `BEBIDAS GELADAS`, as
 visibilidades são caixas separadas para PDV online, smartphone, SmartPOS, PDV
 offline e pedido franqueado; também há ativo, cor e destino de notificação,
 mais uma aba própria de tributação.
-O grupo observado foi `BEBIDAS GELADAS` (ID 68461). A tentativa de abrir sua
-aba de tributação em 04/11 excedeu o tempo do navegador automatizado;
-portanto o vínculo fiscal **efetivo** desse grupo não foi confirmado nesta
-rodada. Não atribuir a ele um dos dois perfis por suposição.
+O grupo observado foi `BEBIDAS GELADAS` (ID 68461). Em uma segunda tentativa
+na sessão autenticada, a aba de tributação abriu e o campo **Grupo tributário
+associado ao grupo** apareceu vazio. O cadastro `ÁGUA COM GÁS` também mostrava
+vazio seu campo de grupo tributário próprio. Assim, a regra de precedência está
+confirmada, mas o perfil fiscal efetivamente usado nesse item não se deduz
+desses dois campos. É necessário confrontar a operação do pedido e o XML
+autorizado antes de atribuir CFOP/CSOSN.
 
 **Produto com passos:** descrição, grupo, preço base, abertura automática ou
 manual, ativo e observações. Cada passo tem descrição, mínimo, máximo, ordem,

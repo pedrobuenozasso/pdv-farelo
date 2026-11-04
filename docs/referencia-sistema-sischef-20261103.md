@@ -1,5 +1,13 @@
 # Referência: Retaguarda do Sischef (back-office) — 03/11/2026
 
+**Correção após inspeção de 04/11:** a existência dos grupos tributários 3551
+e 3552 não prova que cada produto use um deles. A aba fiscal do grupo
+`BEBIDAS GELADAS` (68461) mostrou associação vazia, assim como a do produto
+`ÁGUA COM GÁS` (2297141). As duas combinações abaixo são **candidatas**, não
+perfis efetivos comprovados desses itens. Conferir operação de venda e XML
+autorizado antes da migração. Ver
+`engenharia-reversa-retaguarda-sischef-20261104.md`.
+
 Levantamento do sistema administrativo que a cafeteria usa hoje
 (`sistema.sischef.com`, "Retaguarda"), feito com a sessão real do Admin, para
 alimentar os tickets fiscais (**FISC-01, FISC-02, FISC-04**) e a migração em
