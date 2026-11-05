@@ -24,6 +24,10 @@ export type Product = {
   fiscalProfileId: string | null;
   gtin: string | null;
   fiscalUnit: string | null;
+  // Tem pelo menos um passo configurado (GET /api/v1/products/{id}/steps
+  // não vazio). Opcional porque a Web pode subir antes da API: ausente
+  // significa "não sei", e o PDV trata como "tem passos" (abre as escolhas).
+  hasSteps?: boolean;
   createdAt: string;
   updatedAt: string;
 };

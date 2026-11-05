@@ -12,7 +12,7 @@
  * | Ctrl/Cmd + F     | Focar a busca de produto                         |
  * | ↑ / ↓            | Navegar a grade de produtos (mesmo digitando)    |
  * | ← / →            | Navegar a grade (fora de campo, ou campo vazio)  |
- * | Enter            | Selecionar o produto em foco, ou lançá-lo        |
+ * | Enter            | Lançar o produto em foco (com passos: escolhas)  |
  * | F10              | Confirmar o pedido (vai para produção)           |
  * | F9               | Confirmar e receber (abre o pagamento)           |
  * | Esc              | Limpar seleção / limpar busca                     |
@@ -154,6 +154,34 @@ export function resolvePdvHotkey(
   }
 
   return null;
+}
+
+/**
+ * O que um clique (ou Enter) num card de produto faz.
+ *
+ * <p>Como no PDV que a equipe usa hoje: produto simples entra direto no
+ * rascunho, 1 unidade por clique; só produto com passos abre o painel de
+ * escolhas. Qualquer dúvida cai no painel, que é o caminho que já valida e
+ * explica o bloqueio:
+ * <ul>
+ *   <li><b>`hasSteps` ausente</b> (API anterior ao campo): abre as escolhas.</li>
+ *   <li><b>Preço inválido ou zero</b>: abre o painel, que mostra "Valor zero"
+ *   e não deixa lançar — nunca vira venda grátis silenciosa.</li>
+ *   <li><b>Total do rascunho estouraria o limite numérico</b>: idem.</li>
+ * </ul>
+ *
+ * @param unitCents preço do produto em centavos (`parseMoneyCents`), ou `null`
+ * @param cartTotalCents total atual do rascunho em centavos
+ */
+export function resolveProductActivation(
+  product: { hasSteps?: boolean },
+  unitCents: number | null,
+  cartTotalCents: number,
+): "add-one" | "open-choices" {
+  if (product.hasSteps !== false) return "open-choices";
+  if (unitCents === null || unitCents <= 0) return "open-choices";
+  if (!Number.isSafeInteger(cartTotalCents + unitCents)) return "open-choices";
+  return "add-one";
 }
 
 /** Se o alvo do evento é um campo onde o usuário está digitando texto. */

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolvePdvHotkey, verticalNeighborIndex } from "./pdv-hotkeys.ts";
+import {
+  resolveProductActivation,
+  resolvePdvHotkey,
+  verticalNeighborIndex,
+} from "./pdv-hotkeys.ts";
 
 const context = { hasCart: true, hasSelection: false, hasProducts: true };
 const key = (name, extra = {}) => ({
@@ -133,5 +137,45 @@ test("fora da busca, setas e Enter ficam com o campo (ex.: nome do cliente)", ()
     {
       type: "focus-search",
     },
+  );
+});
+
+test("Enter na busca ativa o card em destaque", () => {
+  assert.deepEqual(
+    resolvePdvHotkey(key("Enter", { typing: true, inOtherField: false }), {
+      ...context,
+      hasCart: false,
+    }),
+    { type: "activate-highlight" },
+  );
+});
+
+test("produto sem passos lança direto; com passos abre as escolhas", () => {
+  assert.equal(
+    resolveProductActivation({ hasSteps: false }, 750, 0),
+    "add-one",
+  );
+  assert.equal(
+    resolveProductActivation({ hasSteps: true }, 750, 0),
+    "open-choices",
+  );
+});
+
+test("sem hasSteps (API antiga) cai no painel de escolhas", () => {
+  assert.equal(resolveProductActivation({}, 750, 0), "open-choices");
+});
+
+test("preço zero/inválido ou estouro do total nunca lançam direto", () => {
+  assert.equal(
+    resolveProductActivation({ hasSteps: false }, 0, 0),
+    "open-choices",
+  );
+  assert.equal(
+    resolveProductActivation({ hasSteps: false }, null, 0),
+    "open-choices",
+  );
+  assert.equal(
+    resolveProductActivation({ hasSteps: false }, 1, Number.MAX_SAFE_INTEGER),
+    "open-choices",
   );
 });

@@ -82,6 +82,7 @@ import { decodeUserId } from "@/lib/auth";
 import { parseMoneyCents } from "@/lib/money-input";
 import { freshPaymentAmount } from "@/lib/payment-after-order";
 import {
+  resolveProductActivation,
   usePdvHotkeys,
   verticalNeighborIndex,
   type PdvHotkeyAction,
@@ -1100,6 +1101,52 @@ function AddItemPanel({
     setHighlightedIndex(flatIndexById.get(product.id) ?? 0);
   }
 
+  // Clique/Enter num card (como no PDV atual): produto simples entra direto,
+  // 1 unidade, somando na linha sem escolhas que já existir; produto com
+  // passos (ou na dúvida: API antiga, preço zero, limite) abre o painel,
+  // que continua sendo o caminho que valida e explica. Ver
+  // resolveProductActivation.
+  function activateProduct(product: Product) {
+    const unitCents = parseMoneyCents(String(product.price));
+    if (
+      unitCents === null ||
+      resolveProductActivation(product, unitCents, cartTotalCents) !== "add-one"
+    ) {
+      selectProduct(product);
+      return;
+    }
+    // Pedido sendo enviado: o rascunho será zerado no sucesso, então um
+    // item lançado agora sumiria. Mesmo bloqueio do "+" e do "Adicionar".
+    if (addItemMutation.isPending) return;
+    setCart((current) => {
+      const existing = current.find(
+        (item) => item.productId === product.id && !item.options?.length,
+      );
+      return existing
+        ? current.map((item) =>
+            item.lineId === existing.lineId
+              ? { ...item, quantity: item.quantity + 1 }
+              : item,
+          )
+        : [
+            ...current,
+            {
+              lineId: crypto.randomUUID(),
+              productId: product.id,
+              quantity: 1,
+              unitPriceCents: unitCents,
+              optionLabels: [],
+            },
+          ];
+    });
+    // Fecha um painel de escolhas que estivesse aberto para outro produto
+    // (o clique já trocava a seleção antes) e deixa o destaque no card.
+    setSelectedProductId(null);
+    setQuantity(1);
+    setOptionQuantities({});
+    setHighlightedIndex(flatIndexById.get(product.id) ?? 0);
+  }
+
   // O índice destacado é clampado na leitura (em vez de corrigido por efeito),
   // então a busca/categoria pode reduzir a grade sem deixar o destaque fora
   // dos limites. A navegação por setas usa módulo sobre a contagem atual.
@@ -1118,6 +1165,7 @@ function AddItemPanel({
     highlightedIndex: safeHighlightedIndex,
     canAddSelected,
     addSelectedProduct,
+    activateProduct,
   });
   useEffect(() => {
     latest.current = {
@@ -1127,6 +1175,7 @@ function AddItemPanel({
       highlightedIndex: safeHighlightedIndex,
       canAddSelected,
       addSelectedProduct,
+      activateProduct,
     };
   });
 
@@ -1176,19 +1225,15 @@ function AddItemPanel({
         }
         case "activate-highlight":
           // Com um produto já selecionado e válido, Enter lança no carrinho;
-          // caso contrário, seleciona o produto em destaque (que então pede
-          // passos/quantidade, como um clique faria).
+          // caso contrário, ativa o produto em destaque exatamente como um
+          // clique: simples entra direto, com passos abre as escolhas.
           if (state.selectedProductId !== null) {
             if (state.canAddSelected) state.addSelectedProduct();
             return;
           }
           {
             const target = state.flatProducts[state.highlightedIndex];
-            if (target) {
-              setSelectedProductId(target.id);
-              setOptionQuantities({});
-              setQuantity(1);
-            }
+            if (target) state.activateProduct(target);
           }
           return;
         case "confirm":
@@ -1321,14 +1366,25 @@ function AddItemPanel({
                       <button
                         type="button"
                         data-product-index={index}
-                        onClick={() => selectProduct(product)}
+                        onClick={() => activateProduct(product)}
                         className="flex min-h-[4.75rem] flex-1 flex-col items-start justify-between gap-2 rounded-xl p-3 text-left"
                       >
                         <span className="line-clamp-2 text-sm leading-snug font-semibold break-words">
                           {product.name}
                         </span>
-                        <span className="text-primary-dark text-sm font-bold tabular-nums">
-                          {currencyFormatter.format(product.price)}
+                        <span className="flex w-full items-center justify-between gap-1">
+                          <span className="text-primary-dark text-sm font-bold tabular-nums">
+                            {currencyFormatter.format(product.price)}
+                          </span>
+                          {/* O clique abre o painel de escolhas em vez de
+                              lançar direto. Só com hasSteps === true: com a
+                              API antiga (campo ausente) todo card abriria
+                              escolhas e o selo viraria ruído. */}
+                          {product.hasSteps === true ? (
+                            <span className="text-ink-faint border-line rounded-full border px-1.5 text-[10px] leading-4 font-semibold">
+                              opções
+                            </span>
+                          ) : null}
                         </span>
                       </button>
                       {inDraft ? (
