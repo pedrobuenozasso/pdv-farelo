@@ -15,7 +15,13 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
@@ -75,7 +81,11 @@ import { cn } from "@/lib/cn";
 import { decodeUserId } from "@/lib/auth";
 import { parseMoneyCents } from "@/lib/money-input";
 import { freshPaymentAmount } from "@/lib/payment-after-order";
-import { usePdvHotkeys, type PdvHotkeyAction } from "@/lib/pdv-hotkeys";
+import {
+  usePdvHotkeys,
+  verticalNeighborIndex,
+  type PdvHotkeyAction,
+} from "@/lib/pdv-hotkeys";
 import { useSession } from "@/lib/use-session";
 
 // Tom de atendente, diferente do texto amigável ao cliente em
@@ -196,7 +206,7 @@ export default function PdvCommandsPage() {
             aria-label={`Comanda ${selectedNumber}`}
             className="bg-ink/50 fixed inset-0 z-50 overflow-y-auto p-2 sm:p-6"
           >
-            <div className="mx-auto max-w-6xl">
+            <div className="mx-auto max-w-[100rem]">
               <CommandDetail
                 key={selectedNumber}
                 number={selectedNumber}
@@ -426,24 +436,102 @@ function CommandDetail({
   const totalPaid = balanceQuery.data?.totalPaid ?? 0;
   const remaining = balanceQuery.data?.remaining ?? 0;
 
+  // UI-01c: contexto da comanda no topo do painel do pedido, como no PDV
+  // atual (comanda, mesa, cliente, atendente). Garçom/atendente no Farelo é
+  // atribuído por pedido já confirmado (WaiterPicker em OrderCard); o
+  // rascunho não tem esse campo, então aqui só aparece quem já atende a
+  // visita.
+  const attendantNames = Array.from(
+    new Set(
+      (ordersQuery.data ?? [])
+        .filter((order) => order.status !== "CANCELLED")
+        .map((order) => order.assignedUserName)
+        .filter((name): name is string => !!name),
+    ),
+  );
+  const contextPanel = command ? (
+    <section
+      aria-label="Contexto da comanda"
+      className="border-line bg-bg flex min-w-0 flex-col gap-3 rounded-2xl border p-4"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-serif text-lg font-semibold">
+          Comanda {number}
+        </span>
+        <Badge tone={STATUS_TONE[command.status]} dot>
+          {STATUS_LABEL[command.status]}
+        </Badge>
+        <span className="text-ink-faint text-xs">
+          Visita {command.cycleNumber}
+        </span>
+      </div>
+      <TableAssociation command={command} />
+      <CustomerCard commandNumber={number} command={command} />
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+        <span className="text-ink-faint text-[11px] font-bold tracking-wide uppercase">
+          Atendente
+        </span>
+        <span className={attendantNames.length ? "" : "text-ink-faint"}>
+          {attendantNames.length
+            ? attendantNames.join(", ")
+            : "Definido em cada pedido confirmado"}
+        </span>
+      </div>
+    </section>
+  ) : null;
+
+  const ordersSection = (
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-ink-faint text-xs font-bold tracking-wide uppercase">
+          Pedidos
+        </h3>
+        {command &&
+        (command.status === "AVAILABLE" || command.status === "OPEN") ? (
+          <button
+            type="button"
+            onClick={() => setAddItemOpen(true)}
+            disabled={addItemOpen}
+            className="text-primary text-xs font-bold hover:underline"
+          >
+            {addItemOpen ? "Lançamento em andamento" : "+ Adicionar item"}
+          </button>
+        ) : null}
+      </div>
+      {ordersQuery.isLoading ? (
+        <p className="text-ink-faint text-sm">Carregando...</p>
+      ) : null}
+      {ordersQuery.isError ? (
+        <p className="text-red text-sm">
+          Não foi possível carregar os pedidos.
+        </p>
+      ) : null}
+      {ordersQuery.data && ordersQuery.data.length === 0 ? (
+        <p className="text-ink-faint text-sm">Nenhum pedido ainda.</p>
+      ) : null}
+      {ordersQuery.data?.map((order) => (
+        <OrderCard key={order.id} order={order} commandNumber={number} />
+      ))}
+    </div>
+  );
+
+  const paymentPanel = command ? (
+    <PaymentPanel
+      commandNumber={number}
+      totalOwed={totalOwed}
+      totalDiscount={totalDiscount}
+      totalPaid={totalPaid}
+      remaining={remaining}
+      openSignal={paymentPrompt}
+    />
+  ) : null;
+
   return (
     <Card className="flex flex-col gap-5 shadow-xl">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h2 className="font-serif text-xl font-semibold">
-            Lançamento de pedido — Comanda {number}
-          </h2>
-          {command ? (
-            <Badge tone={STATUS_TONE[command.status]} dot>
-              {STATUS_LABEL[command.status]}
-            </Badge>
-          ) : null}
-          {command ? (
-            <span className="text-ink-faint text-xs">
-              Visita {command.cycleNumber}
-            </span>
-          ) : null}
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h2 className="font-serif text-xl font-semibold">
+          Lançamento de pedido — Comanda {number}
+        </h2>
         <button
           type="button"
           onClick={() => {
@@ -514,93 +602,54 @@ function CommandDetail({
         </div>
       ) : null}
 
-      <div className="grid min-w-0 gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] sm:items-start">
-        <div className="flex min-w-0 flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-ink-faint text-xs font-bold tracking-wide uppercase">
-              Pedidos
-            </h3>
-            {command &&
-            (command.status === "AVAILABLE" || command.status === "OPEN") ? (
-              <button
-                type="button"
-                onClick={() => setAddItemOpen(true)}
-                disabled={addItemOpen}
-                className="text-primary text-xs font-bold hover:underline"
-              >
-                {addItemOpen ? "Lançamento em andamento" : "+ Adicionar item"}
-              </button>
-            ) : null}
-          </div>
-
-          {addItemOpen ? (
-            <AddItemPanel
-              commandNumber={number}
-              onDraftChange={setDraftHasItems}
-              onPendingChange={setOrderPending}
-              onAdded={() => {
-                // Partial-match invalidation: also catches "orders" and
-                // "paymentBalance" (both nested under this same key prefix)
-                // in one call — and the command status itself, since
-                // adding the first item auto-opens an AVAILABLE comanda
-                // (CommandService#openForOrdering) and the header badge
-                // needs to reflect that.
-                queryClient.invalidateQueries({
-                  queryKey: ["pdv", "command", number],
-                });
-                queryClient.invalidateQueries({
-                  queryKey: ["pdv", "commands"],
-                });
-              }}
-              onConfirmAndReceive={() => {
-                void freshPaymentAmount(() =>
-                  queryClient.fetchQuery({
-                    queryKey: ["pdv", "command", number, "paymentBalance"],
-                    queryFn: () => getPaymentBalance(number),
-                    staleTime: 0,
-                  }),
-                ).then((amount) =>
-                  setPaymentPrompt(({ token }) => ({
-                    token: token + 1,
-                    amount,
-                  })),
-                );
-              }}
-            />
-          ) : null}
-
-          {ordersQuery.isLoading ? (
-            <p className="text-ink-faint text-sm">Carregando...</p>
-          ) : null}
-          {ordersQuery.isError ? (
-            <p className="text-red text-sm">
-              Não foi possível carregar os pedidos.
-            </p>
-          ) : null}
-          {ordersQuery.data && ordersQuery.data.length === 0 ? (
-            <p className="text-ink-faint text-sm">Nenhum pedido ainda.</p>
-          ) : null}
-          {ordersQuery.data?.map((order) => (
-            <OrderCard key={order.id} order={order} commandNumber={number} />
-          ))}
-        </div>
-
-        {command ? (
-          <PaymentPanel
-            commandNumber={number}
-            totalOwed={totalOwed}
-            totalDiscount={totalDiscount}
-            totalPaid={totalPaid}
-            remaining={remaining}
-            openSignal={paymentPrompt}
-          />
-        ) : null}
-      </div>
-
-      {command ? (
-        <CustomerCard commandNumber={number} command={command} />
-      ) : null}
-      {command ? <TableAssociation command={command} /> : null}
+      {addItemOpen ? (
+        <AddItemPanel
+          commandNumber={number}
+          context={contextPanel}
+          orders={ordersSection}
+          payment={paymentPanel}
+          onDraftChange={setDraftHasItems}
+          onPendingChange={setOrderPending}
+          onAdded={() => {
+            // Partial-match invalidation: also catches "orders" and
+            // "paymentBalance" (both nested under this same key prefix)
+            // in one call — and the command status itself, since
+            // adding the first item auto-opens an AVAILABLE comanda
+            // (CommandService#openForOrdering) and the header badge
+            // needs to reflect that.
+            queryClient.invalidateQueries({
+              queryKey: ["pdv", "command", number],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["pdv", "commands"],
+            });
+          }}
+          onConfirmAndReceive={() => {
+            void freshPaymentAmount(() =>
+              queryClient.fetchQuery({
+                queryKey: ["pdv", "command", number, "paymentBalance"],
+                queryFn: () => getPaymentBalance(number),
+                staleTime: 0,
+              }),
+            ).then((amount) =>
+              setPaymentPrompt(({ token }) => ({
+                token: token + 1,
+                amount,
+              })),
+            );
+          }}
+        />
+      ) : (
+        <LaunchLayout
+          main={ordersSection}
+          aside={
+            <>
+              {contextPanel}
+              {paymentPanel}
+            </>
+          }
+        />
+      )}
       {(visitsQuery.data?.length ?? 0) > 1 ? (
         <div className="border-line border-t pt-3 text-sm">
           <p className="text-ink-soft font-semibold">Histórico de visitas</p>
@@ -663,15 +712,26 @@ function TableAssociation({ command }: { command: Command }) {
     },
   });
 
-  if (!tables.data?.length) return null;
+  // Sem mesas cadastradas (ou ainda carregando) não há o que escolher, mas o
+  // painel do pedido mostra a mesa já vinculada, se houver.
+  if (!tables.data?.length) {
+    return command.tableNumber !== null ? (
+      <p className="text-sm">
+        <span className="text-ink-faint text-[11px] font-bold tracking-wide uppercase">
+          Mesa
+        </span>{" "}
+        {command.tableNumber}
+      </p>
+    ) : null;
+  }
   return (
-    <div className="border-line flex flex-wrap items-end gap-3 border-t pt-4">
-      <label className="text-ink-soft flex min-w-40 flex-col gap-1 text-sm">
+    <div className="flex flex-wrap items-end gap-2">
+      <label className="text-ink-soft flex min-w-0 flex-1 basis-40 flex-col gap-1 text-sm">
         Mesa vinculada
         <select
           value={selectedValue}
           onChange={(event) => setSelection(event.target.value)}
-          className="border-line bg-surface text-ink rounded-lg border px-3 py-2"
+          className="border-line bg-surface text-ink min-w-0 rounded-lg border px-3 py-2"
         >
           <option value="">Sem mesa</option>
           {tables.data.map((table) => (
@@ -720,14 +780,53 @@ function selectedOptionCount(
   );
 }
 
+// Tela de lançamento no formato do PDV que a equipe já usa (Sischef):
+// categorias → grade de produtos → painel do pedido. Em janela estreita as
+// colunas empilham (busca, categorias, grade, painel) sem rolagem horizontal.
+// `main` recebe o catálogo (quando há lançamento) e os pedidos confirmados;
+// `aside` é o painel do pedido: contexto da comanda no topo, rascunho com
+// totais e os botões de commit, e o resumo de pagamento da comanda.
+function LaunchLayout({ main, aside }: { main: ReactNode; aside: ReactNode }) {
+  return (
+    <div className="grid min-w-0 gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,20rem)] md:items-start xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+      <div className="flex min-w-0 flex-col gap-4">{main}</div>
+      <aside
+        aria-label="Painel do pedido"
+        className="flex min-w-0 flex-col gap-4"
+      >
+        {aside}
+      </aside>
+    </div>
+  );
+}
+
+// Cards da grade na ordem do índice achatado (`data-product-index`), lidos
+// só em handlers de teclado — nunca durante o render.
+function productCards(container: HTMLElement | null): HTMLElement[] {
+  if (!container) return [];
+  return Array.from(
+    container.querySelectorAll<HTMLElement>("[data-product-index]"),
+  ).sort(
+    (a, b) => Number(a.dataset.productIndex) - Number(b.dataset.productIndex),
+  );
+}
+
 function AddItemPanel({
   commandNumber,
+  context,
+  orders,
+  payment,
   onDraftChange,
   onPendingChange,
   onAdded,
   onConfirmAndReceive,
 }: {
   commandNumber: number;
+  // UI-01c: blocos do CommandDetail que este painel posiciona no layout de
+  // lançamento (o rascunho vive aqui, então o layout também).
+  context: ReactNode;
+  orders: ReactNode;
+  payment: ReactNode;
   onDraftChange: (hasItems: boolean) => void;
   onPendingChange: (pending: boolean) => void;
   onAdded: () => void;
@@ -754,6 +853,8 @@ function AddItemPanel({
   // Operação por teclado (espelha o PDV que a equipe já usa): foco da busca
   // para Ctrl+F e índice do produto em destaque para navegação por setas.
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // Contêiner da grade: as setas ↑/↓ leem a posição real dos cards nele.
+  const gridRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     searchInputRef.current?.focus();
   }, []);
@@ -827,14 +928,28 @@ function AddItemPanel({
   // Só produtos ativos e habilitados pro caixa (availableOnPos) — mesmo
   // filtro que o cardápio QR já aplica pro seu próprio flag
   // (availableOnMenu), FARELO-181.
-  const availableProducts = (productsQuery.data ?? []).filter(
+  const searchMatches = (productsQuery.data ?? []).filter(
     (product) =>
       product.active &&
       product.availableOnPos &&
-      (selectedCategoryId === null ||
-        product.categoryId === selectedCategoryId) &&
       product.name.toLowerCase().includes(search.toLowerCase()),
   );
+  // Contagem por categoria sobre o resultado da busca: mostra onde estão os
+  // produtos encontrados antes de trocar de categoria.
+  const matchCountByCategory = new Map<string, number>();
+  for (const product of searchMatches) {
+    matchCountByCategory.set(
+      product.categoryId,
+      (matchCountByCategory.get(product.categoryId) ?? 0) + 1,
+    );
+  }
+  const availableProducts = searchMatches.filter(
+    (product) =>
+      selectedCategoryId === null || product.categoryId === selectedCategoryId,
+  );
+  const activeCategories = (categoriesQuery.data ?? [])
+    .filter((category) => category.active)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
   const categoryNameById = new Map(
     (categoriesQuery.data ?? []).map((category: Category) => [
       category.id,
@@ -866,6 +981,7 @@ function AddItemPanel({
     (total, item) => total + item.unitPriceCents * item.quantity,
     0,
   );
+  const cartQuantity = cart.reduce((total, item) => total + item.quantity, 0);
   const selectedSteps = stepsQuery.data ?? [];
   const selectedBaseCents = selectedProduct
     ? parseMoneyCents(String(selectedProduct.price))
@@ -957,6 +1073,33 @@ function AddItemPanel({
     setOptionQuantities({});
   }
 
+  // UI-01b: `− qtd +` no card e no painel ajustam uma linha já validada do
+  // rascunho. O preço unitário (com escolhas) foi fixado quando a linha
+  // entrou; aqui só muda a quantidade. Chegar a zero remove a linha.
+  function changeLineQuantity(lineId: string, delta: 1 | -1) {
+    setCart((current) =>
+      current.flatMap((item) => {
+        if (item.lineId !== lineId) return [item];
+        const next = item.quantity + delta;
+        return next <= 0 ? [] : [{ ...item, quantity: next }];
+      }),
+    );
+  }
+  function canIncrementLine(item: DraftCartItem) {
+    return (
+      !addItemMutation.isPending &&
+      Number.isSafeInteger(cartTotalCents + item.unitPriceCents)
+    );
+  }
+
+  function selectProduct(product: Product) {
+    setSelectedProductId(product.id);
+    setOptionQuantities({});
+    setQuantity(1);
+    // O destaque do teclado acompanha o clique, para as setas seguirem dali.
+    setHighlightedIndex(flatIndexById.get(product.id) ?? 0);
+  }
+
   // O índice destacado é clampado na leitura (em vez de corrigido por efeito),
   // então a busca/categoria pode reduzir a grade sem deixar o destaque fora
   // dos limites. A navegação por setas usa módulo sobre a contagem atual.
@@ -1004,14 +1147,33 @@ function AddItemPanel({
           searchInputRef.current?.focus();
           searchInputRef.current?.select();
           return;
-        case "move-highlight":
+        case "move-highlight": {
           setSelectedProductId(null);
-          setHighlightedIndex((index) => {
-            const count = state.flatProducts.length;
-            if (count === 0) return 0;
-            return (index + action.delta + count) % count;
-          });
+          const count = state.flatProducts.length;
+          if (count === 0) return;
+          const current = state.highlightedIndex;
+          const cards = productCards(gridRef.current);
+          const forward =
+            action.direction === "right" || action.direction === "down";
+          // ←/→ andam um card na ordem de leitura; ↑/↓ trocam de linha
+          // visual. Sem linha naquela direção, volta ao primeiro/último card
+          // (a lista antiga também dava a volta).
+          let next = (current + (forward ? 1 : -1) + count) % count;
+          if (
+            (action.direction === "up" || action.direction === "down") &&
+            cards.length === count
+          ) {
+            next =
+              verticalNeighborIndex(
+                cards.map((card) => card.getBoundingClientRect()),
+                current,
+                action.direction,
+              ) ?? (forward ? 0 : count - 1);
+          }
+          setHighlightedIndex(next);
+          cards[next]?.scrollIntoView({ block: "nearest" });
           return;
+        }
         case "activate-highlight":
           // Com um produto já selecionado e válido, Enter lança no carrinho;
           // caso contrário, seleciona o produto em destaque (que então pede
@@ -1053,332 +1215,494 @@ function AddItemPanel({
 
   usePdvHotkeys(true, getHotkeyContext, dispatchHotkey);
 
-  return (
-    <div className="border-line bg-bg flex flex-col gap-3 rounded-2xl border p-4">
+  const categoryButtonClass = (active: boolean) =>
+    cn(
+      "flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold xl:w-full xl:justify-between xl:rounded-lg xl:py-2 xl:text-left xl:text-[13px]",
+      active
+        ? "bg-primary text-primary-ink"
+        : "bg-bg-alt text-ink-soft hover:text-ink",
+    );
+
+  const catalog = (
+    <section
+      aria-label="Produtos"
+      className="border-line bg-bg grid min-w-0 gap-3 rounded-2xl border p-4 xl:grid-cols-[11rem_minmax(0,1fr)]"
+    >
       <input
         ref={searchInputRef}
         type="text"
         placeholder="Buscar produto pelo nome... (Ctrl+F)"
         value={search}
         onChange={(event) => setSearch(event.target.value)}
-        className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-sm outline-none"
+        className="border-line bg-surface focus:border-primary min-w-0 rounded-lg border px-3 py-2 text-sm outline-none xl:col-span-2"
       />
 
       <div
-        className="flex gap-2 overflow-x-auto pb-1"
+        role="group"
+        className="flex min-w-0 gap-2 overflow-x-auto pb-1 xl:max-h-[60vh] xl:flex-col xl:self-start xl:overflow-x-hidden xl:overflow-y-auto xl:pb-0"
         aria-label="Categorias de produtos"
       >
         <button
           type="button"
           onClick={() => setSelectedCategoryId(null)}
           aria-pressed={selectedCategoryId === null}
-          className={cn(
-            "shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold",
-            selectedCategoryId === null
-              ? "bg-primary text-primary-ink"
-              : "bg-bg-alt text-ink-soft",
-          )}
+          className={categoryButtonClass(selectedCategoryId === null)}
         >
-          Todos
+          <span>Todos</span>
+          <span className="tabular-nums opacity-70">
+            {searchMatches.length}
+          </span>
         </button>
-        {(categoriesQuery.data ?? [])
-          .filter((category) => category.active)
-          .sort((a, b) => a.sortOrder - b.sortOrder)
-          .map((category) => (
-            <button
-              key={category.id}
-              type="button"
-              onClick={() => setSelectedCategoryId(category.id)}
-              aria-pressed={selectedCategoryId === category.id}
-              className={cn(
-                "shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold",
-                selectedCategoryId === category.id
-                  ? "bg-primary text-primary-ink"
-                  : "bg-bg-alt text-ink-soft",
-              )}
-            >
-              {category.name}
-            </button>
-          ))}
-      </div>
-
-      <div className="flex max-h-[45vh] flex-col gap-3 overflow-y-auto">
-        {productsQuery.isLoading ? (
-          <p className="text-ink-faint text-sm">Carregando...</p>
-        ) : null}
-        {availableProducts.length === 0 && !productsQuery.isLoading ? (
-          <p className="text-ink-faint text-sm">Nenhum produto encontrado.</p>
-        ) : null}
-        {Array.from(sections.entries()).map(([categoryName, products]) => (
-          <div key={categoryName} className="flex flex-col gap-1">
-            <div className="text-ink-faint text-[11px] font-bold tracking-wide uppercase">
-              {categoryName}
-            </div>
-            {products.map((product) => {
-              const isHighlighted =
-                selectedProductId === null &&
-                flatIndexById.get(product.id) === safeHighlightedIndex;
-              return (
-                <button
-                  key={product.id}
-                  type="button"
-                  ref={
-                    isHighlighted
-                      ? (node) => node?.scrollIntoView({ block: "nearest" })
-                      : undefined
-                  }
-                  onClick={() => {
-                    setSelectedProductId(product.id);
-                    setOptionQuantities({});
-                    setQuantity(1);
-                  }}
-                  className={cn(
-                    "flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
-                    selectedProductId === product.id
-                      ? "bg-primary-soft text-primary-dark font-semibold"
-                      : isHighlighted
-                        ? "bg-bg-alt ring-primary/40 ring-2"
-                        : "hover:bg-bg-alt",
-                  )}
-                >
-                  <span>{product.name}</span>
-                  <span className="font-semibold">
-                    {currencyFormatter.format(product.price)}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+        {activeCategories.map((category) => (
+          <button
+            key={category.id}
+            type="button"
+            onClick={() => setSelectedCategoryId(category.id)}
+            aria-pressed={selectedCategoryId === category.id}
+            className={categoryButtonClass(selectedCategoryId === category.id)}
+          >
+            <span className="truncate">{category.name}</span>
+            <span className="tabular-nums opacity-70">
+              {matchCountByCategory.get(category.id) ?? 0}
+            </span>
+          </button>
         ))}
       </div>
 
-      {selectedProduct ? (
-        <div className="border-line flex flex-col gap-2 border-t pt-3">
-          {stepsQuery.isPending ? (
-            <p className="text-ink-faint text-sm">Carregando escolhas...</p>
+      <div className="flex min-w-0 flex-col gap-3">
+        <div
+          ref={gridRef}
+          className="flex max-h-[50vh] min-w-0 flex-col gap-4 overflow-y-auto pr-1 xl:max-h-[60vh]"
+        >
+          {productsQuery.isLoading ? (
+            <p className="text-ink-faint text-sm">Carregando...</p>
           ) : null}
-          {stepsQuery.isError ? (
-            <p className="text-red text-sm">
-              Não foi possível consultar as escolhas deste produto. Tente
-              selecioná-lo novamente.
-            </p>
+          {availableProducts.length === 0 && !productsQuery.isLoading ? (
+            <p className="text-ink-faint text-sm">Nenhum produto encontrado.</p>
           ) : null}
-          {selectedSteps.map((step) => {
-            const count = selectedOptionCount(step, optionQuantities);
-            return (
-              <fieldset
-                key={step.id}
-                className="border-line rounded-xl border p-3"
-              >
-                <legend className="px-1 text-sm font-semibold">
-                  {step.label}
-                </legend>
-                <p className="text-ink-soft mb-2 text-xs">
-                  Escolha de {step.minChoices} a {step.maxChoices} · {count}{" "}
-                  selecionada(s)
-                </p>
-                {step.options.map((option) => {
-                  const chosen = optionQuantities[option.id] ?? 0;
-                  const optionCents = parseMoneyCents(String(option.price));
+          {Array.from(sections.entries()).map(([categoryName, products]) => (
+            <div key={categoryName} className="flex flex-col gap-2">
+              <div className="text-ink-faint text-[11px] font-bold tracking-wide uppercase">
+                {categoryName}
+              </div>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
+                {products.map((product) => {
+                  const index = flatIndexById.get(product.id) ?? 0;
+                  const isSelected = selectedProductId === product.id;
+                  const isHighlighted =
+                    selectedProductId === null &&
+                    index === safeHighlightedIndex;
+                  const lines = cart.filter(
+                    (item) => item.productId === product.id,
+                  );
+                  const simpleLine = lines.find(
+                    (item) => !item.options?.length,
+                  );
+                  const withChoicesQuantity = lines
+                    .filter((item) => item.options?.length)
+                    .reduce((total, item) => total + item.quantity, 0);
+                  const inDraft = lines.length > 0;
                   return (
                     <div
-                      key={option.id}
-                      className="flex items-center justify-between gap-2 py-1 text-sm"
+                      key={product.id}
+                      className={cn(
+                        "flex min-w-0 flex-col rounded-xl border transition-colors",
+                        inDraft
+                          ? "border-primary bg-primary-soft"
+                          : "border-line bg-surface hover:border-primary/40",
+                        isSelected
+                          ? "ring-primary ring-2"
+                          : isHighlighted
+                            ? "ring-primary/40 ring-2"
+                            : null,
+                      )}
                     >
-                      <span>
-                        {option.optionName} ·{" "}
-                        {optionCents === null
-                          ? "Preço inválido"
-                          : `+ ${currencyFormatter.format(optionCents / 100)}`}
-                        {!option.optionActive ? (
-                          <span className="text-red ml-2 text-xs">
-                            Indisponível
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          aria-label={`Diminuir ${option.optionName}`}
-                          disabled={chosen === 0 || addItemMutation.isPending}
-                          onClick={() =>
-                            setOptionQuantities((current) => ({
-                              ...current,
-                              [option.id]: Math.max(
-                                0,
-                                (current[option.id] ?? 0) - 1,
-                              ),
-                            }))
-                          }
-                          className="border-line h-7 w-7 rounded-full border disabled:opacity-40"
+                      <button
+                        type="button"
+                        data-product-index={index}
+                        onClick={() => selectProduct(product)}
+                        className="flex min-h-[4.75rem] flex-1 flex-col items-start justify-between gap-2 rounded-xl p-3 text-left"
+                      >
+                        <span className="line-clamp-2 text-sm leading-snug font-semibold break-words">
+                          {product.name}
+                        </span>
+                        <span className="text-primary-dark text-sm font-bold tabular-nums">
+                          {currencyFormatter.format(product.price)}
+                        </span>
+                      </button>
+                      {inDraft ? (
+                        <div
+                          role="group"
+                          aria-label={`${product.name} no pedido`}
+                          className="border-primary/20 flex min-h-9 items-center justify-between gap-1 border-t px-2 py-1"
                         >
-                          −
-                        </button>
-                        <span className="w-5 text-center">{chosen}</span>
-                        <button
-                          type="button"
-                          aria-label={`Aumentar ${option.optionName}`}
-                          disabled={
-                            !option.optionActive ||
-                            optionCents === null ||
-                            count >= step.maxChoices ||
-                            addItemMutation.isPending
-                          }
-                          onClick={() =>
-                            setOptionQuantities((current) => ({
-                              ...current,
-                              [option.id]: (current[option.id] ?? 0) + 1,
-                            }))
-                          }
-                          className="border-line h-7 w-7 rounded-full border disabled:opacity-40"
-                        >
-                          +
-                        </button>
-                      </span>
+                          {simpleLine ? (
+                            <span className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                aria-label={`Diminuir ${product.name} no pedido`}
+                                disabled={addItemMutation.isPending}
+                                onClick={() =>
+                                  changeLineQuantity(simpleLine.lineId, -1)
+                                }
+                                className="border-primary/40 bg-surface flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold disabled:opacity-40"
+                              >
+                                −
+                              </button>
+                              <span className="w-6 text-center text-sm font-bold tabular-nums">
+                                {simpleLine.quantity}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label={`Aumentar ${product.name} no pedido`}
+                                disabled={!canIncrementLine(simpleLine)}
+                                onClick={() =>
+                                  changeLineQuantity(simpleLine.lineId, 1)
+                                }
+                                className="border-primary/40 bg-surface flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold disabled:opacity-40"
+                              >
+                                +
+                              </button>
+                            </span>
+                          ) : null}
+                          {withChoicesQuantity > 0 ? (
+                            <span className="text-primary-dark text-[11px] font-semibold">
+                              {simpleLine
+                                ? `+${withChoicesQuantity} c/ escolhas`
+                                : `${withChoicesQuantity} no pedido`}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
-                {count < step.minChoices ? (
-                  <p className="text-red mt-1 text-xs" role="status">
-                    Faltam {step.minChoices - count} escolha(s) nesta etapa.
-                  </p>
-                ) : null}
-              </fieldset>
-            );
-          })}
-          <div className="flex items-center gap-3">
-            <span className="flex-1 text-sm font-semibold">
-              {selectedProduct.name}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setQuantity((qty) => Math.max(1, qty - 1))}
-                className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
-                aria-label="Diminuir quantidade"
-              >
-                −
-              </button>
-              <span className="w-6 text-center text-sm font-bold">
-                {quantity}
-              </span>
-              <button
-                type="button"
-                onClick={() => setQuantity((qty) => qty + 1)}
-                className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
-                aria-label="Aumentar quantidade"
-              >
-                +
-              </button>
+              </div>
             </div>
-            <Button
-              variant="outline"
-              disabled={!canAddSelected}
-              onClick={addSelectedProduct}
-              className="px-4 py-2 text-[13px]"
-            >
-              Adicionar ao pedido
-            </Button>
-          </div>
-          {stepsQuery.isSuccess ? (
-            <p className="text-right text-sm font-semibold">
-              Total deste item:{" "}
-              {selectedUnitCents === null
-                ? "Preço indisponível"
-                : currencyFormatter.format(
-                    (selectedUnitCents * quantity) / 100,
-                  )}
-              {selectedUnitCents === 0 ? (
-                <span className="text-red block text-xs">
-                  Valor zero: confira o cadastro antes de vender.
-                </span>
-              ) : null}
-            </p>
-          ) : null}
+          ))}
         </div>
-      ) : null}
-      {cart.length > 0 ? (
-        <div className="border-line flex flex-col gap-3 border-t pt-3">
-          <h4 className="text-sm font-semibold">Pedido em preparação</h4>
-          {cart.map((item) => {
-            const product = productById.get(item.productId);
-            return (
-              <div
-                key={item.lineId}
-                className="flex items-center justify-between gap-3 text-sm"
-              >
-                <span className="flex flex-col">
-                  <span>
-                    {item.quantity} × {product?.name ?? "Produto indisponível"}{" "}
-                    ·{" "}
-                    {currencyFormatter.format(
-                      (item.unitPriceCents * item.quantity) / 100,
-                    )}
-                  </span>
-                  {item.optionLabels.length ? (
-                    <span className="text-ink-soft text-xs">
-                      {item.optionLabels.join(", ")}
-                    </span>
+
+        {selectedProduct ? (
+          <div className="border-line flex flex-col gap-2 border-t pt-3">
+            {stepsQuery.isPending ? (
+              <p className="text-ink-faint text-sm">Carregando escolhas...</p>
+            ) : null}
+            {stepsQuery.isError ? (
+              <p className="text-red text-sm">
+                Não foi possível consultar as escolhas deste produto. Tente
+                selecioná-lo novamente.
+              </p>
+            ) : null}
+            {selectedSteps.map((step) => {
+              const count = selectedOptionCount(step, optionQuantities);
+              return (
+                <fieldset
+                  key={step.id}
+                  className="border-line rounded-xl border p-3"
+                >
+                  <legend className="px-1 text-sm font-semibold">
+                    {step.label}
+                  </legend>
+                  <p className="text-ink-soft mb-2 text-xs">
+                    Escolha de {step.minChoices} a {step.maxChoices} · {count}{" "}
+                    selecionada(s)
+                  </p>
+                  {step.options.map((option) => {
+                    const chosen = optionQuantities[option.id] ?? 0;
+                    const optionCents = parseMoneyCents(String(option.price));
+                    return (
+                      <div
+                        key={option.id}
+                        className="flex items-center justify-between gap-2 py-1 text-sm"
+                      >
+                        <span className="min-w-0">
+                          {option.optionName} ·{" "}
+                          {optionCents === null
+                            ? "Preço inválido"
+                            : `+ ${currencyFormatter.format(optionCents / 100)}`}
+                          {!option.optionActive ? (
+                            <span className="text-red ml-2 text-xs">
+                              Indisponível
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            aria-label={`Diminuir ${option.optionName}`}
+                            disabled={chosen === 0 || addItemMutation.isPending}
+                            onClick={() =>
+                              setOptionQuantities((current) => ({
+                                ...current,
+                                [option.id]: Math.max(
+                                  0,
+                                  (current[option.id] ?? 0) - 1,
+                                ),
+                              }))
+                            }
+                            className="border-line h-7 w-7 rounded-full border disabled:opacity-40"
+                          >
+                            −
+                          </button>
+                          <span className="w-5 text-center">{chosen}</span>
+                          <button
+                            type="button"
+                            aria-label={`Aumentar ${option.optionName}`}
+                            disabled={
+                              !option.optionActive ||
+                              optionCents === null ||
+                              count >= step.maxChoices ||
+                              addItemMutation.isPending
+                            }
+                            onClick={() =>
+                              setOptionQuantities((current) => ({
+                                ...current,
+                                [option.id]: (current[option.id] ?? 0) + 1,
+                              }))
+                            }
+                            className="border-line h-7 w-7 rounded-full border disabled:opacity-40"
+                          >
+                            +
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {count < step.minChoices ? (
+                    <p className="text-red mt-1 text-xs" role="status">
+                      Faltam {step.minChoices - count} escolha(s) nesta etapa.
+                    </p>
                   ) : null}
+                </fieldset>
+              );
+            })}
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="min-w-0 flex-1 text-sm font-semibold">
+                {selectedProduct.name}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQuantity((qty) => Math.max(1, qty - 1))}
+                  className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+                  aria-label="Diminuir quantidade"
+                >
+                  −
+                </button>
+                <span className="w-6 text-center text-sm font-bold">
+                  {quantity}
                 </span>
                 <button
                   type="button"
-                  onClick={() =>
-                    setCart((current) =>
-                      current.filter((entry) => entry.lineId !== item.lineId),
-                    )
-                  }
-                  disabled={addItemMutation.isPending}
-                  className="text-red text-xs font-semibold hover:underline"
-                  aria-label={`Remover ${product?.name ?? "produto"} do pedido`}
+                  onClick={() => setQuantity((qty) => qty + 1)}
+                  className="border-line flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold"
+                  aria-label="Aumentar quantidade"
                 >
-                  Remover
+                  +
                 </button>
               </div>
-            );
-          })}
-          <p className="text-right text-sm font-semibold">
-            Subtotal: {currencyFormatter.format(cartTotalCents / 100)}
-          </p>
-          <input
-            type="text"
-            placeholder="Observação do pedido (opcional)"
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            maxLength={500}
-            className="border-line bg-surface focus:border-primary rounded-lg border px-3 py-2 text-[13px] outline-none"
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              disabled={addItemMutation.isPending}
-              onClick={() => {
-                receiveAfterRef.current = false;
-                addItemMutation.mutate();
-              }}
-            >
-              {addItemMutation.isPending
-                ? "Confirmando..."
-                : "Confirmar pedido (F10)"}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={addItemMutation.isPending}
-              onClick={() => {
-                receiveAfterRef.current = true;
-                addItemMutation.mutate();
-              }}
-            >
-              Confirmar e receber (F9)
-            </Button>
+              <Button
+                variant="outline"
+                disabled={!canAddSelected}
+                onClick={addSelectedProduct}
+                className="px-4 py-2 text-[13px]"
+              >
+                Adicionar ao pedido
+              </Button>
+            </div>
+            {stepsQuery.isSuccess ? (
+              <p className="text-right text-sm font-semibold">
+                Total deste item:{" "}
+                {selectedUnitCents === null
+                  ? "Preço indisponível"
+                  : currencyFormatter.format(
+                      (selectedUnitCents * quantity) / 100,
+                    )}
+                {selectedUnitCents === 0 ? (
+                  <span className="text-red block text-xs">
+                    Valor zero: confira o cadastro antes de vender.
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
           </div>
-          <p className="text-ink-faint text-[11px]">
-            Teclado: Ctrl+F busca, ↑↓ navegam, Enter lança, F10 confirma, F9
-            recebe, Esc limpa.
+        ) : null}
+      </div>
+    </section>
+  );
+
+  const draftPanel = (
+    <section
+      aria-label="Pedido em preparação"
+      className="border-line bg-surface flex min-w-0 flex-col rounded-2xl border"
+    >
+      <div className="border-line flex items-center justify-between gap-2 border-b px-4 py-3">
+        <h4 className="text-sm font-semibold">Pedido em preparação</h4>
+        <span className="text-ink-faint text-xs tabular-nums">
+          {cartQuantity} {cartQuantity === 1 ? "item" : "itens"}
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-3 px-4 py-3">
+        <input
+          type="text"
+          placeholder="Observação do pedido (opcional)"
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          maxLength={500}
+          className="border-line bg-surface focus:border-primary min-w-0 rounded-lg border px-3 py-2 text-[13px] outline-none"
+        />
+
+        {cart.length === 0 ? (
+          <p className="text-ink-faint text-sm">
+            Nenhum item ainda. Busque ou escolha um produto na grade.
           </p>
+        ) : (
+          <ul className="divide-line flex flex-col divide-y">
+            {cart.map((item) => {
+              const product = productById.get(item.productId);
+              const name = product?.name ?? "Produto indisponível";
+              return (
+                <li
+                  key={item.lineId}
+                  className="flex flex-col gap-1.5 py-2 text-sm first:pt-0 last:pb-0"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="flex min-w-0 flex-col">
+                      <span className="font-semibold break-words">{name}</span>
+                      {item.optionLabels.length ? (
+                        <span className="text-ink-soft text-xs">
+                          {item.optionLabels.join(", ")}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="shrink-0 font-semibold tabular-nums">
+                      {currencyFormatter.format(
+                        (item.unitPriceCents * item.quantity) / 100,
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        aria-label={`Diminuir ${name} no pedido`}
+                        disabled={
+                          item.quantity <= 1 || addItemMutation.isPending
+                        }
+                        onClick={() => changeLineQuantity(item.lineId, -1)}
+                        className="border-line flex h-6 w-6 items-center justify-center rounded-full border text-xs font-bold disabled:opacity-40"
+                      >
+                        −
+                      </button>
+                      <span className="w-6 text-center text-xs font-bold tabular-nums">
+                        {item.quantity}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Aumentar ${name} no pedido`}
+                        disabled={!canIncrementLine(item)}
+                        onClick={() => changeLineQuantity(item.lineId, 1)}
+                        className="border-line flex h-6 w-6 items-center justify-center rounded-full border text-xs font-bold disabled:opacity-40"
+                      >
+                        +
+                      </button>
+                      <span className="text-ink-faint text-xs tabular-nums">
+                        × {currencyFormatter.format(item.unitPriceCents / 100)}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCart((current) =>
+                          current.filter(
+                            (entry) => entry.lineId !== item.lineId,
+                          ),
+                        )
+                      }
+                      disabled={addItemMutation.isPending}
+                      className="text-red text-xs font-semibold hover:underline"
+                      aria-label={`Remover ${product?.name ?? "produto"} do pedido`}
+                    >
+                      Remover
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <div className="border-line bg-bg flex flex-col gap-3 rounded-b-2xl border-t px-4 py-3">
+        <dl className="flex flex-col gap-1 text-sm">
+          <div className="flex justify-between gap-3">
+            <dt className="text-ink-soft">Subtotal</dt>
+            <dd className="tabular-nums">
+              {currencyFormatter.format(cartTotalCents / 100)}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-ink-soft">Desconto</dt>
+            <dd className="text-ink-faint text-xs">aplicado após confirmar</dd>
+          </div>
+          <div className="flex justify-between gap-3 text-base font-semibold">
+            <dt>Total do pedido</dt>
+            <dd className="font-serif tabular-nums">
+              {currencyFormatter.format(cartTotalCents / 100)}
+            </dd>
+          </div>
+        </dl>
+        <div className="grid gap-2">
+          <Button
+            disabled={cart.length === 0 || addItemMutation.isPending}
+            onClick={() => {
+              receiveAfterRef.current = false;
+              addItemMutation.mutate();
+            }}
+          >
+            {addItemMutation.isPending
+              ? "Confirmando..."
+              : "Confirmar pedido (F10)"}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={cart.length === 0 || addItemMutation.isPending}
+            onClick={() => {
+              receiveAfterRef.current = true;
+              addItemMutation.mutate();
+            }}
+          >
+            Confirmar e receber (F9)
+          </Button>
         </div>
-      ) : null}
-      {errorMessage ? <p className="text-red text-sm">{errorMessage}</p> : null}
-    </div>
+        {errorMessage ? (
+          <p className="text-red text-sm">{errorMessage}</p>
+        ) : null}
+        <p className="text-ink-faint text-[11px]">
+          Teclado: Ctrl+F busca, setas navegam a grade, Enter lança, F10
+          confirma, F9 recebe, Esc limpa.
+        </p>
+      </div>
+    </section>
+  );
+
+  return (
+    <LaunchLayout
+      main={
+        <>
+          {catalog}
+          {orders}
+        </>
+      }
+      aside={
+        <>
+          {context}
+          {draftPanel}
+          {payment}
+        </>
+      }
+    />
   );
 }
 

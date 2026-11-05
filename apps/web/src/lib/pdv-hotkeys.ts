@@ -11,6 +11,7 @@
  * | ---------------- | ------------------------------------------------ |
  * | Ctrl/Cmd + F     | Focar a busca de produto                         |
  * | ↑ / ↓            | Navegar a grade de produtos (mesmo digitando)    |
+ * | ← / →            | Navegar a grade (fora de campo, ou campo vazio)  |
  * | Enter            | Selecionar o produto em foco, ou lançá-lo        |
  * | F10              | Confirmar o pedido (vai para produção)           |
  * | F9               | Confirmar e receber (abre o pagamento)           |
@@ -27,11 +28,17 @@ import { useEffect } from "react";
 
 export type PdvHotkeyAction =
   | { type: "focus-search" }
-  | { type: "move-highlight"; delta: 1 | -1 }
+  | { type: "move-highlight"; direction: PdvGridDirection }
   | { type: "activate-highlight" }
   | { type: "confirm" }
   | { type: "confirm-and-receive" }
   | { type: "clear" };
+
+/**
+ * Direção de navegação na grade de cards. ←/→ andam um card na ordem de
+ * leitura; ↑/↓ trocam de linha visual (ver {@link verticalNeighborIndex}).
+ */
+export type PdvGridDirection = "up" | "down" | "left" | "right";
 
 export type PdvHotkeyContext = {
   /** Há pelo menos um item no carrinho (habilita confirmar/receber). */
@@ -48,6 +55,12 @@ type KeyboardLike = {
   metaKey: boolean;
   /** `true` quando o foco está num campo de texto (ver `isTypingTarget`). */
   typing: boolean;
+  /**
+   * `true` quando o campo de texto em foco está vazio (ver
+   * `isEmptyTypingTarget`). Sem texto não há cursor para mover, então ←/→
+   * podem ir para a grade sem roubar nada do operador.
+   */
+  typingEmpty: boolean;
 };
 
 /**
@@ -58,6 +71,10 @@ type KeyboardLike = {
  * <ul>
  *   <li><b>Setas funcionam mesmo digitando.</b> No PDV real "na busca, as setas
  *   navegam e Enter lança" — então ↑/↓ nunca ficam presas ao cursor do campo.</li>
+ *   <li><b>←/→ respeitam o texto digitado.</b> Numa grade elas andam de card em
+ *   card, mas dentro de um campo com texto movem o cursor (corrigir uma letra
+ *   da busca é mais comum que andar para o lado). Com o campo vazio, ou fora
+ *   de campo, navegam a grade.</li>
  *   <li><b>Enter digitando só age quando há um produto em foco ou selecionado.</b>
  *   Sem isso, Enter no campo de busca vazio não deve fazer nada.</li>
  *   <li><b>F9/F10 e Ctrl+F agem em qualquer foco</b>, inclusive dentro da busca —
@@ -88,10 +105,21 @@ export function resolvePdvHotkey(
 
   // Setas navegam a grade, mesmo com foco na busca.
   if (event.key === "ArrowDown" && context.hasProducts) {
-    return { type: "move-highlight", delta: 1 };
+    return { type: "move-highlight", direction: "down" };
   }
   if (event.key === "ArrowUp" && context.hasProducts) {
-    return { type: "move-highlight", delta: -1 };
+    return { type: "move-highlight", direction: "up" };
+  }
+  // ←/→ — só quando não há texto em edição (ver regra acima).
+  if (
+    (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+    context.hasProducts &&
+    (!event.typing || event.typingEmpty)
+  ) {
+    return {
+      type: "move-highlight",
+      direction: event.key === "ArrowRight" ? "right" : "left",
+    };
   }
 
   // Enter — ativa o produto em foco (seleciona ou lança). Quando digitando,
@@ -125,6 +153,80 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   );
 }
 
+/** Se o alvo é um campo de texto vazio (input/textarea sem valor). */
+export function isEmptyTypingTarget(target: EventTarget | null): boolean {
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement
+  ) {
+    return target.value === "";
+  }
+  return false;
+}
+
+export type GridRect = {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+};
+
+/**
+ * Índice do card na linha visual acima/abaixo de `current`, escolhendo o de
+ * centro horizontal mais próximo, como a seta faz numa grade de verdade.
+ * Recebe retângulos (e não um número de colunas) porque a grade é responsiva
+ * e quebrada em seções por categoria: o número de colunas muda com a largura
+ * e a última linha de uma seção pode estar incompleta.
+ *
+ * <p>Devolve `null` quando não há linha naquela direção; quem chama decide o
+ * que fazer (o PDV volta ao primeiro/último card, como a lista fazia).
+ */
+export function verticalNeighborIndex(
+  rects: readonly GridRect[],
+  current: number,
+  direction: "up" | "down",
+): number | null {
+  const origin = rects[current];
+  if (!origin) return null;
+  const originCenter = (origin.left + origin.right) / 2;
+  // Tolerância de meio card: cards da mesma linha podem divergir alguns
+  // pixels (bordas, arredondamento), mas nunca meia altura.
+  const tolerance = Math.max(1, (origin.bottom - origin.top) / 2);
+
+  // Borda da linha vizinha mais próxima: menor topo abaixo, ou maior base
+  // acima, do card atual.
+  let edge: number | null = null;
+  for (let index = 0; index < rects.length; index++) {
+    if (index === current) continue;
+    const rect = rects[index];
+    if (direction === "down" && rect.top >= origin.bottom - tolerance) {
+      edge = edge === null ? rect.top : Math.min(edge, rect.top);
+    }
+    if (direction === "up" && rect.bottom <= origin.top + tolerance) {
+      edge = edge === null ? rect.bottom : Math.max(edge, rect.bottom);
+    }
+  }
+  if (edge === null) return null;
+
+  let best: number | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < rects.length; index++) {
+    if (index === current) continue;
+    const rect = rects[index];
+    const inRow =
+      direction === "down"
+        ? Math.abs(rect.top - edge) < tolerance
+        : Math.abs(rect.bottom - edge) < tolerance;
+    if (!inRow) continue;
+    const distance = Math.abs((rect.left + rect.right) / 2 - originCenter);
+    if (distance < bestDistance) {
+      best = index;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 /** Ações que o navegador não deve também processar quando o atalho dispara. */
 const PREVENT_DEFAULT: ReadonlySet<PdvHotkeyAction["type"]> = new Set([
   "focus-search",
@@ -153,6 +255,7 @@ export function usePdvHotkeys(
           ctrlKey: event.ctrlKey,
           metaKey: event.metaKey,
           typing: isTypingTarget(event.target),
+          typingEmpty: isEmptyTypingTarget(event.target),
         },
         getContext(),
       );
