@@ -120,3 +120,40 @@ Perfis a criar (todos CFOP 5102 · CSOSN 102 · PIS 99 · COFINS 99 · origem 0)
    associar cada produto em `/admin/products`.
 3. Conferir em `/admin/fiscal-review` que nenhum item ativo ficou sem perfil.
 4. Só então seguir para a homologação (FISC-08).
+
+## Decisão do contador (05/11/2026) e aplicação proposta
+
+O contador orientou **"usar o mais vantajoso pelas regras atuais"**. A vantagem
+concreta é tratar como **ICMS retido por ST** as bebidas revendidas cujo imposto
+já foi recolhido pelo fornecedor: **CFOP 5405 / CSOSN 500** (PIS/COFINS 99,
+origem 0), o que tira esse ICMS do DAS quando a receita é segregada no PGDAS-D.
+CFOP 5101 para produção própria não muda imposto no Simples e **não** foi
+adotado (continua 5102). Marcar como ST um item **sem** ST retida reduziria o
+ICMS devido indevidamente, então só entram itens de ST inequívoca em SP com
+classificação coerente:
+
+| Produto (Farelo) | NCM | CEST | Perfil | Origem do dado |
+| --- | --- | --- | --- | --- |
+| Água mineral | 22011000 | 0300100 | 5405 / 500 | nota autorizada + histórico XML |
+| Água com gás | 22011000 | 0300100 | 5405 / 500 | idem |
+| Água Tônica Antárctica | 22029900 | 0302200 | 5405 / 500 | histórico XML |
+| Energético Red Bull Tradicional | 22029900 | 0302200 | 5405 / 500 | histórico XML |
+| Refrigerantes | **22021000** | 1711000 | 5405 / 500 | cadastro Sischef das Cocas; NCM autorizado na nota 13924 (corrige 21069090) |
+| Cerveja | **22030000** | **pendente** | 5405 / 500 | NCM de cerveja de malte; o Sischef tem 21069090 em todas as cervejas e nenhum CEST coerente |
+
+**Ficam em continuidade (5102/102) com alerta:** Água de Coco (NCM 21069030
+duvidoso para água de coco) e Suco de Laranja Integral — ST incerta, não aplicar
+500 sem confirmação.
+
+**Pré-requisitos antes de cadastrar estes perfis:**
+1. O gerador de XML precisa emitir o grupo `ICMSSN500` (hoje só emite
+   `ICMSSN102`) — implementação em andamento.
+2. O CEST da Cerveja e a dupla NCM/CEST de Refrigerantes devem ser
+   confirmados; a **homologação (FISC-08) deve incluir uma nota com Cerveja e
+   uma com Refrigerante** para a SEFAZ validar a combinação.
+
+**Observação do cardápio (CAT-01):** no Sischef, Refrigerante e Cerveja são
+produtos com passos (o cliente escolhe a marca, cada marca com NCM próprio). No
+Farelo não há nenhum produto com passos: são itens únicos. Se a equipe precisar
+registrar a marca (estoque, bar), isso volta como passos e o perfil fiscal
+passa a ser o de cada marca.
