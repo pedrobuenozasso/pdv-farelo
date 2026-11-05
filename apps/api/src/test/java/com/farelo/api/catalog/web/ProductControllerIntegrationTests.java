@@ -7,6 +7,8 @@ import com.farelo.api.catalog.Category;
 import com.farelo.api.catalog.CategoryRepository;
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductRepository;
+import com.farelo.api.catalog.ProductStep;
+import com.farelo.api.catalog.ProductStepOption;
 import com.farelo.api.catalog.ProductStepOptionRepository;
 import com.farelo.api.catalog.ProductStepRepository;
 import com.farelo.api.catalog.ProductionStation;
@@ -471,6 +473,69 @@ class ProductControllerIntegrationTests extends AbstractIntegrationTest {
         assertThat(products)
                 .extracting(ProductResponse::categoryId)
                 .containsOnly(category.getId());
+    }
+
+    // hasSteps: o PDV lança produto simples com um clique e só abre as
+    // escolhas quando há passo. Mesma noção do GET .../steps: qualquer passo
+    // configurado conta, mesmo sem opções ou com mínimo zero.
+    @Test
+    void listReportsWhichProductsHaveSteps() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        Product espresso = productRepository.save(new Product("Café Espresso", new BigDecimal("7.50"), category));
+        Product cerveja = productRepository.save(new Product("Cerveja", new BigDecimal("0.00"), category));
+        Product lata = productRepository.save(new Product("Lata", new BigDecimal("12.00"), category));
+        Product suco = productRepository.save(new Product("Suco", new BigDecimal("9.00"), category));
+        ProductStep marca = productStepRepository.save(new ProductStep(
+                cerveja, "Marca", 1, 1, 0, "Mesmo nivel do produto principal", "Unitário"));
+        productStepOptionRepository.save(new ProductStepOption(marca, lata, 0, new BigDecimal("12.00")));
+        // Dois passos no mesmo produto: o id aparece uma vez só (distinct).
+        productStepRepository.save(new ProductStep(
+                cerveja, "Copo", 0, 1, 1, "Mesmo nivel do produto principal", "Unitário"));
+        // Passo opcional e ainda sem opções também abre o painel no PDV.
+        productStepRepository.save(new ProductStep(
+                suco, "Gelo", 0, 1, 0, "Mesmo nivel do produto principal", "Unitário"));
+
+        mockMvc.perform(get("/api/v1/products"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$[?(@.name == 'Café Espresso')].hasSteps").value(false))
+                .andExpect(jsonPath("$[?(@.name == 'Lata')].hasSteps").value(false))
+                .andExpect(jsonPath("$[?(@.name == 'Cerveja')].hasSteps").value(true))
+                .andExpect(jsonPath("$[?(@.name == 'Suco')].hasSteps").value(true));
+
+        assertThat(productStepRepository.findDistinctProductIds())
+                .containsExactlyInAnyOrder(cerveja.getId(), suco.getId())
+                .doesNotContain(espresso.getId(), lata.getId());
+    }
+
+    @Test
+    void createAndUpdateResponsesReportHasSteps() throws Exception {
+        Category category = categoryRepository.save(new Category("Bebidas"));
+        String createBody = """
+                {"name": "Cerveja", "price": 10.00, "categoryId": "%s"}
+                """.formatted(category.getId());
+        MvcResult created = mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.hasSteps").value(false))
+                .andReturn();
+        UUID id = objectMapper.readValue(created.getResponse().getContentAsString(), ProductResponse.class).id();
+
+        productStepRepository.save(new ProductStep(productRepository.findById(id).orElseThrow(),
+                "Marca", 1, 1, 0, "Mesmo nivel do produto principal", "Unitário"));
+
+        String updateBody = """
+                {"name": "Cerveja", "price": 10.00, "categoryId": "%s",
+                 "active": true, "availableOnMenu": true, "availableOnPos": true}
+                """.formatted(category.getId());
+        mockMvc.perform(put("/api/v1/products/{id}", id)
+                        .header("Authorization", "Bearer " + tokenFor(UserRole.ADMIN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hasSteps").value(true));
     }
 
     @Test

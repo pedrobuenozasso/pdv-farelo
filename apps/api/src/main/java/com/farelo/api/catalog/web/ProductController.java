@@ -2,6 +2,7 @@ package com.farelo.api.catalog.web;
 
 import com.farelo.api.catalog.Product;
 import com.farelo.api.catalog.ProductService;
+import com.farelo.api.catalog.ProductStepService;
 import com.farelo.api.security.UserRole;
 import com.farelo.api.security.auth.AuthenticatedPrincipal;
 import com.farelo.api.security.rbac.RequireRole;
@@ -19,6 +20,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -53,9 +55,11 @@ import java.util.UUID;
 public class ProductController {
 
     private final ProductService productService;
+    private final ProductStepService productStepService;
 
-    public ProductController(ProductService productService) {
+    public ProductController(ProductService productService, ProductStepService productStepService) {
         this.productService = productService;
+        this.productStepService = productStepService;
     }
 
     @PostMapping
@@ -81,7 +85,9 @@ public class ProductController {
                 .buildAndExpand(product.getId())
                 .toUri();
 
-        return ResponseEntity.created(location).body(ProductResponse.from(product));
+        // Produto recém-criado nunca tem passos (eles são configurados depois,
+        // em PUT /api/v1/products/{id}/steps).
+        return ResponseEntity.created(location).body(ProductResponse.from(product, false));
     }
 
     // No categoryId (or other) filter yet — YAGNI, no consumer (Admin/PDV)
@@ -92,11 +98,15 @@ public class ProductController {
     // dependency of the anonymous customer-facing "Cardápio QR"
     // (FARELO-043), which has no login of any kind. The Admin surface for
     // products is authoring them (create()/update()), not reading them.
+    //
+    // hasSteps: uma consulta só (IDs de produto com passos) para a lista
+    // inteira, nunca uma por produto.
     @GetMapping
     @PublicEndpoint
     public List<ProductResponse> list() {
+        Set<UUID> withSteps = productStepService.productIdsWithSteps();
         return productService.listAll().stream()
-                .map(ProductResponse::from)
+                .map(product -> ProductResponse.from(product, withSteps.contains(product.getId())))
                 .toList();
     }
 
@@ -127,7 +137,7 @@ public class ProductController {
                 request.fiscalUnit(),
                 principal.userId());
 
-        return ProductResponse.from(product);
+        return ProductResponse.from(product, productStepService.hasSteps(product.getId()));
     }
 
 }

@@ -280,6 +280,7 @@ consumidor existir.
     "imageUrl": "https://example.com/espresso.png",
     "productionStation": "BAR",
     "fiscalProfileId": "c4a2d3e1-7d0b-4b3c-8a4b-2b3c4d5e6f70",
+    "hasSteps": false,
     "createdAt": "2026-09-01T13:00:00Z",
     "updatedAt": "2026-09-01T13:00:00Z"
   }
@@ -287,6 +288,17 @@ consumidor existir.
 ```
 
 Lista vazia (`[]`) quando não há produtos cadastrados.
+
+`hasSteps` é `true` quando o produto tem pelo menos um passo
+configurado, ou seja, quando `GET /api/v1/products/{productId}/steps`
+devolveria uma lista não vazia (qualquer passo conta, mesmo opcional ou ainda
+sem opções). O PDV usa o campo para lançar produto simples com um clique e
+abrir o painel de escolhas só quando há passos; ausente (API anterior ao
+campo), o cliente deve tratar como `true`. Calculado com uma consulta só para
+a lista inteira (`select distinct product_id from product_step`), sem uma
+consulta por produto. Não revela preço nem opções, por isso segue público como
+o resto do endpoint. `POST` sempre responde `false` (produto novo não tem
+passos) e `PUT` responde o valor atual.
 
 ### `PUT /api/v1/products/{id}`
 

@@ -26,6 +26,12 @@ import java.util.UUID;
  * codebase that read a *name* off a lazy association (e.g. {@code
  * PrintJobRepository#findByStatusOrderByCreatedAtAsc}'s {@code JOIN FETCH
  * p.order}).
+ *
+ * <p>{@code hasSteps}: o produto tem pelo menos um passo configurado (ver
+ * {@code ProductStepService#productIdsWithSteps}). O PDV usa isso para lançar
+ * produto simples com um clique e abrir as escolhas só quando há passos. Não
+ * é coluna de {@link Product}: quem monta a resposta resolve à parte (uma
+ * consulta para a lista inteira).
  */
 public record ProductResponse(
         UUID id,
@@ -42,10 +48,11 @@ public record ProductResponse(
         UUID fiscalProfileId,
         String gtin,
         String fiscalUnit,
+        boolean hasSteps,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 
-    public static ProductResponse from(Product product) {
+    public static ProductResponse from(Product product, boolean hasSteps) {
         return new ProductResponse(
                 product.getId(),
                 product.getName(),
@@ -61,6 +68,7 @@ public record ProductResponse(
                 product.getFiscalProfile() != null ? product.getFiscalProfile().getId() : null,
                 product.getGtin(),
                 product.getFiscalUnit(),
+                hasSteps,
                 product.getCreatedAt(),
                 product.getUpdatedAt());
     }

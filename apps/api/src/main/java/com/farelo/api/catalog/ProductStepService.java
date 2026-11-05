@@ -33,6 +33,23 @@ public class ProductStepService {
         return read(productId);
     }
 
+    /**
+     * Produtos que abrem escolhas no PDV: os que têm pelo menos um passo — a
+     * mesma noção de {@link #list}, que devolve todos os passos do produto
+     * (com ou sem opções, mínimo zero ou não). Uma consulta para o catálogo
+     * inteiro.
+     */
+    @Transactional(readOnly = true)
+    public Set<UUID> productIdsWithSteps() {
+        return new HashSet<>(steps.findDistinctProductIds());
+    }
+
+    /** Versão de um produto só de {@link #productIdsWithSteps()}. */
+    @Transactional(readOnly = true)
+    public boolean hasSteps(UUID productId) {
+        return steps.existsByProductId(productId);
+    }
+
     /** Full replacement; validate every linked Product before deleting anything. */
     @Transactional
     public List<StepResponse> replace(UUID productId, List<StepRequest> requested) {
