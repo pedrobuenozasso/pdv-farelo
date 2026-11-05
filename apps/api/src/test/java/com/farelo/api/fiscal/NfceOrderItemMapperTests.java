@@ -47,14 +47,44 @@ class NfceOrderItemMapperTests {
     }
 
     @Test
-    void rejectsUnsupportedContributionWithoutInventingTaxAmounts() {
+    void simplesNacionalCst99CarriesExplicitZeroAmountsByRegime() {
         FiscalProfile profile = completeProfile();
+        profile.setPisCst("99");
+        profile.setCofinsCst("99");
+        OrderItem sold = persisted(new OrderItem(null, product(profile), 1, BigDecimal.ONE));
+
+        NfceXmlBuilder.Item item = NfceOrderItemMapper.mapSimple(sold, "1");
+
+        for (NfceXmlBuilder.OtherContribution other
+                : java.util.List.of(item.taxes().pisOther(), item.taxes().cofinsOther())) {
+            assertThat(other).isNotNull();
+            // Same "explicit zero" NfceXmlBuilder demands for CST 99: value 0, scale <= 2.
+            assertThat(other.base()).isEqualByComparingTo("0").satisfies(v -> assertThat(v.scale()).isLessThanOrEqualTo(2));
+            assertThat(other.rate()).isEqualByComparingTo("0").satisfies(v -> assertThat(v.scale()).isLessThanOrEqualTo(2));
+            assertThat(other.amount()).isEqualByComparingTo("0").satisfies(v -> assertThat(v.scale()).isLessThanOrEqualTo(2));
+        }
+    }
+
+    @Test
+    void nonSimplesCst99StillRefusesToInventTaxAmounts() {
+        FiscalProfile profile = completeProfile();
+        profile.setCsosn(null);
+        profile.setCst("40");
         profile.setPisCst("99");
         OrderItem sold = persisted(new OrderItem(null, product(profile), 1, BigDecimal.ONE));
 
-        assertThatThrownBy(() -> NfceOrderItemMapper.mapSimple(sold, "1"))
+        assertThatThrownBy(() -> NfceOrderItemMapper.mapSimple(sold, "3"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("CST 99");
+    }
+
+    @Test
+    void nonNinetyNineContributionsCarryNoAmounts() {
+        NfceXmlBuilder.Item item = NfceOrderItemMapper.mapSimple(
+                persisted(new OrderItem(null, product(completeProfile()), 1, BigDecimal.ONE)), "1");
+
+        assertThat(item.taxes().pisOther()).isNull();
+        assertThat(item.taxes().cofinsOther()).isNull();
     }
 
     @Test

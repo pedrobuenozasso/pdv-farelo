@@ -38,8 +38,16 @@ public final class NfceOrderItemMapper {
                 || sold.getFiscalCofinsCstSnapshot() == null) {
             throw new IllegalArgumentException("sale line lacks a complete fiscal classification snapshot");
         }
-        // CST 99 needs explicit PIS/COFINS amounts that this profile does not store.
-        if ("99".equals(sold.getFiscalPisCstSnapshot()) || "99".equals(sold.getFiscalCofinsCstSnapshot())) {
+        boolean pis99 = "99".equals(sold.getFiscalPisCstSnapshot());
+        boolean cofins99 = "99".equals(sold.getFiscalCofinsCstSnapshot());
+        // CST 99 (PISOutr/COFINSOutr) carries base, rate and amount. The profile
+        // stores no amounts, so outside the Simples Nacional there is nothing
+        // trustworthy to put there and the line is still refused. Under the
+        // Simples Nacional (CRT 1) PIS/COFINS are collected in the DAS, not per
+        // item: the per-line values are zero by regime — not an invented tax —
+        // which is exactly what NfceXmlBuilder accepts for CST 99 ("explicit zero
+        // base/rate/amount") and what the cafe's current system emits.
+        if ((pis99 || cofins99) && !"1".equals(issuerCrt)) {
             throw new IllegalArgumentException("contribution CST 99 requires explicit amounts");
         }
         BigDecimal quantity = BigDecimal.valueOf(sold.getQuantity());
@@ -50,6 +58,13 @@ public final class NfceOrderItemMapper {
                 sold.getFiscalCfopSnapshot(), sold.getFiscalUnitSnapshot(), quantity,
                 sold.getUnitPrice(), total,
                 new NfceXmlBuilder.Taxes(sold.getFiscalIcmsOriginSnapshot(), icms,
-                        sold.getFiscalPisCstSnapshot(), sold.getFiscalCofinsCstSnapshot()));
+                        sold.getFiscalPisCstSnapshot(), sold.getFiscalCofinsCstSnapshot(),
+                        pis99 ? simplesNacionalZero() : null,
+                        cofins99 ? simplesNacionalZero() : null));
+    }
+
+    private static NfceXmlBuilder.OtherContribution simplesNacionalZero() {
+        BigDecimal zero = new BigDecimal("0.00");
+        return new NfceXmlBuilder.OtherContribution(zero, zero, zero);
     }
 }
