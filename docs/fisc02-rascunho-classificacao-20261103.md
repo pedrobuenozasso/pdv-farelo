@@ -1,5 +1,13 @@
 # FISC-02 — Rascunho de classificação fiscal dos 52 itens — 03/11/2026
 
+**Atualização de 05/11/2026:** a leitura de 8 NFC-e autorizadas (nº 13925–13932)
+mostrou que o Sischef emite **todo** o cardápio com um único perfil —
+operação VENDA DE MERCADORIAS, CFOP 5102, CSOSN 102, PIS/COFINS 99 —,
+inclusive itens com ST e produção própria. A divisão em Perfil A/B abaixo é,
+portanto, uma **melhoria a decidir pelo contador**, não o estado atual. A
+opção de continuidade e o NCM efetivamente autorizado por produto estão em
+`fisc10-matriz-fiscal-autorizada-20261105.md`.
+
 **RASCUNHO PARA CONFERÊNCIA DA CONTABILIDADE. Não aplicado, não aprovado.**
 Nenhum `FiscalProfile` foi criado nem associado a produto a partir deste
 documento. A emissão continua bloqueada até a contabilidade validar.
