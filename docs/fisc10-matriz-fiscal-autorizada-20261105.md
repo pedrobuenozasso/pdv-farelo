@@ -6,8 +6,8 @@ autenticada da cafeteria. Responde à lacuna registrada em
 tributário do produto e do grupo de produto aparecem **vazios**, então a regra
 efetiva não se deduz do cadastro. Aqui ela é lida **no que a SEFAZ autorizou**.
 
-**Método.** Abertas 8 NFC-e autorizadas consecutivas (status 100), nº 13925 a
-13932, emitidas entre 01/11 e 04/11/2026, pela tela `notafiscal.jsf?id=…`
+**Método.** Abertas 11 NFC-e autorizadas (status 100): nº 13925 a 13932 consecutivas,
+mais 13924, 13922 e 13919, emitidas entre 01/11 e 04/11/2026, pela tela `notafiscal.jsf?id=…`
 (somente leitura; a nota aparece como "Finalizada – não pode ser alterada").
 De cada item foram lidos apenas: descrição, NCM, operação, CFOP e, onde a seção
 de impostos foi expandida, ICMS/PIS/COFINS. Todas as notas lidas tinham
@@ -17,7 +17,7 @@ neste documento.
 
 ## Resultado
 
-**44 linhas de item, 8 notas, 23 produtos distintos: 100% com a operação
+**58 linhas de item, 11 notas, 25 produtos distintos: 100% com a operação
 `221134 – VENDA DE MERCADORIAS` e CFOP `5102`.** Na linha com impostos
 expandidos (Água mineral, nota 13932): ICMS Simples Nacional **CSOSN 102**,
 PIS **CST 99**, COFINS **CST 99**.
@@ -44,6 +44,7 @@ Nome como aparece na nota do Sischef (pode diferir do nome no Farelo OS).
 | ÁGUA COM GÁS | 22011000 | 13929 | idem |
 | ÁGUA DE COCO | 21069030 | 13929, 13927 | |
 | REFRIGERANTE | 21069090 | 13931, 13929, 13925 | **NCM incompatível** (refrigerante é 2202.x); ST não aplicada |
+| COCA-COLA ZERO | 22021000 | 13924 | NCM correto de refrigerante — confirma que REFRIGERANTE está com erro de cadastro |
 | SUCO LARANJA INTEGRAL | 21069090 | 4 notas | |
 | SUCO UVA INTEGRAL | 21069090 | 13926 | |
 | CHA GELADO SABORES | 21069090 | 13927 | |
@@ -52,6 +53,7 @@ Nome como aparece na nota do Sischef (pode diferir do nome no Farelo OS).
 | CAPPUCCINO DA CASA | 21011200 | 13926 | |
 | CAFÉ COM LEITE (PINGADO) | 21069090 | 13926, 13925 | diverge dos demais cafés (21011200) |
 | PAO COM OVO E BACON | 21069090 | 4 notas | |
+| MISTO QUENTE | 21069090 | 13922 | |
 | PÃO NA CHAPA (FATIA) | 21069090 | 3 notas | |
 | CESTINHA DE MINI PÃES DE QUEIJO | 19059010 | 3 notas | |
 | MINI COXINHAS DE FRANGO COM REQUEIJÃO | 19059090 | 13926 | |
@@ -64,7 +66,7 @@ Nome como aparece na nota do Sischef (pode diferir do nome no Farelo OS).
 | BROWNIE COM COBERTURA DE DOCE DE LEITE | 19059090 | 13928 | |
 | PRODUTO PADRAO INTEGRACAO APPS | **00000000** | 13929, 13925 | **NCM inválido em nota autorizada** (produto genérico de pedidos de app) |
 
-A amostra cobre 23 produtos, não o cardápio inteiro. Para os demais, a fonte
+A amostra cobre 25 produtos, não o cardápio inteiro. Para os demais, a fonte
 continua sendo os candidatos históricos em `fiscal_ncm_review` (Admin
 `/admin/fiscal-review`), que devem ser conferidos contra esta tabela.
 
