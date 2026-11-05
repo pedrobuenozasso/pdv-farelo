@@ -52,6 +52,27 @@ fi
 [[ "$output" == *'local_backup=FAIL'* ]]
 touch "$tmp/site/shared/backups/recent.dump"
 
+# Offsite check stays silent until offsite.env exists, then fails closed.
+output="$(run_check)"
+[[ "$output" == *'offsite_backup=NOT_CONFIGURED'* ]]
+: > "$tmp/site/shared/offsite.env"
+if output="$(run_check)"; then
+  printf 'Configured offsite without a success marker should fail.\n' >&2
+  exit 1
+fi
+[[ "$output" == *'offsite_backup=FAIL'* ]]
+mkdir -p "$tmp/site/shared/offsite-state"
+: > "$tmp/site/shared/offsite-state/last-success"
+output="$(run_check)"
+[[ "$output" == *'offsite_backup_age_hours=0'* && "$output" == *'offsite_backup=OK'* ]]
+touch -t 202001010000 "$tmp/site/shared/offsite-state/last-success"
+if output="$(run_check)"; then
+  printf 'Stale offsite backup should fail.\n' >&2
+  exit 1
+fi
+[[ "$output" == *'offsite_backup=FAIL'* ]]
+rm -rf -- "$tmp/site/shared/offsite.env" "$tmp/site/shared/offsite-state"
+
 if output="$(MOCK_COUNTS='2|601|1|0|0|0' run_check)"; then
   printf 'Old outbox event should fail.\n' >&2
   exit 1

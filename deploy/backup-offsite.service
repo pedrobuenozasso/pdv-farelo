@@ -1,0 +1,18 @@
+[Unit]
+Description=Farelo OS encrypted offsite copy of the newest local PostgreSQL dump
+After=farelo-backup-local.service network-online.target
+Wants=network-online.target
+# Sem offsite.env a unidade é apenas ignorada; o backup local segue igual.
+ConditionPathExists=/opt/farelo-os/shared/offsite.env
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/bash /opt/farelo-os/current/deploy/backup-offsite.sh
+TimeoutStartSec=30min
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal

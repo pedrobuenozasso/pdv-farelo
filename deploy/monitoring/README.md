@@ -31,6 +31,13 @@ Os limites iniciais são 85% de uso do disco, 26 horas desde o dump local e
 `FARELO_MONITOR_OUTBOX_MAX_SECONDS`. `FARELO_MONITOR_ROOT` só é necessário
 em ambiente de teste ou instalação fora de `/opt/farelo-os`.
 
+A checagem opcional `offsite_backup` (OPS-01) só é ativada quando
+`/opt/farelo-os/shared/offsite.env` existe: então confere a idade do marcador
+`/opt/farelo-os/shared/offsite-state/last-success`, gravado por
+`deploy/backup-offsite.sh` depois de verificar a cópia no destino, e falha
+acima de 30 horas (`FARELO_MONITOR_OFFSITE_MAX_HOURS`) ou sem marcador. Sem
+`offsite.env` imprime `offsite_backup=NOT_CONFIGURED` e não falha.
+
 Esta verificação **não** prova que existe cópia externa nem restauração
 testada. Não há timer, cron nem destino de alerta instalado neste ticket.
 Antes de fechar OPS-02, escolher canal de aviso, executar a checagem na VPS,

@@ -10,12 +10,15 @@ backup_dir="$root/shared/backups"
 backup_max_hours="${FARELO_MONITOR_BACKUP_MAX_HOURS:-26}"
 disk_max_percent="${FARELO_MONITOR_DISK_MAX_PERCENT:-85}"
 outbox_max_seconds="${FARELO_MONITOR_OUTBOX_MAX_SECONDS:-600}"
+offsite_env="${FARELO_MONITOR_OFFSITE_ENV:-$root/shared/offsite.env}"
+offsite_marker="$root/shared/offsite-state/last-success"
+offsite_max_hours="${FARELO_MONITOR_OFFSITE_MAX_HOURS:-30}"
 failed=0
 
 fail() { printf '%s=FAIL\n' "$1"; failed=1; }
 pass() { printf '%s=OK\n' "$1"; }
 
-if [[ ! "$backup_max_hours" =~ ^[0-9]+$ || ! "$disk_max_percent" =~ ^[0-9]+$ || ! "$outbox_max_seconds" =~ ^[0-9]+$ ]]; then
+if [[ ! "$backup_max_hours" =~ ^[0-9]+$ || ! "$disk_max_percent" =~ ^[0-9]+$ || ! "$outbox_max_seconds" =~ ^[0-9]+$ || ! "$offsite_max_hours" =~ ^[0-9]+$ ]]; then
   fail configuration
   exit 1
 fi
@@ -88,6 +91,25 @@ if [[ -n "$newest_backup" ]]; then
   fi
 else
   fail local_backup
+fi
+
+# Optional (OPS-01): checked only once offsite.env exists. The marker is written
+# by backup-offsite.sh after the remote copy was read back and verified.
+if [[ -e "$offsite_env" ]]; then
+  offsite_epoch=""
+  if [[ -f "$offsite_marker" ]]; then
+    offsite_epoch="$(stat -c %Y -- "$offsite_marker" 2>/dev/null || stat -f %m -- "$offsite_marker" 2>/dev/null)" || offsite_epoch=""
+  fi
+  now_epoch="$(date +%s)"
+  if [[ "$offsite_epoch" =~ ^[0-9]+$ && "$now_epoch" =~ ^[0-9]+$ && "$now_epoch" -ge "$offsite_epoch" ]]; then
+    offsite_age_hours=$(((now_epoch - offsite_epoch) / 3600))
+    printf 'offsite_backup_age_hours=%s\n' "$offsite_age_hours"
+    if (( offsite_age_hours <= offsite_max_hours )); then pass offsite_backup; else fail offsite_backup; fi
+  else
+    fail offsite_backup
+  fi
+else
+  printf 'offsite_backup=NOT_CONFIGURED\n'
 fi
 
 # One aggregate row; no customer, document, ticket or secret fields leave psql.

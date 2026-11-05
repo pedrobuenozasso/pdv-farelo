@@ -314,6 +314,8 @@ Consultar `systemctl status farelo-backup-local.timer` e
 `journalctl -u farelo-backup-local.service -n 50 --no-pager`. O script não faz
 retenção nem criptografia externa. **Não considera o ticket #19 concluído**:
 configurar destino remoto cifrado, restauração isolada, retenção e alerta.
+A camada externa cifrada está preparada (inativa) na seção
+[Backup externo cifrado (OPS-01)](#backup-externo-cifrado-ops-01).
 
 Para reverter apenas a API `f522695` para `cfb6b05`, na VPS:
 
@@ -372,3 +374,147 @@ Um dump novo em `/opt/farelo-os/shared/backups/pre-upgrade-20261016.dump`
 foi restaurado em PostgreSQL temporário isolado, com 27 tabelas verificadas.
 O banco tinha duas contas ativas (ADM e `caixa.farelodebolo`) e zero produtos na auditoria de 17/10; o login do Caixa ainda precisa ser ensaiado. Um novo dump pré-release está em `/opt/farelo-os/shared/backups/pre-release-edfabc1.dump` (modo 600), com catálogo `pg_restore --list` validado. O `restic` 0.16.4 está instalado na VPS; o script e timer de backup externo foram preparados no código, mas não instalados: falta destino externo, credenciais e teste de restauração. Ainda faltam catálogo atual conferido, backup externo automático, domínio/HTTPS e homologação fiscal. Não publique a porta
 3000 ou a API diretamente na internet antes dessas etapas.
+
+## Backup externo cifrado (OPS-01)
+
+**Estado: preparado no código, não ativado.** Nada foi instalado na VPS. Falta
+o proprietário fornecer o destino e a chave pública; até lá o backup local
+segue exatamente como antes.
+
+Como funciona:
+
+- `deploy/backup-offsite.sh` pega o `daily-*.dump` mais novo de
+  `/opt/farelo-os/shared/backups/` (publicado por `backup-local.sh` só depois
+  de `pg_restore --list`; dumps manuais `pre-*` não entram), recusa dumps com
+  mais de 26 h ou sem cabeçalho `PGDMP`, cifra com `age` para as **chaves
+  públicas** configuradas e envia com `rclone`. O dump em texto claro nunca sai
+  da VPS nem é copiado; a VPS **não consegue decifrar** o que enviou.
+- O envio vai para um nome provisório `.partial`; o script lê de volta tamanho
+  e SHA-256 do que o destino guardou (`rclone hashsum --download`), só então
+  publica `daily-AAAAMMDDTHHMMSSZ.dump.age` e um `.sha256` ao lado. Se não
+  conferir, apaga o provisório e falha.
+- Retenção no destino: o objeto mais novo de cada um dos últimos 14 dias, 8
+  semanas ISO e 12 meses (UTC), ajustável. Nomes fora do padrão nunca são
+  apagados. Com `OFFSITE_PRUNE=0` o script não apaga nada (retenção pelo
+  provedor).
+- Após sucesso grava `/opt/farelo-os/shared/offsite-state/last-success`. O
+  monitor `check-private-vps.sh` passa a conferir `offsite_backup_age_hours`
+  (limite 30 h, `FARELO_MONITOR_OFFSITE_MAX_HOURS`) **somente quando
+  `offsite.env` existe**; antes disso imprime `offsite_backup=NOT_CONFIGURED`
+  sem falhar. O alerta ao responsável depende do canal do #20.
+- Sem `offsite.env` o script imprime `offsite_backup=NOT_CONFIGURED` e sai com
+  0; a unidade systemd tem `ConditionPathExists` e é apenas ignorada.
+- `offsite.env` é lido como `CHAVE=valor` sem `source`; chave desconhecida,
+  remoto com `,`/`=` (sintaxe inline com credencial), `rclone.conf` legível por
+  grupo/outros ou chave **privada** age no arquivo de destinatários fazem o
+  envio falhar. A saída tem só estados, nome do objeto e contagens; stderr do
+  rclone é suprimido (`OFFSITE_DEBUG=1` mostra numa execução manual).
+- XML fiscal: hoje os XMLs ficam em colunas do PostgreSQL (`xml_content`,
+  `*_response_xml`, `cancellation_event_xml`), então vão no dump. Se algum dia
+  forem gravados em disco, esse diretório precisará entrar no backup.
+
+Em relação a `infra/backup-postgres.sh` (restic, ainda não usado): o restic
+exige a senha do repositório na VPS, então quem tomar a VPS lê todo o
+histórico. Aqui a chave de leitura fica só com o proprietário. Para a
+instalação privada atual (`deploy/compose.yml`), usar esta camada.
+
+### O que o proprietário precisa fornecer
+
+1. **Destino externo** em outro provedor que não a Contabo (por exemplo
+   Backblaze B2, Cloudflare R2, Wasabi, S3, ou SFTP para outra máquina), com
+   uma credencial restrita a um bucket/pasta. Preferir credencial **sem
+   permissão de apagar** e regra de ciclo de vida/versionamento/object lock no
+   provedor, com `OFFSITE_PRUNE=0`: assim quem invadir a VPS não consegue
+   apagar as cópias externas. Se a credencial puder apagar, ativar ao menos o
+   versionamento do bucket. O volume é pequeno (dumps de ~100 KB hoje).
+2. **Chave pública age**, gerada na máquina do proprietário:
+
+   ```bash
+   brew install age rclone        # no Mac do proprietário
+   age-keygen -o ~/farelo-backup-age.key   # imprime "Public key: age1..."
+   chmod 600 ~/farelo-backup-age.key
+   ```
+
+   Guardar `~/farelo-backup-age.key` num gerenciador de senhas e uma cópia
+   offline. **Sem ela nenhum backup externo pode ser restaurado.** Recomenda-se
+   uma segunda chave (por exemplo de um sócio ou de cofre) como segundo
+   destinatário. Só a linha `age1...` vai para a VPS.
+
+### Ativação (operador, como root, num release que contenha estes arquivos)
+
+```bash
+apt-get install -y age rclone   # Ubuntu 24.04 (universe); conferir `rclone version`
+install -m 600 /dev/null /opt/farelo-os/shared/offsite-age-recipients.txt
+# colar uma ou mais chaves públicas age1..., uma por linha
+rclone --config /opt/farelo-os/shared/rclone.conf config   # criar remoto "farelo-offsite"
+chmod 600 /opt/farelo-os/shared/rclone.conf
+install -m 600 /opt/farelo-os/current/deploy/offsite.env.example \
+  /opt/farelo-os/shared/offsite.env   # ajustar OFFSITE_REMOTE e retenção
+```
+
+Para S3/B2/R2 com credencial restrita ao bucket, incluir
+`no_check_bucket = true` no remoto do `rclone.conf`. Depois, envio manual:
+
+```bash
+bash /opt/farelo-os/current/deploy/backup-offsite.sh   # espera offsite_backup=OK
+```
+
+Rodar o teste de restauração abaixo **antes** de ligar o timer. Então:
+
+```bash
+install -m 644 /opt/farelo-os/current/deploy/backup-offsite.service \
+  /etc/systemd/system/farelo-backup-offsite.service
+install -m 644 /opt/farelo-os/current/deploy/backup-offsite.timer \
+  /etc/systemd/system/farelo-backup-offsite.timer
+systemctl daemon-reload
+systemctl enable --now farelo-backup-offsite.timer
+systemctl list-timers farelo-backup-offsite.timer
+journalctl -u farelo-backup-offsite.service -n 50 --no-pager
+```
+
+O timer roda às 06:00 UTC (+ até 15 min), depois do local das 05:00 UTC, e
+recupera execuções perdidas (`Persistent=true`).
+
+### Teste de restauração (máquina do proprietário, mensal)
+
+```bash
+bash deploy/restore-offsite-check.sh \
+  --remote farelo-offsite:nome-do-bucket/farelo-os/postgres \
+  --identity ~/farelo-backup-age.key \
+  --rclone-config ~/.config/rclone/rclone.conf --min-products 50
+```
+
+O `rclone.conf` do proprietário pode usar uma credencial **somente leitura**
+do mesmo bucket. O script baixa o objeto mais novo (ou `--object
+daily-....dump.age`), confere o `.sha256`, decifra, roda `pg_restore --list`,
+restaura com `--exit-on-error` num `postgres:16-alpine` descartável **sem
+rede**, confere tabelas, `product` e histórico Flyway, e remove contêiner e
+arquivos temporários. Requer Docker, `rclone` e `age`; funciona no bash 3.2 do
+macOS. Termina com `restore_test=OK`; registrar data, objeto e contagens no
+#19. A cada trimestre, restaurar também um objeto semanal antigo com
+`--object`.
+
+### Testes do código
+
+```bash
+bash deploy/monitoring/test-check-private-vps.sh
+docker run --rm -v "$PWD/deploy:/deploy:ro" alpine:3.20 sh -c \
+  'apk add -q bash coreutils age rclone util-linux && bash /deploy/test-backup-offsite.sh'
+```
+
+`test-backup-offsite.sh` usa age e rclone reais com remoto `local` em
+diretório temporário: cifra/decifra, `.sha256`, idempotência, retenção,
+`OFFSITE_PRUNE=0`, hash divergente e configurações inválidas, e confirma que o
+backup local não muda.
+
+### Desativar ou reverter
+
+```bash
+systemctl disable --now farelo-backup-offsite.timer
+mv /opt/farelo-os/shared/offsite.env /opt/farelo-os/shared/offsite.env.disabled
+# opcional: rm /etc/systemd/system/farelo-backup-offsite.{service,timer}; systemctl daemon-reload
+```
+
+Sem `offsite.env`, o monitor volta a `offsite_backup=NOT_CONFIGURED` e o
+backup local continua igual. Revogar a credencial no provedor se não for mais
+usada. As cópias já enviadas permanecem no destino até o proprietário apagá-las.
