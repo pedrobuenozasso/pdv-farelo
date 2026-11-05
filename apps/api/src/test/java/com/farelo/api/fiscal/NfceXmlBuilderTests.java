@@ -8,8 +8,12 @@ import org.xml.sax.InputSource;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.transform.stream.StreamSource;
+import javax.xml.validation.SchemaFactory;
 import java.io.StringReader;
 import java.math.BigDecimal;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -268,6 +272,115 @@ class NfceXmlBuilderTests {
                 List.of(new NfceXmlBuilder.Payment(NfceXmlBuilder.PaymentMethod.PIX,
                         new BigDecimal("12.50"),
                         new NfceXmlBuilder.ElectronicDetails("2", null, "01", null, null, null))))));
+    }
+
+    @Test
+    void writesIcmsSn500ForStResaleNextToIcmsSn102AndValidatesAgainstOfficialSchema() throws Exception {
+        NfceXmlBuilder.Draft source = draft("Cafe", "12.50", "12.50");
+        NfceXmlBuilder.Item coffee = source.items().get(0);
+        NfceXmlBuilder.Item soda = new NfceXmlBuilder.Item("P2", "Refrigerante lata", "SEM GTIN",
+                "22021000", "0300700", "5405", "UN", new BigDecimal("2.0000"), new BigDecimal("6.0000"),
+                new BigDecimal("12.00"), new NfceXmlBuilder.Taxes("0", "500", "07", "07"));
+        NfceXmlBuilder.Draft mixed = new NfceXmlBuilder.Draft(source.issuer(), source.operation(),
+                source.series(), source.number(), source.randomCode(), source.issuedAt(),
+                List.of(coffee, soda), new BigDecimal("24.50"));
+
+        String unsigned = builder.buildHomologation(mixed).unsignedXml();
+        Document xml = parse(unsigned);
+
+        NodeList cfops = xml.getElementsByTagName("CFOP");
+        assertEquals("5102", cfops.item(0).getTextContent());
+        assertEquals("5405", cfops.item(1).getTextContent());
+        NodeList sn102 = xml.getElementsByTagName("ICMSSN102");
+        NodeList sn500 = xml.getElementsByTagName("ICMSSN500");
+        assertEquals(1, sn102.getLength());
+        assertEquals(1, sn500.getLength());
+        assertEquals("1", ((Element) sn102.item(0).getParentNode().getParentNode().getParentNode())
+                .getAttribute("nItem"));
+        assertEquals("2", ((Element) sn500.item(0).getParentNode().getParentNode().getParentNode())
+                .getAttribute("nItem"));
+        assertEquals(List.of("orig", "CSOSN"), childNames((Element) sn102.item(0)));
+        assertEquals(List.of("orig", "CSOSN"), childNames((Element) sn500.item(0)),
+                "no retained-ST, FCP-ST or effective-ICMS values are invented");
+        assertEquals("102", child(sn102, 0, "CSOSN"));
+        assertEquals("500", child(sn500, 0, "CSOSN"));
+        assertEquals("0", child(sn500, 0, "orig"));
+        assertEquals("0.00", text(xml, "vBCST"));
+        assertEquals("0.00", text(xml, "vST"));
+        assertEquals("0.00", text(xml, "vICMS"));
+        assertEquals("24.50", text(xml, "vNF"));
+
+        validateSignedAgainstOfficialSchema(unsigned);
+    }
+
+    @Test
+    void stillRejectsUnsupportedSimpleNationalCodesAndCsosn500ForRegimeNormal() {
+        NfceXmlBuilder.Draft source = draft("Cafe", "12.50", "12.50");
+        NfceXmlBuilder.Item item = source.items().get(0);
+        for (String unsupported : List.of("101", "201", "202", "900", "50", "40")) {
+            NfceXmlBuilder.Item bad = new NfceXmlBuilder.Item(item.code(), item.description(), item.gtin(),
+                    item.ncm(), "5405", item.unit(), item.quantity(), item.unitPrice(), item.total(),
+                    new NfceXmlBuilder.Taxes("0", unsupported, "07", "07"));
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                    () -> builder.buildHomologation(replaceItem(source, bad)), unsupported);
+            assertEquals("unsupported ICMS code for CRT", error.getMessage());
+        }
+        NfceXmlBuilder.Issuer normal = new NfceXmlBuilder.Issuer(source.issuer().cnpj(),
+                source.issuer().legalName(), source.issuer().stateRegistration(), "3",
+                source.issuer().address());
+        NfceXmlBuilder.Item csosn500 = new NfceXmlBuilder.Item(item.code(), item.description(), item.gtin(),
+                item.ncm(), "5405", item.unit(), item.quantity(), item.unitPrice(), item.total(),
+                new NfceXmlBuilder.Taxes("0", "500", "07", "07"));
+        assertThrows(IllegalArgumentException.class, () -> builder.buildHomologation(new NfceXmlBuilder.Draft(
+                normal, source.operation(), source.series(), source.number(), source.randomCode(),
+                source.issuedAt(), List.of(csosn500), source.cashPaid())));
+    }
+
+    @Test
+    void regimeNormalKeepsIcms40EvenWithStResaleCfop() throws Exception {
+        NfceXmlBuilder.Draft source = draft("Cafe", "12.50", "12.50");
+        NfceXmlBuilder.Issuer normal = new NfceXmlBuilder.Issuer(source.issuer().cnpj(),
+                source.issuer().legalName(), source.issuer().stateRegistration(), "3",
+                source.issuer().address());
+        NfceXmlBuilder.Item item = source.items().get(0);
+        NfceXmlBuilder.Item exempt = new NfceXmlBuilder.Item(item.code(), item.description(), item.gtin(),
+                item.ncm(), "5405", item.unit(), item.quantity(), item.unitPrice(), item.total(),
+                new NfceXmlBuilder.Taxes("0", "40", "07", "07"));
+        Document xml = parse(builder.buildHomologation(new NfceXmlBuilder.Draft(normal, source.operation(),
+                source.series(), source.number(), source.randomCode(), source.issuedAt(), List.of(exempt),
+                source.cashPaid())).unsignedXml());
+        assertEquals(1, xml.getElementsByTagName("ICMS40").getLength());
+        assertEquals(0, xml.getElementsByTagName("ICMSSN102").getLength());
+        assertEquals(0, xml.getElementsByTagName("ICMSSN500").getLength());
+        assertEquals(0, xml.getElementsByTagName("CSOSN").getLength());
+        assertEquals("40", text(xml, "CST"));
+    }
+
+    /** Same path as NfceXmlSignerTests: sign, add QR code v3, validate with the pinned PL_010f package. */
+    private static void validateSignedAgainstOfficialSchema(String unsigned) throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        KeyPair pair = generator.generateKeyPair();
+        String signed = new NfceXmlSigner().signHomologation(unsigned, pair.getPrivate(),
+                NfceXmlSignerTests.selfSignedTestCertificate(pair));
+        String decorated = new NfceQrCodeV3().addToSignedHomologation(signed);
+        var resource = NfceXmlBuilderTests.class.getResource("/nfe-xsd/PL_010f_v1.04/nfe_v4.00.xsd");
+        assertTrue(resource != null);
+        SchemaFactory factory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+        factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        factory.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "file");
+        var validator = factory.newSchema(resource).newValidator();
+        validator.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        validator.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        validator.validate(new StreamSource(new StringReader(decorated)));
+    }
+
+    private static List<String> childNames(Element parent) {
+        List<String> names = new java.util.ArrayList<>();
+        for (var node = parent.getFirstChild(); node != null; node = node.getNextSibling()) {
+            if (node instanceof Element element) names.add(element.getLocalName());
+        }
+        return names;
     }
 
     private static NfceXmlBuilder.Draft withPayments(NfceXmlBuilder.Draft source,

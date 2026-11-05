@@ -200,7 +200,7 @@ public final class NfceXmlBuilder {
         start(xml, "imposto");
         start(xml, "ICMS");
         boolean simple = "1".equals(crt);
-        start(xml, simple ? "ICMSSN102" : "ICMS40");
+        start(xml, simple ? simpleNationalGroup(item.taxes().icmsCode()) : "ICMS40");
         element(xml, "orig", item.taxes().origin());
         element(xml, simple ? "CSOSN" : "CST", item.taxes().icmsCode());
         xml.writeEndElement();
@@ -209,6 +209,16 @@ public final class NfceXmlBuilder {
         writeContribution(xml, "COFINS", item.taxes().cofinsCst(), item.taxes().cofinsOther());
         xml.writeEndElement(); // imposto
         xml.writeEndElement(); // det
+    }
+
+    /**
+     * CSOSN 500 (ICMS cobrado anteriormente por ST) has its own group. Only the
+     * mandatory orig/CSOSN pair is written: the optional retained-ST, FCP-ST and
+     * effective-ICMS sequences are all minOccurs="0" in PL_010f and need supplier
+     * values this system does not hold, so none is inferred.
+     */
+    private static String simpleNationalGroup(String csosn) {
+        return "500".equals(csosn) ? "ICMSSN500" : "ICMSSN102";
     }
 
     private static void writeContribution(XMLStreamWriter xml, String name, String cst,
@@ -333,7 +343,7 @@ public final class NfceXmlBuilder {
             }
             Taxes tax = item.taxes();
             require(tax.origin() != null && tax.origin().matches("[0-8]"), "invalid ICMS origin");
-            require(("1".equals(e.crt()) ? List.of("102", "103", "300", "400")
+            require(("1".equals(e.crt()) ? List.of("102", "103", "300", "400", "500")
                     : List.of("40", "41", "50")).contains(tax.icmsCode()), "unsupported ICMS code for CRT");
             validateContribution(tax.pisCst(), tax.pisOther(), "PIS");
             validateContribution(tax.cofinsCst(), tax.cofinsOther(), "COFINS");
