@@ -111,3 +111,27 @@ test("sem linha na direção devolve null", () => {
   assert.equal(verticalNeighborIndex(rects, 5, "down"), null);
   assert.equal(verticalNeighborIndex([], 0, "down"), null);
 });
+
+test("fora da busca, setas e Enter ficam com o campo (ex.: nome do cliente)", () => {
+  const outro = { typing: true, typingEmpty: false, inOtherField: true };
+  assert.equal(resolvePdvHotkey(key("Enter", outro), context), null);
+  assert.equal(resolvePdvHotkey(key("ArrowDown", outro), context), null);
+  assert.equal(resolvePdvHotkey(key("ArrowUp", outro), context), null);
+  assert.equal(
+    resolvePdvHotkey(
+      key("ArrowLeft", { ...outro, typingEmpty: true }),
+      context,
+    ),
+    null,
+  );
+  // Atalhos de commit e Ctrl+F continuam valendo em qualquer campo.
+  assert.deepEqual(resolvePdvHotkey(key("F10", outro), context), {
+    type: "confirm",
+  });
+  assert.deepEqual(
+    resolvePdvHotkey(key("f", { ...outro, ctrlKey: true }), context),
+    {
+      type: "focus-search",
+    },
+  );
+});

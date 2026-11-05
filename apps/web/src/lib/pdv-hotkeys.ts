@@ -61,6 +61,13 @@ type KeyboardLike = {
    * podem ir para a grade sem roubar nada do operador.
    */
   typingEmpty: boolean;
+  /**
+   * `true` quando o foco está num campo de texto que **não** é a busca de
+   * produto (nome do cliente, observação, valor de pagamento...). Nesses
+   * campos ↑/↓/←/→ e Enter pertencem ao campo — a grade não os captura, para
+   * que Enter no nome do cliente não selecione o produto em destaque.
+   */
+  inOtherField?: boolean;
 };
 
 /**
@@ -101,6 +108,14 @@ export function resolvePdvHotkey(
   }
   if (event.key === "F9") {
     return context.hasCart ? { type: "confirm-and-receive" } : null;
+  }
+
+  // Fora da busca, num campo de texto qualquer, setas e Enter são do campo.
+  if (
+    event.inOtherField &&
+    (event.key === "Enter" || event.key.startsWith("Arrow"))
+  ) {
+    return null;
   }
 
   // Setas navegam a grade, mesmo com foco na busca.
@@ -150,6 +165,16 @@ export function isTypingTarget(target: EventTarget | null): boolean {
     tag === "TEXTAREA" ||
     tag === "SELECT" ||
     target.isContentEditable
+  );
+}
+
+/**
+ * Se o alvo é a busca de produto do PDV (marcada com `data-pdv-search`). Só
+ * nela as setas e o Enter navegam/lançam enquanto se digita.
+ */
+export function isPdvSearchTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement && target.dataset.pdvSearch !== undefined
   );
 }
 
@@ -256,6 +281,8 @@ export function usePdvHotkeys(
           metaKey: event.metaKey,
           typing: isTypingTarget(event.target),
           typingEmpty: isEmptyTypingTarget(event.target),
+          inOtherField:
+            isTypingTarget(event.target) && !isPdvSearchTarget(event.target),
         },
         getContext(),
       );

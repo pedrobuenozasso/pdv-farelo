@@ -1230,6 +1230,7 @@ function AddItemPanel({
     >
       <input
         ref={searchInputRef}
+        data-pdv-search=""
         type="text"
         placeholder="Buscar produto pelo nome... (Ctrl+F)"
         value={search}
